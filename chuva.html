@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Chuva">
+<meta name="theme-color" content="#f0f6ff">
+<title>Chuva — Controle de Pluviometria</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+
+<!-- ▼▼▼ MESMO FIREBASE DO AGROOP — cole as mesmas configurações ▼▼▼ -->
+<script type="module">
+import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, doc, addDoc, onSnapshot,
+         query, orderBy, enableIndexedDbPersistence }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ══════════════════════════════════════════════
+// COLE AQUI AS MESMAS CONFIGURAÇÕES DO AGROOP
+// ══════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
+  authDomain: "agroop-d73d4.firebaseapp.com",
+  projectId: "agroop-d73d4",
+  storageBucket: "agroop-d73d4.firebasestorage.app",
+  messagingSenderId: "591049190246",
+  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+};
+// ══════════════════════════════════════════════
+
+const app = initializeApp(firebaseConfig, "chuvaop"); // nome único para não conflitar
+const db  = getFirestore(app);
+
+enableIndexedDbPersistence(db).catch(()=>{});
+
+window._chuvaDb       = db;
+window._chuvaAddDoc   = addDoc;
+window._chuvaCol      = (n) => collection(db, n);
+window._chuvaQuery    = query;
+window._chuvaOrder    = orderBy;
+window._chuvaSnapshot = onSnapshot;
+window._chuvaReady    = true;
+window.dispatchEvent(new Event('chuva-ready'));
+</script>
+<!-- ▲▲▲ FIM DO BLOCO FIREBASE ▲▲▲ -->
+
+<style>
+:root {
+  --sky:     #e8f4fd;
+  --blue:    #2b7fd4;
+  --blue-dk: #1a5fa0;
+  --blue-lt: #dbeeff;
+  --rain:    #4a9fd4;
+  --text:    #1a2e3d;
+  --text2:   #4a6277;
+  --text3:   #8aafc7;
+  --surface: #ffffff;
+  --border:  #d4e8f7;
+  --ok:      #1e8a4a;
+  --ok-lt:   #e4f5ec;
+  --amber:   #c47d2a;
+  --amber-lt:#fff3e0;
+  --red:     #d63031;
+  --shadow:  0 4px 20px rgba(43,127,212,.12);
+  --r:       16px;
+  --r-sm:    10px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  font-family:'Nunito',sans-serif;
+  background: linear-gradient(160deg, #d6eeff 0%, #f0f6ff 60%, #ffffff 100%);
+  min-height:100vh; color:var(--text);
+  overflow-x:hidden;
+}
+
+/* ── LOADING ── */
+#loading{
+  position:fixed;inset:0;background:#f0f6ff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;z-index:999;
+}
+.spin{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading p{font-size:.88rem;color:var(--text3);font-weight:600;}
+
+/* ── TELA INICIAL (seleção de fazenda) ── */
+#tela-home{display:none;padding:2rem 1.5rem;max-width:480px;margin:0 auto;}
+.home-header{text-align:center;margin-bottom:2.5rem;padding-top:1.5rem;}
+.home-icon{font-size:3rem;margin-bottom:.5rem;}
+.home-title{font-size:1.6rem;font-weight:900;color:var(--text);letter-spacing:-.03em;}
+.home-sub{font-size:.85rem;color:var(--text3);margin-top:.3rem;font-weight:600;}
+
+.fazenda-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;}
+.fazenda-btn{
+  background:var(--surface);border:2px solid var(--border);
+  border-radius:var(--r);padding:1.75rem 1rem;
+  cursor:pointer;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:.6rem;
+  transition:all .18s;box-shadow:0 2px 8px rgba(43,127,212,.08);
+  -webkit-user-select:none;user-select:none;
+}
+.fazenda-btn:active{transform:scale(.96);box-shadow:none;}
+.fazenda-btn:hover{border-color:var(--blue);box-shadow:var(--shadow);}
+.faz-icon{font-size:2.2rem;}
+.faz-nome{font-size:1rem;font-weight:800;color:var(--text);}
+.faz-sub{font-size:.72rem;color:var(--text3);font-weight:600;}
+
+.admin-btn{
+  background:var(--surface);border:2px solid var(--border);
+  border-radius:var(--r);padding:1.1rem 1.5rem;
+  cursor:pointer;width:100%;
+  display:flex;align-items:center;justify-content:center;gap:.75rem;
+  transition:all .18s;box-shadow:0 2px 8px rgba(43,127,212,.06);
+  font-family:'Nunito',sans-serif;font-size:.95rem;font-weight:700;color:var(--text2);
+}
+.admin-btn:hover{border-color:var(--amber);color:var(--amber);}
+.admin-btn:active{transform:scale(.98);}
+
+/* Status pill pequeno */
+.status-bar{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:1.25rem;}
+.s-pill{font-size:.65rem;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.04em;}
+.s-online {background:var(--ok-lt); color:var(--ok);}
+.s-offline{background:var(--amber-lt);color:var(--amber);}
+.s-sync   {background:var(--blue-lt);color:var(--blue);animation:pulse .8s infinite alternate;}
+@keyframes pulse{from{opacity:.6}to{opacity:1}}
+
+/* ── TELA DE REGISTRO (funcionário) ── */
+#tela-registro{display:none;min-height:100vh;padding:0;}
+.reg-header{
+  background:var(--blue);color:#fff;
+  padding:1.25rem 1.5rem .9rem;
+  display:flex;align-items:center;gap:.75rem;
+}
+.reg-back{background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;width:36px;height:36px;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s;}
+.reg-back:hover{background:rgba(255,255,255,.3);}
+.reg-title{font-size:1.1rem;font-weight:800;}
+.reg-sub{font-size:.75rem;opacity:.8;margin-top:.1rem;}
+
+.reg-body{padding:2rem 1.5rem;max-width:400px;margin:0 auto;}
+
+.reg-data-box{
+  background:var(--surface);border:1.5px solid var(--border);
+  border-radius:var(--r-sm);padding:.85rem 1.25rem;
+  margin-bottom:1.75rem;
+  display:flex;align-items:center;gap:.75rem;
+}
+.reg-data-icon{font-size:1.3rem;}
+.reg-data-label{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);}
+.reg-data-val{font-size:.95rem;font-weight:800;color:var(--text);}
+
+/* display grande do volume */
+.volume-display{
+  background:var(--surface);border:2.5px solid var(--border);
+  border-radius:var(--r);padding:1.5rem;
+  text-align:center;margin-bottom:1.5rem;
+  box-shadow:0 2px 12px rgba(43,127,212,.08);
+}
+.vol-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.5rem;}
+.vol-num{font-size:4rem;font-weight:900;color:var(--blue);letter-spacing:-.04em;line-height:1;}
+.vol-unit{font-size:1.2rem;font-weight:700;color:var(--text3);margin-top:.25rem;}
+
+/* teclado numérico customizado */
+.teclado{display:grid;grid-template-columns:repeat(3,1fr);gap:.65rem;margin-bottom:1.5rem;}
+.key{
+  background:var(--surface);border:2px solid var(--border);
+  border-radius:var(--r-sm);padding:1rem;
+  font-family:'Nunito',sans-serif;font-size:1.5rem;font-weight:800;color:var(--text);
+  cursor:pointer;text-align:center;transition:all .12s;
+  box-shadow:0 2px 5px rgba(43,127,212,.07);
+  -webkit-user-select:none;user-select:none;
+}
+.key:active{transform:scale(.93);background:var(--blue-lt);border-color:var(--blue);}
+.key.key-del{font-size:1.2rem;color:var(--text2);}
+.key.key-dot{font-size:1.6rem;}
+.key.key-zero{grid-column:span 1;}
+
+.btn-salvar{
+  width:100%;padding:1.1rem;
+  background:var(--blue);color:#fff;border:none;border-radius:var(--r-sm);
+  font-family:'Nunito',sans-serif;font-size:1.1rem;font-weight:800;
+  cursor:pointer;transition:all .15s;
+  box-shadow:0 3px 12px rgba(43,127,212,.3);
+  letter-spacing:.01em;
+}
+.btn-salvar:hover{background:var(--blue-dk);transform:translateY(-1px);}
+.btn-salvar:active{transform:scale(.98);}
+.btn-salvar:disabled{background:var(--text3);box-shadow:none;cursor:not-allowed;}
+
+/* confirmação de registro */
+.confirm-box{
+  background:var(--ok-lt);border:1.5px solid #b8e0cb;
+  border-radius:var(--r-sm);padding:.9rem 1.25rem;
+  display:none;align-items:center;gap:.75rem;margin-bottom:1rem;
+  animation:fadeUp .25s ease;
+}
+.confirm-box.show{display:flex;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.confirm-icon{font-size:1.4rem;}
+.confirm-txt{font-size:.85rem;font-weight:700;color:var(--ok);}
+
+/* registros do dia */
+.registros-dia{margin-top:1.5rem;}
+.reg-dia-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.65rem;}
+.reg-item{
+  background:var(--surface);border:1.5px solid var(--border);
+  border-radius:var(--r-sm);padding:.7rem 1rem;margin-bottom:.5rem;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.reg-item-hora{font-size:.75rem;color:var(--text3);font-weight:600;}
+.reg-item-vol{font-size:1rem;font-weight:800;color:var(--blue);}
+.reg-total{
+  background:var(--blue-lt);border:1.5px solid #b8d8f5;
+  border-radius:var(--r-sm);padding:.7rem 1rem;
+  display:flex;justify-content:space-between;align-items:center;
+  margin-top:.25rem;
+}
+.reg-total-label{font-size:.75rem;font-weight:700;color:var(--blue-dk);}
+.reg-total-val{font-size:1.05rem;font-weight:900;color:var(--blue);}
+
+/* ── MODAL SENHA ADMIN ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:400;align-items:center;justify-content:center;padding:1.5rem;backdrop-filter:blur(3px);}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border-radius:var(--r);padding:2rem;width:100%;max-width:340px;box-shadow:0 20px 60px rgba(0,0,0,.15);}
+.modal-title{font-size:1rem;font-weight:800;color:var(--text);margin-bottom:1.25rem;}
+.modal label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text2);display:block;margin-bottom:.35rem;}
+.modal input{width:100%;background:#f5f8ff;border:1.5px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:'Nunito',monospace;font-size:1.1rem;letter-spacing:.15em;padding:.7rem 1rem;outline:none;transition:border-color .15s;}
+.modal input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(43,127,212,.12);}
+.modal-erro{font-size:.78rem;color:var(--red);margin-top:.4rem;display:none;}
+.modal-erro.show{display:block;}
+.modal-btns{display:flex;gap:.65rem;margin-top:1.25rem;}
+.mbtn{flex:1;padding:.75rem;border:none;border-radius:var(--r-sm);font-family:'Nunito',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;transition:all .15s;}
+.mbtn-cancel{background:#f0f4f8;color:var(--text2);}
+.mbtn-cancel:hover{background:#e4eaf0;}
+.mbtn-ok{background:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(43,127,212,.25);}
+.mbtn-ok:hover{background:var(--blue-dk);}
+
+/* ── TELA ADMIN ── */
+#tela-admin{display:none;}
+.adm-header{
+  background:var(--surface);border-bottom:1.5px solid var(--border);
+  padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(43,127,212,.07);
+}
+.adm-logo{font-size:1rem;font-weight:900;color:var(--text);}
+.adm-logo em{color:var(--blue);font-style:normal;}
+.adm-right{display:flex;align-items:center;gap:.65rem;}
+.btn-sair{background:none;border:1.5px solid var(--border);color:var(--text2);font-family:'Nunito',sans-serif;font-size:.75rem;font-weight:700;padding:.3rem .85rem;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;}
+.btn-sair:hover{border-color:var(--red);color:var(--red);}
+
+.adm-body{padding:1.5rem;max-width:860px;margin:0 auto;}
+
+/* filtros período */
+.periodo-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;margin-bottom:1.25rem;box-shadow:0 1px 4px rgba(43,127,212,.06);}
+.periodo-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.85rem;}
+.periodo-btns{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.85rem;}
+.pbtn{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:.45rem .9rem;font-family:'Nunito',sans-serif;font-size:.78rem;font-weight:700;color:var(--text2);cursor:pointer;transition:all .15s;}
+.pbtn:hover{border-color:var(--blue);color:var(--blue);}
+.pbtn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.periodo-custom{display:none;grid-template-columns:1fr 1fr;gap:.65rem;margin-top:.5rem;}
+.periodo-custom.show{display:grid;}
+.periodo-custom label{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);display:block;margin-bottom:.25rem;}
+.periodo-custom input{width:100%;background:#f5f8ff;border:1.5px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:'Nunito',sans-serif;font-size:.88rem;padding:.55rem .85rem;outline:none;transition:border-color .15s;}
+.periodo-custom input:focus{border-color:var(--blue);}
+.btn-filtrar{background:var(--blue);color:#fff;border:none;border-radius:var(--r-sm);padding:.6rem 1.25rem;font-family:'Nunito',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;margin-top:.75rem;transition:all .15s;}
+.btn-filtrar:hover{background:var(--blue-dk);}
+
+/* cards de resumo fazenda */
+.fazendas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;margin-bottom:1.25rem;}
+.faz-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;box-shadow:0 1px 4px rgba(43,127,212,.07);text-align:center;}
+.faz-card-icon{font-size:1.75rem;margin-bottom:.5rem;}
+.faz-card-nome{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin-bottom:.5rem;}
+.faz-card-vol{font-size:2rem;font-weight:900;color:var(--blue);letter-spacing:-.03em;line-height:1;}
+.faz-card-mm{font-size:.75rem;color:var(--text3);font-weight:600;margin-top:.15rem;}
+.faz-card-qtd{font-size:.7rem;color:var(--text3);margin-top:.25rem;}
+
+/* tabela detalhada */
+.detalhe-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;box-shadow:0 1px 4px rgba(43,127,212,.07);}
+.detalhe-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;}
+.btn-export{background:var(--ok-lt);color:var(--ok);border:1.5px solid #b8e0cb;border-radius:6px;padding:.3rem .85rem;font-family:'Nunito',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;}
+.btn-export:hover{background:#d0f0df;}
+
+.tabela-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:.82rem;}
+th{background:#f0f6ff;color:var(--text2);font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;padding:.5rem .75rem;text-align:left;border-bottom:1.5px solid var(--border);white-space:nowrap;}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);color:var(--text);}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:#f8faff;}
+.td-vol{font-weight:700;color:var(--blue);}
+.td-faz{font-weight:600;}
+.empty-adm{text-align:center;padding:2.5rem;color:var(--text3);font-size:.88rem;}
+
+/* filtro fazenda no admin */
+.faz-filter{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;}
+.ffbtn{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:.38rem .85rem;font-family:'Nunito',sans-serif;font-size:.75rem;font-weight:700;color:var(--text2);cursor:pointer;transition:all .15s;}
+.ffbtn:hover{border-color:var(--blue);color:var(--blue);}
+.ffbtn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+
+/* toast */
+.toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(60px);background:var(--text);color:#fff;font-size:.85rem;font-weight:700;padding:.7rem 1.5rem;border-radius:30px;transition:transform .25s;z-index:999;white-space:nowrap;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.2);}
+.toast.show{transform:translateX(-50%) translateY(0);}
+.toast.ok{background:var(--ok);}
+.toast.err{background:var(--red);}
+
+@media(max-width:480px){
+  .fazenda-grid{grid-template-columns:1fr 1fr;}
+  .key{padding:.85rem;font-size:1.35rem;}
+  .vol-num{font-size:3.2rem;}
+  .fazendas-grid{grid-template-columns:1fr 1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loading"><div class="spin"></div><p>Conectando...</p></div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- MODAL SENHA ADMIN -->
+<div class="modal-overlay" id="modal-senha">
+  <div class="modal">
+    <div class="modal-title">🔐 Acesso Administrador</div>
+    <label>Senha</label>
+    <input type="password" id="inp-senha" placeholder="••••••" onkeydown="if(event.key==='Enter')confirmarSenha()">
+    <div class="modal-erro" id="modal-erro">Senha incorreta.</div>
+    <div class="modal-btns">
+      <button class="mbtn mbtn-cancel" onclick="fecharModalSenha()">Cancelar</button>
+      <button class="mbtn mbtn-ok" onclick="confirmarSenha()">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ -->
+<!-- TELA HOME                      -->
+<!-- ═══════════════════════════════ -->
+<div id="tela-home">
+  <div class="home-header">
+    <div class="home-icon">🌧️</div>
+    <div class="home-title">Pluviometria</div>
+    <div class="home-sub">Selecione sua fazenda</div>
+  </div>
+
+  <div class="fazenda-grid">
+    <div class="fazenda-btn" onclick="abrirRegistro('Rodeio')">
+      <div class="faz-icon">🌾</div>
+      <div class="faz-nome">Rodeio</div>
+    </div>
+    <div class="fazenda-btn" onclick="abrirRegistro('Palmeiras')">
+      <div class="faz-icon">🌴</div>
+      <div class="faz-nome">Palmeiras</div>
+    </div>
+    <div class="fazenda-btn" onclick="abrirRegistro('Silo')">
+      <div class="faz-icon">🏚️</div>
+      <div class="faz-nome">Silo</div>
+    </div>
+    <div class="fazenda-btn" onclick="abrirRegistro('ACF')">
+      <div class="faz-icon">🌿</div>
+      <div class="faz-nome">ACF</div>
+    </div>
+  </div>
+
+  <button class="admin-btn" onclick="abrirModalSenha()">
+    <span>🔐</span> Administrador
+  </button>
+
+  <div class="status-bar">
+    <span class="s-pill s-online" id="home-status">● online</span>
+    <span class="s-pill s-sync"   id="home-sync"   style="display:none">↕ sincronizando</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ -->
+<!-- TELA REGISTRO (FUNCIONÁRIO)    -->
+<!-- ═══════════════════════════════ -->
+<div id="tela-registro">
+  <div class="reg-header">
+    <button class="reg-back" onclick="voltarHome()">←</button>
+    <div>
+      <div class="reg-title" id="reg-fazenda-title">Fazenda</div>
+      <div class="reg-sub">Registrar chuva</div>
+    </div>
+  </div>
+
+  <div class="reg-body">
+    <div class="reg-data-box">
+      <div class="reg-data-icon">📅</div>
+      <div>
+        <div class="reg-data-label">Data e hora</div>
+        <div class="reg-data-val" id="reg-datetime">—</div>
+      </div>
+    </div>
+
+    <div class="volume-display">
+      <div class="vol-label">Volume registrado</div>
+      <div class="vol-num" id="vol-display">0</div>
+      <div class="vol-unit">mm</div>
+    </div>
+
+    <!-- teclado numérico grande -->
+    <div class="teclado">
+      <div class="key" onclick="tecla('1')">1</div>
+      <div class="key" onclick="tecla('2')">2</div>
+      <div class="key" onclick="tecla('3')">3</div>
+      <div class="key" onclick="tecla('4')">4</div>
+      <div class="key" onclick="tecla('5')">5</div>
+      <div class="key" onclick="tecla('6')">6</div>
+      <div class="key" onclick="tecla('7')">7</div>
+      <div class="key" onclick="tecla('8')">8</div>
+      <div class="key" onclick="tecla('9')">9</div>
+      <div class="key key-dot" onclick="tecla('.')">·</div>
+      <div class="key key-zero" onclick="tecla('0')">0</div>
+      <div class="key key-del" onclick="apagar()">⌫</div>
+    </div>
+
+    <div class="confirm-box" id="confirm-box">
+      <div class="confirm-icon">✅</div>
+      <div class="confirm-txt" id="confirm-txt">Registrado com sucesso!</div>
+    </div>
+
+    <button class="btn-salvar" id="btn-salvar" onclick="salvarRegistro()">
+      💾 &nbsp; Salvar
+    </button>
+
+    <!-- registros do dia atual para essa fazenda -->
+    <div class="registros-dia" id="registros-dia-box" style="display:none">
+      <div class="reg-dia-title">Registros de hoje</div>
+      <div id="registros-dia-lista"></div>
+      <div class="reg-total">
+        <span class="reg-total-label">Total do dia</span>
+        <span class="reg-total-val" id="reg-total-dia">0 mm</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ -->
+<!-- TELA ADMIN                     -->
+<!-- ═══════════════════════════════ -->
+<div id="tela-admin">
+  <div class="adm-header">
+    <div class="adm-logo">Chuva<em>Op</em></div>
+    <div class="adm-right">
+      <span class="s-pill s-online" id="adm-status">● online</span>
+      <button class="btn-sair" onclick="voltarHome()">Sair</button>
+    </div>
+  </div>
+
+  <div class="adm-body">
+
+    <!-- PERÍODO -->
+    <div class="periodo-card">
+      <div class="periodo-title">Período de análise</div>
+      <div class="periodo-btns">
+        <button class="pbtn active" data-p="hoje"    onclick="setPeriodo('hoje',this)">Hoje</button>
+        <button class="pbtn"        data-p="semana"  onclick="setPeriodo('semana',this)">Esta semana</button>
+        <button class="pbtn"        data-p="mes"     onclick="setPeriodo('mes',this)">Este mês</button>
+        <button class="pbtn"        data-p="ano"     onclick="setPeriodo('ano',this)">Este ano</button>
+        <button class="pbtn"        data-p="custom"  onclick="setPeriodo('custom',this)">Personalizado</button>
+      </div>
+      <div class="periodo-custom" id="periodo-custom">
+        <div><label>Data início</label><input type="date" id="dt-inicio"></div>
+        <div><label>Data fim</label><input type="date" id="dt-fim"></div>
+      </div>
+      <button class="btn-filtrar" onclick="aplicarFiltro()">Aplicar filtro</button>
+    </div>
+
+    <!-- CARDS RESUMO POR FAZENDA -->
+    <div class="fazendas-grid" id="fazendas-grid"></div>
+
+    <!-- TABELA DETALHADA -->
+    <div class="detalhe-card">
+      <div class="detalhe-title">
+        <span>Registros detalhados</span>
+        <button class="btn-export" onclick="exportarCSV()">↓ Exportar CSV</button>
+      </div>
+      <div class="faz-filter" id="faz-filter">
+        <button class="ffbtn active" data-f="todas" onclick="setFazFilter('todas',this)">Todas</button>
+        <button class="ffbtn" data-f="Rodeio"   onclick="setFazFilter('Rodeio',this)">Rodeio</button>
+        <button class="ffbtn" data-f="Palmeiras"onclick="setFazFilter('Palmeiras',this)">Palmeiras</button>
+        <button class="ffbtn" data-f="Silo"     onclick="setFazFilter('Silo',this)">Silo</button>
+        <button class="ffbtn" data-f="ACF"      onclick="setFazFilter('ACF',this)">ACF</button>
+      </div>
+      <div class="tabela-wrap"><table>
+        <thead><tr><th>Data/Hora</th><th>Fazenda</th><th>Volume (mm)</th></tr></thead>
+        <tbody id="tabela-body"></tbody>
+      </table></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════
+const SENHA_KEY    = 'chuvaop_senha';
+const SENHA_PADRAO = '1234';
+const FAZENDAS     = ['Rodeio','Palmeiras','Silo','ACF'];
+const FAZ_ICONS    = {Rodeio:'🌾',Palmeiras:'🌴',Silo:'🏚️',ACF:'🌿'};
+
+function getSenha(){ return localStorage.getItem(SENHA_KEY)||SENHA_PADRAO; }
+
+// Estado
+let registros   = [];   // cache local espelho do Firestore
+let fazendaAtual = '';
+let volStr       = '0';
+let periodoAtual = 'hoje';
+let fazFiltro    = 'todas';
+let dtInicio     = null;
+let dtFim        = null;
+
+// ═══════════════════════════════════════════
+// FIREBASE — SYNC TEMPO REAL
+// ═══════════════════════════════════════════
+function iniciarSync(){
+  if(!window._chuvaReady) return;
+
+  const q = window._chuvaQuery(
+    window._chuvaCol('chuva_registros'),
+    window._chuvaOrder('timestamp','asc')
+  );
+
+  window._chuvaSnapshot(q, (snap)=>{
+    registros = snap.docs.map(d=>({id:d.id,...d.data()}));
+    // re-renderiza se admin estiver aberto
+    if(document.getElementById('tela-admin').style.display!=='none') aplicarFiltro();
+    // atualiza registros do dia na tela de registro
+    if(fazendaAtual) renderRegistrosDia();
+    atualizarSyncPill(snap.metadata.fromCache);
+  });
+}
+
+function atualizarSyncPill(fromCache){
+  ['home-sync'].forEach(id=>{
+    const el=document.getElementById(id); if(!el)return;
+    if(fromCache){ el.style.display='inline-block'; el.textContent='⏳ aguardando rede'; el.className='s-pill s-offline'; }
+    else{ el.style.display='none'; }
+  });
+}
+
+async function salvarNoFirebase(registro){
+  if(!window._chuvaReady) return;
+  try{
+    setSyncIndicator('sync');
+    await window._chuvaAddDoc(window._chuvaCol('chuva_registros'), registro);
+    setSyncIndicator('ok');
+  } catch(e){
+    setSyncIndicator('pend');
+  }
+}
+
+function setSyncIndicator(estado){
+  const s=document.getElementById('home-sync');
+  if(!s)return;
+  if(estado==='sync'){s.style.display='inline-block';s.textContent='↕ sincronizando';s.className='s-pill s-sync';}
+  else if(estado==='ok'){s.style.display='none';}
+  else{s.style.display='inline-block';s.textContent='⏳ aguardando rede';s.className='s-pill s-offline';}
+}
+
+// ═══════════════════════════════════════════
+// NAVEGAÇÃO
+// ═══════════════════════════════════════════
+function mostrarTela(id){
+  ['tela-home','tela-registro','tela-admin'].forEach(t=>{
+    document.getElementById(t).style.display = t===id ? (id==='tela-home'||id==='tela-admin'?'block':'block') : 'none';
+  });
+  // scroll para o topo
+  window.scrollTo(0,0);
+}
+
+function voltarHome(){
+  fazendaAtual='';
+  volStr='0';
+  atualizarDisplay();
+  mostrarTela('tela-home');
+}
+
+// ═══════════════════════════════════════════
+// TELA REGISTRO
+// ═══════════════════════════════════════════
+function abrirRegistro(fazenda){
+  fazendaAtual = fazenda;
+  volStr = '0';
+  document.getElementById('reg-fazenda-title').textContent = '🌾 '+fazenda;
+  atualizarDisplay();
+  atualizarDatetime();
+  setInterval(atualizarDatetime, 30000);
+  document.getElementById('confirm-box').classList.remove('show');
+  renderRegistrosDia();
+  mostrarTela('tela-registro');
+}
+
+function atualizarDatetime(){
+  const el=document.getElementById('reg-datetime'); if(!el)return;
+  el.textContent = new Date().toLocaleString('pt-BR',{weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'});
+}
+
+// Teclado
+function tecla(v){
+  if(v==='.' && volStr.includes('.')) return;
+  // máximo 1 casa decimal, máximo 4 dígitos antes do ponto
+  if(volStr.includes('.')){
+    const partes = volStr.split('.');
+    if(partes[1] && partes[1].length>=1) return; // só 1 decimal
+  } else {
+    if(volStr!=='0' && volStr.replace('.','').length>=4) return;
+  }
+  if(volStr==='0' && v!=='.') volStr=v;
+  else volStr+=v;
+  atualizarDisplay();
+}
+
+function apagar(){
+  if(volStr.length<=1){ volStr='0'; }
+  else { volStr=volStr.slice(0,-1); }
+  atualizarDisplay();
+}
+
+function atualizarDisplay(){
+  const el=document.getElementById('vol-display'); if(!el)return;
+  el.textContent = volStr;
+}
+
+async function salvarRegistro(){
+  const vol = parseFloat(volStr);
+  if(!vol || vol<=0){ toast('Digite um volume maior que zero','err'); return; }
+  if(vol>999){ toast('Volume parece incorreto. Máximo 999 mm','err'); return; }
+
+  const btn = document.getElementById('btn-salvar');
+  btn.disabled = true;
+
+  const registro = {
+    fazenda:   fazendaAtual,
+    volume:    vol,
+    timestamp: new Date().toISOString(),
+    data:      new Date().toISOString().slice(0,10),
+  };
+
+  await salvarNoFirebase(registro);
+
+  // feedback visual
+  const cbox = document.getElementById('confirm-box');
+  document.getElementById('confirm-txt').textContent = `${vol} mm registrado com sucesso!`;
+  cbox.classList.add('show');
+  setTimeout(()=>cbox.classList.remove('show'), 3000);
+
+  // limpa input
+  volStr='0'; atualizarDisplay();
+  renderRegistrosDia();
+  btn.disabled=false;
+  toast(`${vol} mm salvo!`,'ok');
+}
+
+function renderRegistrosDia(){
+  const hoje = new Date().toISOString().slice(0,10);
+  const doDia = registros.filter(r=>r.fazenda===fazendaAtual && r.data===hoje);
+  const box   = document.getElementById('registros-dia-box');
+  const lista = document.getElementById('registros-dia-lista');
+  const total = document.getElementById('reg-total-dia');
+
+  if(!doDia.length){ box.style.display='none'; return; }
+  box.style.display='block';
+  lista.innerHTML = doDia.map(r=>`
+    <div class="reg-item">
+      <span class="reg-item-hora">${new Date(r.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+      <span class="reg-item-vol">${r.volume} mm</span>
+    </div>`).join('');
+  const soma = doDia.reduce((a,r)=>a+r.volume,0);
+  total.textContent = soma.toFixed(1)+' mm';
+}
+
+// ═══════════════════════════════════════════
+// MODAL SENHA ADMIN
+// ═══════════════════════════════════════════
+function abrirModalSenha(){
+  document.getElementById('inp-senha').value='';
+  document.getElementById('modal-erro').classList.remove('show');
+  document.getElementById('modal-senha').classList.add('open');
+  setTimeout(()=>document.getElementById('inp-senha').focus(),150);
+}
+function fecharModalSenha(){ document.getElementById('modal-senha').classList.remove('open'); }
+function confirmarSenha(){
+  const v = document.getElementById('inp-senha').value;
+  if(v!==getSenha()){
+    document.getElementById('modal-erro').classList.add('show');
+    document.getElementById('inp-senha').select(); return;
+  }
+  fecharModalSenha();
+  mostrarTela('tela-admin');
+  aplicarFiltro();
+}
+
+// ═══════════════════════════════════════════
+// ADMIN — FILTROS E RENDER
+// ═══════════════════════════════════════════
+function setPeriodo(p, btn){
+  periodoAtual=p;
+  document.querySelectorAll('.pbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const custom=document.getElementById('periodo-custom');
+  custom.classList.toggle('show', p==='custom');
+}
+
+function setFazFilter(f, btn){
+  fazFiltro=f;
+  document.querySelectorAll('.ffbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTabela(filtrarRegistros());
+}
+
+function calcRange(){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  let ini, fim=new Date(); fim.setHours(23,59,59,999);
+  if(periodoAtual==='hoje'){
+    ini=new Date(hoje);
+  } else if(periodoAtual==='semana'){
+    ini=new Date(hoje);
+    ini.setDate(ini.getDate()-ini.getDay()); // domingo
+  } else if(periodoAtual==='mes'){
+    ini=new Date(hoje.getFullYear(),hoje.getMonth(),1);
+  } else if(periodoAtual==='ano'){
+    ini=new Date(hoje.getFullYear(),0,1);
+  } else if(periodoAtual==='custom'){
+    const di=document.getElementById('dt-inicio').value;
+    const df=document.getElementById('dt-fim').value;
+    if(!di||!df){ toast('Selecione data início e fim','err'); return null; }
+    ini=new Date(di+'T00:00:00');
+    fim=new Date(df+'T23:59:59');
+  }
+  return {ini,fim};
+}
+
+function filtrarRegistros(){
+  const range=calcRange(); if(!range)return [];
+  let r=registros.filter(reg=>{
+    const t=new Date(reg.timestamp);
+    return t>=range.ini && t<=range.fim;
+  });
+  if(fazFiltro!=='todas') r=r.filter(reg=>reg.fazenda===fazFiltro);
+  return r.slice().reverse(); // mais recente primeiro
+}
+
+function aplicarFiltro(){
+  const r=filtrarRegistros();
+  renderCards(r);
+  renderTabela(r);
+}
+
+function renderCards(regs){
+  const grid=document.getElementById('fazendas-grid');
+  grid.innerHTML=FAZENDAS.map(f=>{
+    const items=regs.filter(r=>r.fazenda===f);
+    const soma=items.reduce((a,r)=>a+r.volume,0);
+    return `
+      <div class="faz-card">
+        <div class="faz-card-icon">${FAZ_ICONS[f]}</div>
+        <div class="faz-card-nome">${f}</div>
+        <div class="faz-card-vol">${soma.toFixed(1)}</div>
+        <div class="faz-card-mm">mm acumulados</div>
+        <div class="faz-card-qtd">${items.length} registro${items.length!==1?'s':''}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderTabela(regs){
+  const tbody=document.getElementById('tabela-body');
+  if(!regs.length){
+    tbody.innerHTML=`<tr><td colspan="3"><div class="empty-adm">Nenhum registro no período selecionado</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML=regs.map(r=>`
+    <tr>
+      <td>${new Date(r.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+      <td class="td-faz">${FAZ_ICONS[r.fazenda]||''} ${r.fazenda}</td>
+      <td class="td-vol">${r.volume.toFixed(1)} mm</td>
+    </tr>`).join('');
+}
+
+// ═══════════════════════════════════════════
+// EXPORTAR CSV
+// ═══════════════════════════════════════════
+function exportarCSV(){
+  const regs=filtrarRegistros();
+  if(!regs.length){toast('Nenhum dado para exportar','err');return;}
+  const cols=['Data/Hora','Fazenda','Volume (mm)'];
+  const linhas=[cols.join(';'),...regs.map(r=>[
+    `"${new Date(r.timestamp).toLocaleString('pt-BR')}"`,
+    `"${r.fazenda}"`,
+    r.volume.toFixed(1)
+  ].join(';'))];
+  const blob=new Blob(['\uFEFF'+linhas.join('\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;
+  a.download=`chuva_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();URL.revokeObjectURL(url);
+  toast('CSV exportado!','ok');
+}
+
+// ═══════════════════════════════════════════
+// ONLINE/OFFLINE
+// ═══════════════════════════════════════════
+function atualizarStatusPills(){
+  ['home-status','adm-status'].forEach(id=>{
+    const el=document.getElementById(id); if(!el)return;
+    if(navigator.onLine){el.textContent='● online';el.className='s-pill s-online';}
+    else{el.textContent='◉ offline';el.className='s-pill s-offline';}
+  });
+}
+window.addEventListener('online', atualizarStatusPills);
+window.addEventListener('offline',atualizarStatusPills);
+
+// ═══════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════
+let toastT;
+function toast(msg,tipo=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className='toast'+(tipo?' '+tipo:'');
+  requestAnimationFrame(()=>el.classList.add('show'));
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),2500);
+}
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+function iniciar(){
+  document.getElementById('loading').style.display='none';
+  mostrarTela('tela-home');
+  atualizarStatusPills();
+  iniciarSync();
+}
+
+if(window._chuvaReady){
+  iniciar();
+} else {
+  window.addEventListener('chuva-ready', iniciar, {once:true});
+  setTimeout(()=>{
+    if(document.getElementById('loading').style.display!=='none') iniciar();
+  }, 4000);
+}
+</script>
+</body>
+</html>
