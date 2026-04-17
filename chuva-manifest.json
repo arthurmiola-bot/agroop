@@ -1,0 +1,24 @@
+{
+  "name": "Pluviometria — ChuvaOp",
+  "short_name": "Chuva",
+  "description": "Controle de volume de chuvas por fazenda",
+  "start_url": "./chuva.html",
+  "display": "standalone",
+  "background_color": "#eef6ff",
+  "theme_color": "#2b7fd4",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='url(%23g)'/%3E%3Cpath d='M136 84c0 0-0.4 0-0.8 0C134.6 72.4 124.4 64 112.4 64c-6.8 0-12.8 2.8-17.2 7.2C93 68.8 89.6 67.2 86 67.2c-6.8 0-12.2 4.8-13.4 11.2C72.2 78.4 71.8 78.4 71.4 78.4C63 78.4 56.4 85.2 56.4 93.6S63 108.8 71.4 108.8H135.2c7.2 0 13.2-5.6 13.2-12.8C148.4 89.2 143.2 83.6 136 84Z' fill='white' opacity='0.95'/%3E%3Cellipse cx='76' cy='125' rx='5.5' ry='7.5' fill='white' opacity='0.9'/%3E%3Cellipse cx='96' cy='133' rx='5.5' ry='7.5' fill='white' opacity='0.9'/%3E%3Cellipse cx='116' cy='125' rx='5.5' ry='7.5' fill='white' opacity='0.9'/%3E%3Cellipse cx='86' cy='143' rx='5.5' ry='7.5' fill='white' opacity='0.7'/%3E%3Cellipse cx='106' cy='143' rx='5.5' ry='7.5' fill='white' opacity='0.7'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='192' y2='192' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0%25' stop-color='%234da8ea'/%3E%3Cstop offset='100%25' stop-color='%231a5fa0'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='url(%23g)'/%3E%3Cpath d='M362 224c0 0-1 0-2 0C357 193 333 172 305 172c-18 0-34 7.5-45.5 19.5C253 186 244 182 235 182c-18 0-32.5 12.8-35.6 29.8C199 212 198 212 197 212C175 212 157 230 157 252S175 292 197 292H360c19 0 35-14.8 35-34C395 237 380 222 362 224Z' fill='white' opacity='0.95'/%3E%3Cellipse cx='200' cy='333' rx='14' ry='20' fill='white' opacity='0.9'/%3E%3Cellipse cx='256' cy='355' rx='14' ry='20' fill='white' opacity='0.9'/%3E%3Cellipse cx='312' cy='333' rx='14' ry='20' fill='white' opacity='0.9'/%3E%3Cellipse cx='228' cy='375' rx='14' ry='20' fill='white' opacity='0.7'/%3E%3Cellipse cx='284' cy='375' rx='14' ry='20' fill='white' opacity='0.7'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='512' y2='512' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0%25' stop-color='%234da8ea'/%3E%3Cstop offset='100%25' stop-color='%231a5fa0'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

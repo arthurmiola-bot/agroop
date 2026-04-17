@@ -7,33 +7,37 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Chuva">
 <meta name="theme-color" content="#f0f6ff">
-<title>Chuva — Controle de Pluviometria</title>
+<link rel="manifest" href="chuva-manifest.json">
+<title>Chuva — Pluviometria</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 
-<!-- ▼▼▼ MESMO FIREBASE DO AGROOP — cole as mesmas configurações ▼▼▼ -->
+<!-- FIREBASE -->
 <script type="module">
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, doc, addDoc, onSnapshot,
-         query, orderBy, enableIndexedDbPersistence }
+import { getFirestore, collection, addDoc, onSnapshot,
+         query, orderBy,
+         initializeFirestore, persistentLocalCache, persistentMultipleTabManager }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ══════════════════════════════════════════════
 // COLE AQUI AS MESMAS CONFIGURAÇÕES DO AGROOP
 // ══════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  apiKey:            "COLE_AQUI_apiKey",
+  authDomain:        "COLE_AQUI_authDomain",
+  projectId:         "COLE_AQUI_projectId",
+  storageBucket:     "COLE_AQUI_storageBucket",
+  messagingSenderId: "COLE_AQUI_messagingSenderId",
+  appId:             "COLE_AQUI_appId"
 };
 // ══════════════════════════════════════════════
 
-const app = initializeApp(firebaseConfig, "chuvaop"); // nome único para não conflitar
-const db  = getFirestore(app);
+const fbApp = initializeApp(firebaseConfig, "chuvaop");
 
-enableIndexedDbPersistence(db).catch(()=>{});
+// ✅ Forma correta no Firebase SDK v10 — persistência offline automática
+const db = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
 
 window._chuvaDb       = db;
 window._chuvaAddDoc   = addDoc;
@@ -44,26 +48,24 @@ window._chuvaSnapshot = onSnapshot;
 window._chuvaReady    = true;
 window.dispatchEvent(new Event('chuva-ready'));
 </script>
-<!-- ▲▲▲ FIM DO BLOCO FIREBASE ▲▲▲ -->
 
 <style>
 :root {
-  --sky:     #e8f4fd;
+  --sky:     #eaf4ff;
   --blue:    #2b7fd4;
   --blue-dk: #1a5fa0;
   --blue-lt: #dbeeff;
-  --rain:    #4a9fd4;
   --text:    #1a2e3d;
   --text2:   #4a6277;
   --text3:   #8aafc7;
   --surface: #ffffff;
-  --border:  #d4e8f7;
+  --border:  #cce0f5;
   --ok:      #1e8a4a;
   --ok-lt:   #e4f5ec;
   --amber:   #c47d2a;
   --amber-lt:#fff3e0;
   --red:     #d63031;
-  --shadow:  0 4px 20px rgba(43,127,212,.12);
+  --shadow:  0 4px 20px rgba(43,127,212,.13);
   --r:       16px;
   --r-sm:    10px;
 }
@@ -71,161 +73,136 @@ window.dispatchEvent(new Event('chuva-ready'));
 html,body{height:100%;}
 body{
   font-family:'Nunito',sans-serif;
-  background: linear-gradient(160deg, #d6eeff 0%, #f0f6ff 60%, #ffffff 100%);
-  min-height:100vh; color:var(--text);
-  overflow-x:hidden;
+  background:linear-gradient(160deg,#d4ecff 0%,#eef6ff 55%,#ffffff 100%);
+  min-height:100vh;color:var(--text);overflow-x:hidden;
 }
 
-/* ── LOADING ── */
-#loading{
-  position:fixed;inset:0;background:#f0f6ff;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;z-index:999;
-}
+/* LOADING */
+#loading{position:fixed;inset:0;background:#eef6ff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;z-index:999;}
 .spin{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 #loading p{font-size:.88rem;color:var(--text3);font-weight:600;}
 
-/* ── TELA INICIAL (seleção de fazenda) ── */
-#tela-home{display:none;padding:2rem 1.5rem;max-width:480px;margin:0 auto;}
-.home-header{text-align:center;margin-bottom:2.5rem;padding-top:1.5rem;}
-.home-icon{font-size:3rem;margin-bottom:.5rem;}
-.home-title{font-size:1.6rem;font-weight:900;color:var(--text);letter-spacing:-.03em;}
+/* HOME */
+#tela-home{display:none;padding:2rem 1.5rem 3rem;max-width:420px;margin:0 auto;}
+
+.home-header{text-align:center;margin-bottom:2.5rem;padding-top:1rem;}
+/* ÍCONE SVG bonito */
+.app-icon-wrap{display:flex;justify-content:center;margin-bottom:1rem;}
+.app-icon-wrap svg{filter:drop-shadow(0 6px 16px rgba(43,127,212,.25));}
+.home-title{font-size:1.7rem;font-weight:900;color:var(--text);letter-spacing:-.03em;}
 .home-sub{font-size:.85rem;color:var(--text3);margin-top:.3rem;font-weight:600;}
 
-.fazenda-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;}
+.fazenda-grid{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;margin-bottom:1.1rem;}
 .fazenda-btn{
   background:var(--surface);border:2px solid var(--border);
-  border-radius:var(--r);padding:1.75rem 1rem;
+  border-radius:var(--r);padding:1.6rem 1rem 1.3rem;
   cursor:pointer;text-align:center;
-  display:flex;flex-direction:column;align-items:center;gap:.6rem;
-  transition:all .18s;box-shadow:0 2px 8px rgba(43,127,212,.08);
+  display:flex;flex-direction:column;align-items:center;gap:.55rem;
+  transition:all .18s;box-shadow:0 2px 10px rgba(43,127,212,.08);
   -webkit-user-select:none;user-select:none;
 }
-.fazenda-btn:active{transform:scale(.96);box-shadow:none;}
+.fazenda-btn:active{transform:scale(.95);box-shadow:none;}
 .fazenda-btn:hover{border-color:var(--blue);box-shadow:var(--shadow);}
 .faz-icon{font-size:2.2rem;}
-.faz-nome{font-size:1rem;font-weight:800;color:var(--text);}
-.faz-sub{font-size:.72rem;color:var(--text3);font-weight:600;}
+.faz-nome{font-size:1.05rem;font-weight:800;color:var(--text);}
 
 .admin-btn{
   background:var(--surface);border:2px solid var(--border);
-  border-radius:var(--r);padding:1.1rem 1.5rem;
-  cursor:pointer;width:100%;
+  border-radius:var(--r);padding:1rem 1.5rem;width:100%;
   display:flex;align-items:center;justify-content:center;gap:.75rem;
-  transition:all .18s;box-shadow:0 2px 8px rgba(43,127,212,.06);
+  cursor:pointer;transition:all .18s;
+  box-shadow:0 2px 8px rgba(43,127,212,.06);
   font-family:'Nunito',sans-serif;font-size:.95rem;font-weight:700;color:var(--text2);
+  margin-bottom:1.25rem;
 }
 .admin-btn:hover{border-color:var(--amber);color:var(--amber);}
 .admin-btn:active{transform:scale(.98);}
 
-/* Status pill pequeno */
-.status-bar{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:1.25rem;}
+.status-bar{display:flex;align-items:center;justify-content:center;gap:.5rem;}
 .s-pill{font-size:.65rem;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.04em;}
-.s-online {background:var(--ok-lt); color:var(--ok);}
+.s-online {background:var(--ok-lt);color:var(--ok);}
 .s-offline{background:var(--amber-lt);color:var(--amber);}
 .s-sync   {background:var(--blue-lt);color:var(--blue);animation:pulse .8s infinite alternate;}
 @keyframes pulse{from{opacity:.6}to{opacity:1}}
 
-/* ── TELA DE REGISTRO (funcionário) ── */
-#tela-registro{display:none;min-height:100vh;padding:0;}
+/* REGISTRO */
+#tela-registro{display:none;min-height:100vh;}
 .reg-header{
-  background:var(--blue);color:#fff;
-  padding:1.25rem 1.5rem .9rem;
+  background:linear-gradient(135deg,var(--blue) 0%,var(--blue-dk) 100%);
+  color:#fff;padding:1.25rem 1.5rem .9rem;
   display:flex;align-items:center;gap:.75rem;
 }
-.reg-back{background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;width:36px;height:36px;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s;}
+.reg-back{background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;width:38px;height:38px;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s;}
 .reg-back:hover{background:rgba(255,255,255,.3);}
 .reg-title{font-size:1.1rem;font-weight:800;}
 .reg-sub{font-size:.75rem;opacity:.8;margin-top:.1rem;}
 
-.reg-body{padding:2rem 1.5rem;max-width:400px;margin:0 auto;}
+.reg-body{padding:1.5rem;max-width:400px;margin:0 auto;}
 
-.reg-data-box{
-  background:var(--surface);border:1.5px solid var(--border);
-  border-radius:var(--r-sm);padding:.85rem 1.25rem;
-  margin-bottom:1.75rem;
-  display:flex;align-items:center;gap:.75rem;
-}
-.reg-data-icon{font-size:1.3rem;}
-.reg-data-label{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);}
-.reg-data-val{font-size:.95rem;font-weight:800;color:var(--text);}
+.reg-data-box{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r-sm);padding:.8rem 1.1rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:.75rem;}
+.reg-data-icon{font-size:1.25rem;}
+.reg-data-label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);}
+.reg-data-val{font-size:.92rem;font-weight:800;color:var(--text);}
 
-/* display grande do volume */
 .volume-display{
   background:var(--surface);border:2.5px solid var(--border);
   border-radius:var(--r);padding:1.5rem;
-  text-align:center;margin-bottom:1.5rem;
-  box-shadow:0 2px 12px rgba(43,127,212,.08);
+  text-align:center;margin-bottom:1.25rem;
+  box-shadow:0 3px 14px rgba(43,127,212,.1);
 }
-.vol-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.5rem;}
-.vol-num{font-size:4rem;font-weight:900;color:var(--blue);letter-spacing:-.04em;line-height:1;}
-.vol-unit{font-size:1.2rem;font-weight:700;color:var(--text3);margin-top:.25rem;}
+.vol-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.4rem;}
+.vol-num{font-size:4.5rem;font-weight:900;color:var(--blue);letter-spacing:-.04em;line-height:1;}
+.vol-unit{font-size:1.15rem;font-weight:700;color:var(--text3);margin-top:.2rem;}
 
-/* teclado numérico customizado */
-.teclado{display:grid;grid-template-columns:repeat(3,1fr);gap:.65rem;margin-bottom:1.5rem;}
+/* TECLADO */
+.teclado{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:1.25rem;}
 .key{
   background:var(--surface);border:2px solid var(--border);
   border-radius:var(--r-sm);padding:1rem;
-  font-family:'Nunito',sans-serif;font-size:1.5rem;font-weight:800;color:var(--text);
-  cursor:pointer;text-align:center;transition:all .12s;
+  font-family:'Nunito',sans-serif;font-size:1.6rem;font-weight:800;color:var(--text);
+  cursor:pointer;text-align:center;transition:all .1s;
   box-shadow:0 2px 5px rgba(43,127,212,.07);
   -webkit-user-select:none;user-select:none;
 }
-.key:active{transform:scale(.93);background:var(--blue-lt);border-color:var(--blue);}
+.key:active{transform:scale(.91);background:var(--blue-lt);border-color:var(--blue);}
 .key.key-del{font-size:1.2rem;color:var(--text2);}
-.key.key-dot{font-size:1.6rem;}
-.key.key-zero{grid-column:span 1;}
+.key.key-dot{font-size:1.7rem;}
 
 .btn-salvar{
   width:100%;padding:1.1rem;
-  background:var(--blue);color:#fff;border:none;border-radius:var(--r-sm);
+  background:linear-gradient(135deg,var(--blue),var(--blue-dk));
+  color:#fff;border:none;border-radius:var(--r-sm);
   font-family:'Nunito',sans-serif;font-size:1.1rem;font-weight:800;
   cursor:pointer;transition:all .15s;
-  box-shadow:0 3px 12px rgba(43,127,212,.3);
-  letter-spacing:.01em;
+  box-shadow:0 4px 14px rgba(43,127,212,.3);
 }
-.btn-salvar:hover{background:var(--blue-dk);transform:translateY(-1px);}
+.btn-salvar:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(43,127,212,.35);}
 .btn-salvar:active{transform:scale(.98);}
-.btn-salvar:disabled{background:var(--text3);box-shadow:none;cursor:not-allowed;}
+.btn-salvar:disabled{background:#b0c8e0;box-shadow:none;cursor:not-allowed;}
 
-/* confirmação de registro */
-.confirm-box{
-  background:var(--ok-lt);border:1.5px solid #b8e0cb;
-  border-radius:var(--r-sm);padding:.9rem 1.25rem;
-  display:none;align-items:center;gap:.75rem;margin-bottom:1rem;
-  animation:fadeUp .25s ease;
-}
+.confirm-box{background:var(--ok-lt);border:1.5px solid #b8e0cb;border-radius:var(--r-sm);padding:.9rem 1.1rem;display:none;align-items:center;gap:.75rem;margin-bottom:.85rem;animation:fadeUp .25s ease;}
 .confirm-box.show{display:flex;}
 @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .confirm-icon{font-size:1.4rem;}
-.confirm-txt{font-size:.85rem;font-weight:700;color:var(--ok);}
+.confirm-txt{font-size:.88rem;font-weight:700;color:var(--ok);}
 
-/* registros do dia */
 .registros-dia{margin-top:1.5rem;}
-.reg-dia-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.65rem;}
-.reg-item{
-  background:var(--surface);border:1.5px solid var(--border);
-  border-radius:var(--r-sm);padding:.7rem 1rem;margin-bottom:.5rem;
-  display:flex;align-items:center;justify-content:space-between;
-}
-.reg-item-hora{font-size:.75rem;color:var(--text3);font-weight:600;}
+.reg-dia-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.6rem;}
+.reg-item{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r-sm);padding:.65rem 1rem;margin-bottom:.45rem;display:flex;align-items:center;justify-content:space-between;}
+.reg-item-hora{font-size:.78rem;color:var(--text3);font-weight:600;}
 .reg-item-vol{font-size:1rem;font-weight:800;color:var(--blue);}
-.reg-total{
-  background:var(--blue-lt);border:1.5px solid #b8d8f5;
-  border-radius:var(--r-sm);padding:.7rem 1rem;
-  display:flex;justify-content:space-between;align-items:center;
-  margin-top:.25rem;
-}
+.reg-total{background:var(--blue-lt);border:1.5px solid #b8d8f5;border-radius:var(--r-sm);padding:.7rem 1rem;display:flex;justify-content:space-between;align-items:center;margin-top:.25rem;}
 .reg-total-label{font-size:.75rem;font-weight:700;color:var(--blue-dk);}
 .reg-total-val{font-size:1.05rem;font-weight:900;color:var(--blue);}
 
-/* ── MODAL SENHA ADMIN ── */
+/* MODAL */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:400;align-items:center;justify-content:center;padding:1.5rem;backdrop-filter:blur(3px);}
 .modal-overlay.open{display:flex;}
-.modal{background:var(--surface);border-radius:var(--r);padding:2rem;width:100%;max-width:340px;box-shadow:0 20px 60px rgba(0,0,0,.15);}
+.modal{background:var(--surface);border-radius:var(--r);padding:2rem;width:100%;max-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.15);}
 .modal-title{font-size:1rem;font-weight:800;color:var(--text);margin-bottom:1.25rem;}
 .modal label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text2);display:block;margin-bottom:.35rem;}
-.modal input{width:100%;background:#f5f8ff;border:1.5px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:'Nunito',monospace;font-size:1.1rem;letter-spacing:.15em;padding:.7rem 1rem;outline:none;transition:border-color .15s;}
+.modal input{width:100%;background:#f4f8ff;border:1.5px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:'Nunito',monospace;font-size:1.2rem;letter-spacing:.2em;padding:.7rem 1rem;outline:none;transition:border-color .15s;}
 .modal input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(43,127,212,.12);}
 .modal-erro{font-size:.78rem;color:var(--red);margin-top:.4rem;display:none;}
 .modal-erro.show{display:block;}
@@ -236,14 +213,10 @@ body{
 .mbtn-ok{background:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(43,127,212,.25);}
 .mbtn-ok:hover{background:var(--blue-dk);}
 
-/* ── TELA ADMIN ── */
+/* ADMIN */
 #tela-admin{display:none;}
-.adm-header{
-  background:var(--surface);border-bottom:1.5px solid var(--border);
-  padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;
-  position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(43,127,212,.07);
-}
-.adm-logo{font-size:1rem;font-weight:900;color:var(--text);}
+.adm-header{background:var(--surface);border-bottom:1.5px solid var(--border);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(43,127,212,.07);}
+.adm-logo{display:flex;align-items:center;gap:.5rem;font-size:1rem;font-weight:900;color:var(--text);}
 .adm-logo em{color:var(--blue);font-style:normal;}
 .adm-right{display:flex;align-items:center;gap:.65rem;}
 .btn-sair{background:none;border:1.5px solid var(--border);color:var(--text2);font-family:'Nunito',sans-serif;font-size:.75rem;font-weight:700;padding:.3rem .85rem;border-radius:var(--r-sm);cursor:pointer;transition:all .15s;}
@@ -251,78 +224,71 @@ body{
 
 .adm-body{padding:1.5rem;max-width:860px;margin:0 auto;}
 
-/* filtros período */
-.periodo-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;margin-bottom:1.25rem;box-shadow:0 1px 4px rgba(43,127,212,.06);}
-.periodo-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.85rem;}
-.periodo-btns{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.85rem;}
-.pbtn{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:.45rem .9rem;font-family:'Nunito',sans-serif;font-size:.78rem;font-weight:700;color:var(--text2);cursor:pointer;transition:all .15s;}
+.periodo-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;margin-bottom:1.1rem;box-shadow:0 1px 4px rgba(43,127,212,.06);}
+.card-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:.85rem;}
+.periodo-btns{display:flex;gap:.45rem;flex-wrap:wrap;margin-bottom:.75rem;}
+.pbtn{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:.42rem .9rem;font-family:'Nunito',sans-serif;font-size:.78rem;font-weight:700;color:var(--text2);cursor:pointer;transition:all .15s;}
 .pbtn:hover{border-color:var(--blue);color:var(--blue);}
 .pbtn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
 .periodo-custom{display:none;grid-template-columns:1fr 1fr;gap:.65rem;margin-top:.5rem;}
 .periodo-custom.show{display:grid;}
 .periodo-custom label{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);display:block;margin-bottom:.25rem;}
-.periodo-custom input{width:100%;background:#f5f8ff;border:1.5px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:'Nunito',sans-serif;font-size:.88rem;padding:.55rem .85rem;outline:none;transition:border-color .15s;}
+.periodo-custom input{width:100%;background:#f4f8ff;border:1.5px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-family:'Nunito',sans-serif;font-size:.88rem;padding:.5rem .85rem;outline:none;transition:border-color .15s;}
 .periodo-custom input:focus{border-color:var(--blue);}
-.btn-filtrar{background:var(--blue);color:#fff;border:none;border-radius:var(--r-sm);padding:.6rem 1.25rem;font-family:'Nunito',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;margin-top:.75rem;transition:all .15s;}
+.btn-filtrar{background:var(--blue);color:#fff;border:none;border-radius:var(--r-sm);padding:.6rem 1.25rem;font-family:'Nunito',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;margin-top:.75rem;transition:all .15s;box-shadow:0 2px 8px rgba(43,127,212,.2);}
 .btn-filtrar:hover{background:var(--blue-dk);}
 
-/* cards de resumo fazenda */
-.fazendas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;margin-bottom:1.25rem;}
+.fazendas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.9rem;margin-bottom:1.1rem;}
 .faz-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;box-shadow:0 1px 4px rgba(43,127,212,.07);text-align:center;}
-.faz-card-icon{font-size:1.75rem;margin-bottom:.5rem;}
-.faz-card-nome{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin-bottom:.5rem;}
+.faz-card-icon{font-size:1.75rem;margin-bottom:.4rem;}
+.faz-card-nome{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin-bottom:.45rem;}
 .faz-card-vol{font-size:2rem;font-weight:900;color:var(--blue);letter-spacing:-.03em;line-height:1;}
-.faz-card-mm{font-size:.75rem;color:var(--text3);font-weight:600;margin-top:.15rem;}
-.faz-card-qtd{font-size:.7rem;color:var(--text3);margin-top:.25rem;}
+.faz-card-mm{font-size:.72rem;color:var(--text3);font-weight:600;margin-top:.1rem;}
+.faz-card-qtd{font-size:.68rem;color:var(--text3);margin-top:.2rem;}
 
-/* tabela detalhada */
 .detalhe-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:1.25rem;box-shadow:0 1px 4px rgba(43,127,212,.07);}
-.detalhe-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;}
+.detalhe-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem;}
 .btn-export{background:var(--ok-lt);color:var(--ok);border:1.5px solid #b8e0cb;border-radius:6px;padding:.3rem .85rem;font-family:'Nunito',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;}
 .btn-export:hover{background:#d0f0df;}
+
+.faz-filter{display:flex;gap:.45rem;flex-wrap:wrap;margin-bottom:.9rem;}
+.ffbtn{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:.35rem .8rem;font-family:'Nunito',sans-serif;font-size:.75rem;font-weight:700;color:var(--text2);cursor:pointer;transition:all .15s;}
+.ffbtn:hover{border-color:var(--blue);color:var(--blue);}
+.ffbtn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
 
 .tabela-wrap{overflow-x:auto;}
 table{width:100%;border-collapse:collapse;font-size:.82rem;}
 th{background:#f0f6ff;color:var(--text2);font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;padding:.5rem .75rem;text-align:left;border-bottom:1.5px solid var(--border);white-space:nowrap;}
 td{padding:.5rem .75rem;border-bottom:1px solid var(--border);color:var(--text);}
 tr:last-child td{border-bottom:none;}
-tr:hover td{background:#f8faff;}
+tr:hover td{background:#f5f9ff;}
 .td-vol{font-weight:700;color:var(--blue);}
 .td-faz{font-weight:600;}
 .empty-adm{text-align:center;padding:2.5rem;color:var(--text3);font-size:.88rem;}
 
-/* filtro fazenda no admin */
-.faz-filter{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;}
-.ffbtn{background:#f0f6ff;border:1.5px solid var(--border);border-radius:8px;padding:.38rem .85rem;font-family:'Nunito',sans-serif;font-size:.75rem;font-weight:700;color:var(--text2);cursor:pointer;transition:all .15s;}
-.ffbtn:hover{border-color:var(--blue);color:var(--blue);}
-.ffbtn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
-
-/* toast */
+/* TOAST */
 .toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(60px);background:var(--text);color:#fff;font-size:.85rem;font-weight:700;padding:.7rem 1.5rem;border-radius:30px;transition:transform .25s;z-index:999;white-space:nowrap;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.2);}
 .toast.show{transform:translateX(-50%) translateY(0);}
 .toast.ok{background:var(--ok);}
 .toast.err{background:var(--red);}
 
-@media(max-width:480px){
+@media(max-width:420px){
   .fazenda-grid{grid-template-columns:1fr 1fr;}
   .key{padding:.85rem;font-size:1.35rem;}
-  .vol-num{font-size:3.2rem;}
+  .vol-num{font-size:3.5rem;}
   .fazendas-grid{grid-template-columns:1fr 1fr;}
 }
 </style>
 </head>
 <body>
 
-<!-- LOADING -->
 <div id="loading"><div class="spin"></div><p>Conectando...</p></div>
-
-<!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<!-- MODAL SENHA ADMIN -->
+<!-- MODAL SENHA -->
 <div class="modal-overlay" id="modal-senha">
   <div class="modal">
-    <div class="modal-title">🔐 Acesso Administrador</div>
+    <div class="modal-title">🔐 Administrador</div>
     <label>Senha</label>
     <input type="password" id="inp-senha" placeholder="••••••" onkeydown="if(event.key==='Enter')confirmarSenha()">
     <div class="modal-erro" id="modal-erro">Senha incorreta.</div>
@@ -333,12 +299,31 @@ tr:hover td{background:#f8faff;}
   </div>
 </div>
 
-<!-- ═══════════════════════════════ -->
-<!-- TELA HOME                      -->
-<!-- ═══════════════════════════════ -->
+<!-- ══════════════════════════════ -->
+<!-- HOME                          -->
+<!-- ══════════════════════════════ -->
 <div id="tela-home">
   <div class="home-header">
-    <div class="home-icon">🌧️</div>
+    <!-- Ícone SVG: nuvem com gotas de chuva -->
+    <div class="app-icon-wrap">
+      <svg width="88" height="88" viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="88" height="88" rx="22" fill="url(#grad)"/>
+        <!-- nuvem -->
+        <path d="M62 38.5C62 38.5 61.8 38.5 61.6 38.5C61.2 33.2 56.8 29 51.5 29C48.4 29 45.6 30.4 43.8 32.6C42.7 31.6 41.2 31 39.5 31C36.5 31 34 33.1 33.4 36C33.3 36 33.1 36 33 36C29.1 36 26 39.1 26 43C26 46.9 29.1 50 33 50H61C64.3 50 67 47.3 67 44C67 40.7 64.8 38 62 38.5Z" fill="white" opacity="0.95"/>
+        <!-- gotas -->
+        <ellipse cx="35" cy="57" rx="2.5" ry="3.5" fill="white" opacity="0.9"/>
+        <ellipse cx="44" cy="61" rx="2.5" ry="3.5" fill="white" opacity="0.9"/>
+        <ellipse cx="53" cy="57" rx="2.5" ry="3.5" fill="white" opacity="0.9"/>
+        <ellipse cx="39.5" cy="65" rx="2.5" ry="3.5" fill="white" opacity="0.7"/>
+        <ellipse cx="48.5" cy="65" rx="2.5" ry="3.5" fill="white" opacity="0.7"/>
+        <defs>
+          <linearGradient id="grad" x1="0" y1="0" x2="88" y2="88" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#4da8ea"/>
+            <stop offset="100%" stop-color="#1a5fa0"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
     <div class="home-title">Pluviometria</div>
     <div class="home-sub">Selecione sua fazenda</div>
   </div>
@@ -368,38 +353,36 @@ tr:hover td{background:#f8faff;}
 
   <div class="status-bar">
     <span class="s-pill s-online" id="home-status">● online</span>
-    <span class="s-pill s-sync"   id="home-sync"   style="display:none">↕ sincronizando</span>
+    <span class="s-pill" id="home-sync" style="display:none"></span>
   </div>
 </div>
 
-<!-- ═══════════════════════════════ -->
-<!-- TELA REGISTRO (FUNCIONÁRIO)    -->
-<!-- ═══════════════════════════════ -->
+<!-- ══════════════════════════════ -->
+<!-- REGISTRO                      -->
+<!-- ══════════════════════════════ -->
 <div id="tela-registro">
   <div class="reg-header">
     <button class="reg-back" onclick="voltarHome()">←</button>
     <div>
       <div class="reg-title" id="reg-fazenda-title">Fazenda</div>
-      <div class="reg-sub">Registrar chuva</div>
+      <div class="reg-sub">Registrar volume de chuva</div>
     </div>
   </div>
-
   <div class="reg-body">
     <div class="reg-data-box">
       <div class="reg-data-icon">📅</div>
       <div>
-        <div class="reg-data-label">Data e hora</div>
+        <div class="reg-data-label">Data e hora atual</div>
         <div class="reg-data-val" id="reg-datetime">—</div>
       </div>
     </div>
 
     <div class="volume-display">
-      <div class="vol-label">Volume registrado</div>
+      <div class="vol-label">Volume de chuva</div>
       <div class="vol-num" id="vol-display">0</div>
       <div class="vol-unit">mm</div>
     </div>
 
-    <!-- teclado numérico grande -->
     <div class="teclado">
       <div class="key" onclick="tecla('1')">1</div>
       <div class="key" onclick="tecla('2')">2</div>
@@ -411,22 +394,21 @@ tr:hover td{background:#f8faff;}
       <div class="key" onclick="tecla('8')">8</div>
       <div class="key" onclick="tecla('9')">9</div>
       <div class="key key-dot" onclick="tecla('.')">·</div>
-      <div class="key key-zero" onclick="tecla('0')">0</div>
+      <div class="key" onclick="tecla('0')">0</div>
       <div class="key key-del" onclick="apagar()">⌫</div>
     </div>
 
     <div class="confirm-box" id="confirm-box">
       <div class="confirm-icon">✅</div>
-      <div class="confirm-txt" id="confirm-txt">Registrado com sucesso!</div>
+      <div class="confirm-txt" id="confirm-txt">Registrado!</div>
     </div>
 
     <button class="btn-salvar" id="btn-salvar" onclick="salvarRegistro()">
-      💾 &nbsp; Salvar
+      💧 &nbsp;Salvar Registro
     </button>
 
-    <!-- registros do dia atual para essa fazenda -->
     <div class="registros-dia" id="registros-dia-box" style="display:none">
-      <div class="reg-dia-title">Registros de hoje</div>
+      <div class="reg-dia-title">Registros de hoje nesta fazenda</div>
       <div id="registros-dia-lista"></div>
       <div class="reg-total">
         <span class="reg-total-label">Total do dia</span>
@@ -436,12 +418,22 @@ tr:hover td{background:#f8faff;}
   </div>
 </div>
 
-<!-- ═══════════════════════════════ -->
-<!-- TELA ADMIN                     -->
-<!-- ═══════════════════════════════ -->
+<!-- ══════════════════════════════ -->
+<!-- ADMIN                         -->
+<!-- ══════════════════════════════ -->
 <div id="tela-admin">
   <div class="adm-header">
-    <div class="adm-logo">Chuva<em>Op</em></div>
+    <div class="adm-logo">
+      <svg width="28" height="28" viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="88" height="88" rx="18" fill="url(#grad2)"/>
+        <path d="M62 38.5C61.8 38.5 61.6 38.5 61.6 38.5C61.2 33.2 56.8 29 51.5 29C48.4 29 45.6 30.4 43.8 32.6C42.7 31.6 41.2 31 39.5 31C36.5 31 34 33.1 33.4 36C33.1 36 33 36 33 36C29.1 36 26 39.1 26 43C26 46.9 29.1 50 33 50H61C64.3 50 67 47.3 67 44C67 40.7 64.8 38 62 38.5Z" fill="white" opacity="0.95"/>
+        <ellipse cx="35" cy="57" rx="2.5" ry="3.5" fill="white" opacity="0.9"/>
+        <ellipse cx="44" cy="61" rx="2.5" ry="3.5" fill="white" opacity="0.9"/>
+        <ellipse cx="53" cy="57" rx="2.5" ry="3.5" fill="white" opacity="0.9"/>
+        <defs><linearGradient id="grad2" x1="0" y1="0" x2="88" y2="88" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4da8ea"/><stop offset="100%" stop-color="#1a5fa0"/></linearGradient></defs>
+      </svg>
+      Chuva<em>Op</em>
+    </div>
     <div class="adm-right">
       <span class="s-pill s-online" id="adm-status">● online</span>
       <button class="btn-sair" onclick="voltarHome()">Sair</button>
@@ -449,16 +441,14 @@ tr:hover td{background:#f8faff;}
   </div>
 
   <div class="adm-body">
-
-    <!-- PERÍODO -->
     <div class="periodo-card">
-      <div class="periodo-title">Período de análise</div>
+      <div class="card-label">Período de análise</div>
       <div class="periodo-btns">
-        <button class="pbtn active" data-p="hoje"    onclick="setPeriodo('hoje',this)">Hoje</button>
-        <button class="pbtn"        data-p="semana"  onclick="setPeriodo('semana',this)">Esta semana</button>
-        <button class="pbtn"        data-p="mes"     onclick="setPeriodo('mes',this)">Este mês</button>
-        <button class="pbtn"        data-p="ano"     onclick="setPeriodo('ano',this)">Este ano</button>
-        <button class="pbtn"        data-p="custom"  onclick="setPeriodo('custom',this)">Personalizado</button>
+        <button class="pbtn active" onclick="setPeriodo('hoje',this)">Hoje</button>
+        <button class="pbtn" onclick="setPeriodo('semana',this)">Esta semana</button>
+        <button class="pbtn" onclick="setPeriodo('mes',this)">Este mês</button>
+        <button class="pbtn" onclick="setPeriodo('ano',this)">Este ano</button>
+        <button class="pbtn" onclick="setPeriodo('custom',this)">Personalizado</button>
       </div>
       <div class="periodo-custom" id="periodo-custom">
         <div><label>Data início</label><input type="date" id="dt-inicio"></div>
@@ -467,214 +457,204 @@ tr:hover td{background:#f8faff;}
       <button class="btn-filtrar" onclick="aplicarFiltro()">Aplicar filtro</button>
     </div>
 
-    <!-- CARDS RESUMO POR FAZENDA -->
     <div class="fazendas-grid" id="fazendas-grid"></div>
 
-    <!-- TABELA DETALHADA -->
     <div class="detalhe-card">
-      <div class="detalhe-title">
-        <span>Registros detalhados</span>
+      <div class="detalhe-head">
+        <div class="card-label" style="margin:0">Registros detalhados</div>
         <button class="btn-export" onclick="exportarCSV()">↓ Exportar CSV</button>
       </div>
-      <div class="faz-filter" id="faz-filter">
-        <button class="ffbtn active" data-f="todas" onclick="setFazFilter('todas',this)">Todas</button>
-        <button class="ffbtn" data-f="Rodeio"   onclick="setFazFilter('Rodeio',this)">Rodeio</button>
-        <button class="ffbtn" data-f="Palmeiras"onclick="setFazFilter('Palmeiras',this)">Palmeiras</button>
-        <button class="ffbtn" data-f="Silo"     onclick="setFazFilter('Silo',this)">Silo</button>
-        <button class="ffbtn" data-f="ACF"      onclick="setFazFilter('ACF',this)">ACF</button>
+      <div class="faz-filter" style="margin-top:.85rem">
+        <button class="ffbtn active" onclick="setFazFilter('todas',this)">Todas</button>
+        <button class="ffbtn" onclick="setFazFilter('Rodeio',this)">Rodeio</button>
+        <button class="ffbtn" onclick="setFazFilter('Palmeiras',this)">Palmeiras</button>
+        <button class="ffbtn" onclick="setFazFilter('Silo',this)">Silo</button>
+        <button class="ffbtn" onclick="setFazFilter('ACF',this)">ACF</button>
       </div>
-      <div class="tabela-wrap"><table>
-        <thead><tr><th>Data/Hora</th><th>Fazenda</th><th>Volume (mm)</th></tr></thead>
-        <tbody id="tabela-body"></tbody>
-      </table></div>
+      <div class="tabela-wrap">
+        <table>
+          <thead><tr><th>Data / Hora</th><th>Fazenda</th><th>Volume (mm)</th></tr></thead>
+          <tbody id="tabela-body"></tbody>
+        </table>
+      </div>
     </div>
-
   </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 // CONFIG
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 const SENHA_KEY    = 'chuvaop_senha';
 const SENHA_PADRAO = '1234';
 const FAZENDAS     = ['Rodeio','Palmeiras','Silo','ACF'];
 const FAZ_ICONS    = {Rodeio:'🌾',Palmeiras:'🌴',Silo:'🏚️',ACF:'🌿'};
-
 function getSenha(){ return localStorage.getItem(SENHA_KEY)||SENHA_PADRAO; }
 
-// Estado
-let registros   = [];   // cache local espelho do Firestore
+let registros    = [];
 let fazendaAtual = '';
 let volStr       = '0';
 let periodoAtual = 'hoje';
 let fazFiltro    = 'todas';
-let dtInicio     = null;
-let dtFim        = null;
+let dtTimer      = null;
 
-// ═══════════════════════════════════════════
-// FIREBASE — SYNC TEMPO REAL
-// ═══════════════════════════════════════════
+// ═══════════════════════════
+// FIREBASE SYNC
+// ═══════════════════════════
 function iniciarSync(){
   if(!window._chuvaReady) return;
-
   const q = window._chuvaQuery(
     window._chuvaCol('chuva_registros'),
     window._chuvaOrder('timestamp','asc')
   );
-
-  window._chuvaSnapshot(q, (snap)=>{
-    registros = snap.docs.map(d=>({id:d.id,...d.data()}));
-    // re-renderiza se admin estiver aberto
-    if(document.getElementById('tela-admin').style.display!=='none') aplicarFiltro();
-    // atualiza registros do dia na tela de registro
-    if(fazendaAtual) renderRegistrosDia();
-    atualizarSyncPill(snap.metadata.fromCache);
-  });
+  window._chuvaSnapshot(q,
+    (snap) => {
+      registros = snap.docs.map(d=>({id:d.id,...d.data()}));
+      // Atualiza views abertas
+      if(document.getElementById('tela-admin').style.display!=='none') aplicarFiltro();
+      if(fazendaAtual) renderRegistrosDia();
+      // Indicador de sync
+      const fromCache = snap.metadata.fromCache;
+      const hasPending = snap.metadata.hasPendingWrites;
+      setSyncPill(fromCache || hasPending);
+    },
+    (err) => { console.error('Firestore:', err); setSyncPill(true); }
+  );
 }
 
-function atualizarSyncPill(fromCache){
-  ['home-sync'].forEach(id=>{
-    const el=document.getElementById(id); if(!el)return;
-    if(fromCache){ el.style.display='inline-block'; el.textContent='⏳ aguardando rede'; el.className='s-pill s-offline'; }
-    else{ el.style.display='none'; }
-  });
-}
-
-async function salvarNoFirebase(registro){
-  if(!window._chuvaReady) return;
-  try{
-    setSyncIndicator('sync');
-    await window._chuvaAddDoc(window._chuvaCol('chuva_registros'), registro);
-    setSyncIndicator('ok');
-  } catch(e){
-    setSyncIndicator('pend');
+function setSyncPill(offline){
+  const el = document.getElementById('home-sync'); if(!el) return;
+  if(offline){
+    el.style.display='inline-block';
+    el.textContent='⏳ aguardando rede';
+    el.className='s-pill s-offline';
+  } else {
+    el.style.display='none';
   }
 }
 
-function setSyncIndicator(estado){
-  const s=document.getElementById('home-sync');
-  if(!s)return;
-  if(estado==='sync'){s.style.display='inline-block';s.textContent='↕ sincronizando';s.className='s-pill s-sync';}
-  else if(estado==='ok'){s.style.display='none';}
-  else{s.style.display='inline-block';s.textContent='⏳ aguardando rede';s.className='s-pill s-offline';}
+async function salvarNoFirebase(reg){
+  if(!window._chuvaReady) return;
+  try {
+    await window._chuvaAddDoc(window._chuvaCol('chuva_registros'), reg);
+  } catch(e) {
+    // Offline: Firebase enfileira automaticamente — não é erro
+    console.log('Offline — registro em fila:', e.code);
+  }
 }
 
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 // NAVEGAÇÃO
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 function mostrarTela(id){
   ['tela-home','tela-registro','tela-admin'].forEach(t=>{
-    document.getElementById(t).style.display = t===id ? (id==='tela-home'||id==='tela-admin'?'block':'block') : 'none';
+    document.getElementById(t).style.display = t===id ? 'block' : 'none';
   });
-  // scroll para o topo
   window.scrollTo(0,0);
 }
 
 function voltarHome(){
-  fazendaAtual='';
-  volStr='0';
-  atualizarDisplay();
+  fazendaAtual=''; volStr='0';
+  if(dtTimer){ clearInterval(dtTimer); dtTimer=null; }
   mostrarTela('tela-home');
 }
 
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 // TELA REGISTRO
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 function abrirRegistro(fazenda){
   fazendaAtual = fazenda;
   volStr = '0';
-  document.getElementById('reg-fazenda-title').textContent = '🌾 '+fazenda;
+  const icons = {Rodeio:'🌾',Palmeiras:'🌴',Silo:'🏚️',ACF:'🌿'};
+  document.getElementById('reg-fazenda-title').textContent = (icons[fazenda]||'') + ' ' + fazenda;
   atualizarDisplay();
   atualizarDatetime();
-  setInterval(atualizarDatetime, 30000);
+  if(dtTimer) clearInterval(dtTimer);
+  dtTimer = setInterval(atualizarDatetime, 30000);
   document.getElementById('confirm-box').classList.remove('show');
   renderRegistrosDia();
   mostrarTela('tela-registro');
 }
 
 function atualizarDatetime(){
-  const el=document.getElementById('reg-datetime'); if(!el)return;
-  el.textContent = new Date().toLocaleString('pt-BR',{weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'});
+  const el=document.getElementById('reg-datetime'); if(!el) return;
+  el.textContent = new Date().toLocaleString('pt-BR',{
+    weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'
+  });
 }
 
-// Teclado
 function tecla(v){
   if(v==='.' && volStr.includes('.')) return;
-  // máximo 1 casa decimal, máximo 4 dígitos antes do ponto
   if(volStr.includes('.')){
-    const partes = volStr.split('.');
-    if(partes[1] && partes[1].length>=1) return; // só 1 decimal
+    if(volStr.split('.')[1]?.length >= 1) return;
   } else {
-    if(volStr!=='0' && volStr.replace('.','').length>=4) return;
+    if(volStr !== '0' && volStr.length >= 4) return;
   }
-  if(volStr==='0' && v!=='.') volStr=v;
-  else volStr+=v;
+  if(volStr==='0' && v!=='.') volStr = v;
+  else volStr += v;
   atualizarDisplay();
 }
 
 function apagar(){
-  if(volStr.length<=1){ volStr='0'; }
-  else { volStr=volStr.slice(0,-1); }
+  volStr = volStr.length <= 1 ? '0' : volStr.slice(0,-1);
   atualizarDisplay();
 }
 
 function atualizarDisplay(){
-  const el=document.getElementById('vol-display'); if(!el)return;
+  const el=document.getElementById('vol-display'); if(!el) return;
   el.textContent = volStr;
 }
 
 async function salvarRegistro(){
   const vol = parseFloat(volStr);
-  if(!vol || vol<=0){ toast('Digite um volume maior que zero','err'); return; }
-  if(vol>999){ toast('Volume parece incorreto. Máximo 999 mm','err'); return; }
+  if(!vol || vol <= 0){ toast('Digite um volume maior que zero','err'); return; }
+  if(vol > 999){ toast('Volume parece incorreto (máx 999 mm)','err'); return; }
 
   const btn = document.getElementById('btn-salvar');
   btn.disabled = true;
+  btn.textContent = '⏳ Salvando...';
 
+  const agora = new Date();
   const registro = {
     fazenda:   fazendaAtual,
     volume:    vol,
-    timestamp: new Date().toISOString(),
-    data:      new Date().toISOString().slice(0,10),
+    timestamp: agora.toISOString(),
+    data:      agora.toISOString().slice(0,10),
   };
 
   await salvarNoFirebase(registro);
 
-  // feedback visual
-  const cbox = document.getElementById('confirm-box');
-  document.getElementById('confirm-txt').textContent = `${vol} mm registrado com sucesso!`;
-  cbox.classList.add('show');
-  setTimeout(()=>cbox.classList.remove('show'), 3000);
+  // Feedback
+  document.getElementById('confirm-txt').textContent = `${vol} mm registrado! ✔`;
+  document.getElementById('confirm-box').classList.add('show');
+  setTimeout(()=>document.getElementById('confirm-box').classList.remove('show'), 3000);
 
-  // limpa input
   volStr='0'; atualizarDisplay();
   renderRegistrosDia();
   btn.disabled=false;
+  btn.textContent='💧  Salvar Registro';
   toast(`${vol} mm salvo!`,'ok');
 }
 
 function renderRegistrosDia(){
   const hoje = new Date().toISOString().slice(0,10);
-  const doDia = registros.filter(r=>r.fazenda===fazendaAtual && r.data===hoje);
+  const doDia = registros.filter(r=> r.fazenda===fazendaAtual && r.data===hoje);
   const box   = document.getElementById('registros-dia-box');
   const lista = document.getElementById('registros-dia-lista');
   const total = document.getElementById('reg-total-dia');
-
   if(!doDia.length){ box.style.display='none'; return; }
   box.style.display='block';
   lista.innerHTML = doDia.map(r=>`
     <div class="reg-item">
       <span class="reg-item-hora">${new Date(r.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
-      <span class="reg-item-vol">${r.volume} mm</span>
+      <span class="reg-item-vol">${r.volume.toFixed(1)} mm</span>
     </div>`).join('');
-  const soma = doDia.reduce((a,r)=>a+r.volume,0);
-  total.textContent = soma.toFixed(1)+' mm';
+  total.textContent = doDia.reduce((a,r)=>a+r.volume,0).toFixed(1)+' mm';
 }
 
-// ═══════════════════════════════════════════
-// MODAL SENHA ADMIN
-// ═══════════════════════════════════════════
+// ═══════════════════════════
+// MODAL SENHA
+// ═══════════════════════════
 function abrirModalSenha(){
   document.getElementById('inp-senha').value='';
   document.getElementById('modal-erro').classList.remove('show');
@@ -683,8 +663,7 @@ function abrirModalSenha(){
 }
 function fecharModalSenha(){ document.getElementById('modal-senha').classList.remove('open'); }
 function confirmarSenha(){
-  const v = document.getElementById('inp-senha').value;
-  if(v!==getSenha()){
+  if(document.getElementById('inp-senha').value !== getSenha()){
     document.getElementById('modal-erro').classList.add('show');
     document.getElementById('inp-senha').select(); return;
   }
@@ -693,15 +672,14 @@ function confirmarSenha(){
   aplicarFiltro();
 }
 
-// ═══════════════════════════════════════════
-// ADMIN — FILTROS E RENDER
-// ═══════════════════════════════════════════
+// ═══════════════════════════
+// ADMIN — FILTROS
+// ═══════════════════════════
 function setPeriodo(p, btn){
   periodoAtual=p;
   document.querySelectorAll('.pbtn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  const custom=document.getElementById('periodo-custom');
-  custom.classList.toggle('show', p==='custom');
+  document.getElementById('periodo-custom').classList.toggle('show', p==='custom');
 }
 
 function setFazFilter(f, btn){
@@ -712,35 +690,33 @@ function setFazFilter(f, btn){
 }
 
 function calcRange(){
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
   let ini, fim=new Date(); fim.setHours(23,59,59,999);
   if(periodoAtual==='hoje'){
     ini=new Date(hoje);
   } else if(periodoAtual==='semana'){
-    ini=new Date(hoje);
-    ini.setDate(ini.getDate()-ini.getDay()); // domingo
+    ini=new Date(hoje); ini.setDate(ini.getDate()-ini.getDay());
   } else if(periodoAtual==='mes'){
     ini=new Date(hoje.getFullYear(),hoje.getMonth(),1);
   } else if(periodoAtual==='ano'){
     ini=new Date(hoje.getFullYear(),0,1);
-  } else if(periodoAtual==='custom'){
+  } else {
     const di=document.getElementById('dt-inicio').value;
     const df=document.getElementById('dt-fim').value;
     if(!di||!df){ toast('Selecione data início e fim','err'); return null; }
-    ini=new Date(di+'T00:00:00');
-    fim=new Date(df+'T23:59:59');
+    ini=new Date(di+'T00:00:00'); fim=new Date(df+'T23:59:59');
   }
   return {ini,fim};
 }
 
 function filtrarRegistros(){
-  const range=calcRange(); if(!range)return [];
+  const range=calcRange(); if(!range) return [];
   let r=registros.filter(reg=>{
     const t=new Date(reg.timestamp);
     return t>=range.ini && t<=range.fim;
   });
   if(fazFiltro!=='todas') r=r.filter(reg=>reg.fazenda===fazFiltro);
-  return r.slice().reverse(); // mais recente primeiro
+  return r.slice().reverse();
 }
 
 function aplicarFiltro(){
@@ -750,18 +726,16 @@ function aplicarFiltro(){
 }
 
 function renderCards(regs){
-  const grid=document.getElementById('fazendas-grid');
-  grid.innerHTML=FAZENDAS.map(f=>{
+  document.getElementById('fazendas-grid').innerHTML=FAZENDAS.map(f=>{
     const items=regs.filter(r=>r.fazenda===f);
     const soma=items.reduce((a,r)=>a+r.volume,0);
-    return `
-      <div class="faz-card">
-        <div class="faz-card-icon">${FAZ_ICONS[f]}</div>
-        <div class="faz-card-nome">${f}</div>
-        <div class="faz-card-vol">${soma.toFixed(1)}</div>
-        <div class="faz-card-mm">mm acumulados</div>
-        <div class="faz-card-qtd">${items.length} registro${items.length!==1?'s':''}</div>
-      </div>`;
+    return `<div class="faz-card">
+      <div class="faz-card-icon">${FAZ_ICONS[f]}</div>
+      <div class="faz-card-nome">${f}</div>
+      <div class="faz-card-vol">${soma.toFixed(1)}</div>
+      <div class="faz-card-mm">mm acumulados</div>
+      <div class="faz-card-qtd">${items.length} registro${items.length!==1?'s':''}</div>
+    </div>`;
   }).join('');
 }
 
@@ -779,12 +753,12 @@ function renderTabela(regs){
     </tr>`).join('');
 }
 
-// ═══════════════════════════════════════════
-// EXPORTAR CSV
-// ═══════════════════════════════════════════
+// ═══════════════════════════
+// EXPORTAR
+// ═══════════════════════════
 function exportarCSV(){
   const regs=filtrarRegistros();
-  if(!regs.length){toast('Nenhum dado para exportar','err');return;}
+  if(!regs.length){ toast('Nenhum dado para exportar','err'); return; }
   const cols=['Data/Hora','Fazenda','Volume (mm)'];
   const linhas=[cols.join(';'),...regs.map(r=>[
     `"${new Date(r.timestamp).toLocaleString('pt-BR')}"`,
@@ -792,29 +766,28 @@ function exportarCSV(){
     r.volume.toFixed(1)
   ].join(';'))];
   const blob=new Blob(['\uFEFF'+linhas.join('\n')],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`chuva_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();URL.revokeObjectURL(url);
+  a.click();
   toast('CSV exportado!','ok');
 }
 
-// ═══════════════════════════════════════════
-// ONLINE/OFFLINE
-// ═══════════════════════════════════════════
+// ═══════════════════════════
+// STATUS ONLINE/OFFLINE
+// ═══════════════════════════
 function atualizarStatusPills(){
   ['home-status','adm-status'].forEach(id=>{
-    const el=document.getElementById(id); if(!el)return;
-    if(navigator.onLine){el.textContent='● online';el.className='s-pill s-online';}
-    else{el.textContent='◉ offline';el.className='s-pill s-offline';}
+    const el=document.getElementById(id); if(!el) return;
+    if(navigator.onLine){ el.textContent='● online'; el.className='s-pill s-online'; }
+    else{ el.textContent='◉ offline'; el.className='s-pill s-offline'; }
   });
 }
 window.addEventListener('online', atualizarStatusPills);
 window.addEventListener('offline',atualizarStatusPills);
 
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 // TOAST
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 let toastT;
 function toast(msg,tipo=''){
   const el=document.getElementById('toast');
@@ -823,9 +796,9 @@ function toast(msg,tipo=''){
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),2500);
 }
 
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 // INIT
-// ═══════════════════════════════════════════
+// ═══════════════════════════
 function iniciar(){
   document.getElementById('loading').style.display='none';
   mostrarTela('tela-home');
@@ -839,7 +812,7 @@ if(window._chuvaReady){
   window.addEventListener('chuva-ready', iniciar, {once:true});
   setTimeout(()=>{
     if(document.getElementById('loading').style.display!=='none') iniciar();
-  }, 4000);
+  }, 5000);
 }
 </script>
 </body>
