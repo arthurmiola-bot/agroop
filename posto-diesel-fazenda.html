@@ -7,6 +7,54 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- ▼▼▼ COLE AQUI AS SUAS CONFIGURAÇÕES DO FIREBASE ▼▼▼ -->
+<script type="module">
+import { initializeApp }        from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, doc, onSnapshot,
+         setDoc, updateDoc, deleteDoc,
+         enableIndexedDbPersistence }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ════════════════════════════════════════════════
+// SUBSTITUA OS VALORES ABAIXO PELOS DO SEU PROJETO
+// (copiados do Firebase Console → Configurações)
+// ════════════════════════════════════════════════
+const firebaseConfig = {
+ apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
+  authDomain: "agroop-d73d4.firebaseapp.com",
+  projectId: "agroop-d73d4",
+  storageBucket: "agroop-d73d4.firebasestorage.app",
+  messagingSenderId: "591049190246",
+  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+};
+// ════════════════════════════════════════════════
+
+const fbApp = initializeApp(firebaseConfig);
+const db    = getFirestore(fbApp);
+
+// Ativa persistência offline (IndexedDB) — funciona sem internet
+enableIndexedDbPersistence(db).catch(err => {
+  if (err.code === 'failed-precondition') console.warn('Offline persistence: múltiplas abas abertas.');
+  else if (err.code === 'unimplemented')  console.warn('Offline persistence não suportada neste navegador.');
+});
+
+// Expõe para o código principal
+window._db        = db;
+window._col       = (nome) => collection(db, nome);
+window._doc       = (col, id) => doc(db, col, id);
+window._setDoc    = setDoc;
+window._updateDoc = updateDoc;
+window._deleteDoc = deleteDoc;
+window._onSnapshot = onSnapshot;
+window._firebaseReady = true;
+
+// Dispara evento para o app saber que o Firebase está pronto
+window.dispatchEvent(new Event('firebase-ready'));
+</script>
+<!-- ▲▲▲ FIM DO BLOCO FIREBASE ▲▲▲ -->
+
+
 </head>
 <body>
   <div id="root"></div>
