@@ -7,62 +7,57 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-<!-- ▼▼▼ COLE AQUI AS SUAS CONFIGURAÇÕES DO FIREBASE ▼▼▼ -->
-<script type="module">
-import { initializeApp }        from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, doc, onSnapshot,
-         setDoc, updateDoc, deleteDoc,
-         enableIndexedDbPersistence }
-  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-// ════════════════════════════════════════════════
-// SUBSTITUA OS VALORES ABAIXO PELOS DO SEU PROJETO
-// (copiados do Firebase Console → Configurações)
-// ════════════════════════════════════════════════
-const firebaseConfig = {
- apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0f17fc2bf8a2170655b6a7"
-};
-// ════════════════════════════════════════════════
-
-const fbApp = initializeApp(firebaseConfig);
-const db    = getFirestore(fbApp);
-
-// Ativa persistência offline (IndexedDB) — funciona sem internet
-enableIndexedDbPersistence(db).catch(err => {
-  if (err.code === 'failed-precondition') console.warn('Offline persistence: múltiplas abas abertas.');
-  else if (err.code === 'unimplemented')  console.warn('Offline persistence não suportada neste navegador.');
-});
-
-// Expõe para o código principal
-window._db        = db;
-window._col       = (nome) => collection(db, nome);
-window._doc       = (col, id) => doc(db, col, id);
-window._setDoc    = setDoc;
-window._updateDoc = updateDoc;
-window._deleteDoc = deleteDoc;
-window._onSnapshot = onSnapshot;
-window._firebaseReady = true;
-
-// Dispara evento para o app saber que o Firebase está pronto
-window.dispatchEvent(new Event('firebase-ready'));
-</script>
-<!-- ▲▲▲ FIM DO BLOCO FIREBASE ▲▲▲ -->
-
-
 </head>
 <body>
   <div id="root"></div>
 
-<script type="text/babel">
-const { useState, useEffect, useRef } = React;
+<!-- FIREBASE -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot,
+         initializeFirestore, persistentLocalCache, persistentMultipleTabManager }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// ─── DADOS INICIAIS ───────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
+  authDomain: "agroop-d73d4.firebaseapp.com",
+  projectId: "agroop-d73d4",
+  storageBucket: "agroop-d73d4.firebasestorage.app",
+  messagingSenderId: "591049190246",
+  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+};
+
+const fbApp = initializeApp(firebaseConfig, "postodiesel");
+const db = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+
+// Documento único no Firestore que guarda todo o estado do app
+const DOC_REF = doc(db, "posto-diesel", "dados");
+
+// Expõe funções para o React usar
+window._fbSave = async (data) => {
+  try { await setDoc(DOC_REF, { payload: JSON.stringify(data) }); } catch(e) { console.error("Erro ao salvar:", e); }
+};
+window._fbListen = (callback) => {
+  return onSnapshot(DOC_REF, (snap) => {
+    if (snap.exists()) {
+      try { callback(JSON.parse(snap.data().payload)); } catch(e) {}
+    } else {
+      callback(null); // sem dados ainda — usa INITIAL_DATA
+    }
+  });
+};
+window._fbReady = true;
+
+// Avisa o React que o Firebase está pronto
+window.dispatchEvent(new Event("fb-ready"));
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── DADOS INICIAIS (usados só na primeira vez) ───────────────────────────────
 const INITIAL_DATA = {
   operators: [
     { id: 1, name: "João Silva",   active: true },
@@ -76,25 +71,12 @@ const INITIAL_DATA = {
     { id: 4, code: "ESC-01", description: "Escavadeira Caterpillar 320", active: true, meterType: "hourmeter" },
     { id: 5, code: "CAM-01", description: "Caminhão Iveco 4x4",          active: true, meterType: "odometer"  },
   ],
-  fuelings: [
-    { id: 1, operatorId: 1, machineId: 1, meter: 1250,  liters: 45, date: "2026-04-20 08:30", registeredBy: "OPERADOR"   },
-    { id: 2, operatorId: 2, machineId: 2, meter: 890,   liters: 60, date: "2026-04-21 14:15", registeredBy: "ESCRITORIO" },
-    { id: 3, operatorId: 1, machineId: 3, meter: 2100,  liters: 80, date: "2026-04-22 09:00", registeredBy: "OPERADOR"   },
-    { id: 4, operatorId: 3, machineId: 1, meter: 1298,  liters: 50, date: "2026-04-23 07:45", registeredBy: "OPERADOR"   },
-    { id: 5, operatorId: 2, machineId: 4, meter: 3420,  liters: 70, date: "2026-04-24 11:30", registeredBy: "ESCRITORIO" },
-    { id: 6, operatorId: 2, machineId: 5, meter: 45800, liters: 55, date: "2026-04-22 13:00", registeredBy: "ESCRITORIO" },
-    { id: 7, operatorId: 3, machineId: 5, meter: 46150, liters: 50, date: "2026-04-24 16:00", registeredBy: "OPERADOR"   },
-  ],
-  supplies: [
-    { id: 1, supplier: "Petrobrás Distribuidora", date: "2026-04-10", paymentTerm: "30 dias", pricePerLiter: 6.45, liters: 5000, nf: "001234" },
-    { id: 2, supplier: "Ipiranga",                date: "2026-04-18", paymentTerm: "À vista",  pricePerLiter: 6.38, liters: 3000, nf: "005678" },
-  ],
+  fuelings:  [],
+  supplies:  [],
   tankCapacity: 10000,
-  tankStock: 7540,
+  tankStock: 0,
   lowStockThreshold: 1000,
-  stockAdjustments: [
-    { id: 1, date: "2026-04-01", type: "inicial", liters: 2000, note: "Estoque inicial do sistema", by: "ADMINISTRADOR" }
-  ],
+  stockAdjustments: [],
   users: [
     { id: 1, role: "OPERADOR",      pin: "1111" },
     { id: 2, role: "ESCRITORIO",    pin: "2222" },
@@ -200,15 +182,49 @@ const Row = ({ label, value }) => (
   </div>
 );
 
+// ─── TELA DE CARREGAMENTO ────────────────────────────────────────────────────
+const Loading = () => (
+  <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:bg}}>
+    <style>{STYLE}</style>
+    <div style={{fontSize:48,marginBottom:16}}>⛽</div>
+    <div style={{fontFamily:"'Barlow Condensed'",fontSize:28,fontWeight:800,color:acc,letterSpacing:2}}>POSTO DIESEL</div>
+    <div style={{color:muted,fontSize:13,marginTop:8}} className="pu">Conectando ao banco de dados...</div>
+  </div>
+);
+
 // ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
 function App() {
-  const [data,  setData]  = useState(() => { try { const s=localStorage.getItem("posto_v3"); return s?JSON.parse(s):INITIAL_DATA; } catch { return INITIAL_DATA; } });
-  const [role,  setRole]  = useState(null);
-  const [tab,   setTab]   = useState(null);
-  const [toast, setToast] = useState(null);
-  const tmr = useRef(null);
+  const [data,    setData]    = useState(null); // null = carregando
+  const [role,    setRole]    = useState(null);
+  const [tab,     setTab]     = useState(null);
+  const [toast,   setToast]   = useState(null);
+  const [fbReady, setFbReady] = useState(!!window._fbReady);
+  const tmr     = useRef(null);
+  const saveRef = useRef(null);
 
-  useEffect(() => { try { localStorage.setItem("posto_v3", JSON.stringify(data)); } catch {} }, [data]);
+  // Aguarda Firebase ficar pronto
+  useEffect(() => {
+    if (window._fbReady) { setFbReady(true); return; }
+    const handler = () => setFbReady(true);
+    window.addEventListener("fb-ready", handler);
+    return () => window.removeEventListener("fb-ready", handler);
+  }, []);
+
+  // Quando Firebase pronto, escuta o documento em tempo real
+  useEffect(() => {
+    if (!fbReady || !window._fbListen) return;
+    const unsub = window._fbListen((remoteData) => {
+      setData(remoteData || INITIAL_DATA);
+    });
+    return () => unsub && unsub();
+  }, [fbReady]);
+
+  // Salva no Firestore toda vez que data muda (debounce 800ms)
+  useEffect(() => {
+    if (!data || !window._fbSave) return;
+    clearTimeout(saveRef.current);
+    saveRef.current = setTimeout(() => window._fbSave(data), 800);
+  }, [data]);
 
   const showToast = (msg, type="success") => {
     setToast({msg,type});
@@ -217,6 +233,9 @@ function App() {
   };
 
   const upd = (key, val) => setData(d=>({...d,[key]:val}));
+
+  if (!data) return <Loading />;
+
   const pct = Math.max(0, Math.min(100, (data.tankStock/data.tankCapacity)*100));
   const low = data.tankStock <= threshold(data);
 
@@ -224,15 +243,14 @@ function App() {
 
   const TABS = {
     OPERADOR:      [{id:"fuel",  lbl:"⛽ Abastecer"}],
-    ESCRITORIO:    [{id:"dash",  lbl:"📊 Painel"},{id:"fuel",lbl:"⛽ Abastecer"},{id:"supply",lbl:"🚚 Entrada Diesel"},{id:"reg",lbl:"📋 Cadastros"}],
-    ADMINISTRADOR: [{id:"dash",  lbl:"📊 Painel"},{id:"fuel",lbl:"⛽ Abastecer"},{id:"supply",lbl:"🚚 Entrada Diesel"},{id:"reg",lbl:"📋 Cadastros"},{id:"rep",lbl:"📈 Relatórios"},{id:"adj",lbl:"⚙️ Ajustes"}],
+    ESCRITORIO:    [{id:"dash",lbl:"📊 Painel"},{id:"fuel",lbl:"⛽ Abastecer"},{id:"supply",lbl:"🚚 Entrada Diesel"},{id:"reg",lbl:"📋 Cadastros"}],
+    ADMINISTRADOR: [{id:"dash",lbl:"📊 Painel"},{id:"fuel",lbl:"⛽ Abastecer"},{id:"supply",lbl:"🚚 Entrada Diesel"},{id:"reg",lbl:"📋 Cadastros"},{id:"rep",lbl:"📈 Relatórios"},{id:"adj",lbl:"⚙️ Ajustes"}],
   }[role];
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <style>{STYLE}</style>
 
-      {/* CABEÇALHO */}
       <header style={{background:bgCard,borderBottom:`2px solid ${acc}`,padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <span style={{fontSize:26}}>⛽</span>
@@ -250,7 +268,6 @@ function App() {
         </div>
       </header>
 
-      {/* BARRA DO TANQUE */}
       <div style={{background:bgCard,padding:"10px 20px",borderBottom:`1px solid ${bdr}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <span style={{fontFamily:"'Barlow Condensed'",fontSize:13,letterSpacing:1,color:muted,textTransform:"uppercase"}}>
@@ -263,7 +280,6 @@ function App() {
         <div className="tank-bar"><div className={`tank-fill${low?" low":""}`} style={{width:`${pct}%`}} /></div>
       </div>
 
-      {/* ABAS */}
       <nav style={{background:bgCard,padding:"0 20px",borderBottom:`1px solid ${bdr}`,display:"flex",overflowX:"auto"}}>
         {TABS.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{
@@ -274,7 +290,6 @@ function App() {
         ))}
       </nav>
 
-      {/* CONTEÚDO */}
       <main style={{flex:1,padding:20,maxWidth:1100,margin:"0 auto",width:"100%"}}>
         {toast && (
           <div style={{background:toast.type==="success"?"#0e3d1a":"#3d0e0e",border:`1.5px solid ${toast.type==="success"?grn:red}`,
@@ -284,12 +299,12 @@ function App() {
           </div>
         )}
         <div className="fi" key={tab}>
-          {tab==="fuel"   && <TabFuel    data={data} upd={upd} role={role} showToast={showToast} />}
-          {tab==="dash"   && <TabDash    data={data} />}
-          {tab==="supply" && <TabSupply  data={data} upd={upd} showToast={showToast} />}
-          {tab==="reg"    && <TabReg     data={data} upd={upd} showToast={showToast} />}
-          {tab==="rep"    && <TabReport  data={data} />}
-          {tab==="adj"    && <TabAdj     data={data} upd={upd} showToast={showToast} />}
+          {tab==="fuel"   && <TabFuel   data={data} upd={upd} role={role} showToast={showToast} />}
+          {tab==="dash"   && <TabDash   data={data} />}
+          {tab==="supply" && <TabSupply data={data} upd={upd} showToast={showToast} />}
+          {tab==="reg"    && <TabReg    data={data} upd={upd} showToast={showToast} />}
+          {tab==="rep"    && <TabReport data={data} />}
+          {tab==="adj"    && <TabAdj    data={data} upd={upd} showToast={showToast} />}
         </div>
       </main>
     </div>
@@ -298,9 +313,8 @@ function App() {
 
 // ─── TELA DE LOGIN ────────────────────────────────────────────────────────────
 function Login({ users, onLogin }) {
-  const [pin, setPin]     = useState("");
-  const [err, setErr]     = useState("");
-
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
   const tryLogin = (p) => {
     const u = users.find(u=>u.pin===p);
     if (u) { setErr(""); onLogin(u.role); }
@@ -312,9 +326,8 @@ function Login({ users, onLogin }) {
     setPin(next);
     if (next.length>=4) setTimeout(()=>tryLogin(next), 80);
   };
-
   return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,background:bg}}>
       <style>{STYLE}</style>
       <div style={{textAlign:"center",marginBottom:32}}>
         <div style={{fontSize:56,marginBottom:8}}>⛽</div>
@@ -322,9 +335,7 @@ function Login({ users, onLogin }) {
         <div style={{color:muted,letterSpacing:3,fontSize:12,textTransform:"uppercase",marginTop:4}}>Controle da Fazenda</div>
       </div>
       <div className="card" style={{width:"100%",maxWidth:320,textAlign:"center"}}>
-        <div style={{fontFamily:"'Barlow Condensed'",fontSize:16,color:muted,letterSpacing:1,textTransform:"uppercase",marginBottom:18}}>
-          Digite seu PIN
-        </div>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:16,color:muted,letterSpacing:1,textTransform:"uppercase",marginBottom:18}}>Digite seu PIN</div>
         <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:20}}>
           {[0,1,2,3].map(i=>(
             <div key={i} style={{width:18,height:18,borderRadius:"50%",
@@ -352,34 +363,27 @@ function Login({ users, onLogin }) {
 
 // ─── ABA ABASTECER ────────────────────────────────────────────────────────────
 function TabFuel({ data, upd, role, showToast }) {
-  const [form, setForm]       = useState({ operatorId:"", machineId:"", meter:"", liters:"" });
-  const [confirm, setConfirm] = useState(false);
-  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
-
-  const mc      = data.machines.find(m=>m.id===Number(form.machineId));
-  const mt      = mc?.meterType||"hourmeter";
-  const lastM   = form.machineId
-    ? data.fuelings.filter(f=>f.machineId===Number(form.machineId)).sort((a,b)=>new Date(b.date)-new Date(a.date))[0]?.meter
-    : null;
-
-  const mOk  = form.meter && Number(form.meter)>0 && (!lastM||Number(form.meter)>=lastM);
-  const ok   = form.operatorId && form.machineId && mOk && form.liters && Number(form.liters)>0 && Number(form.liters)<=data.tankStock;
-
-  const submit = () => {
+  const [form,setForm]=useState({operatorId:"",machineId:"",meter:"",liters:""});
+  const [confirm,setConfirm]=useState(false);
+  const sf=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const mc=data.machines.find(m=>m.id===Number(form.machineId));
+  const mt=mc?.meterType||"hourmeter";
+  const lastM=form.machineId ? data.fuelings.filter(f=>f.machineId===Number(form.machineId)).sort((a,b)=>new Date(b.date)-new Date(a.date))[0]?.meter : null;
+  const mOk=form.meter&&Number(form.meter)>0&&(!lastM||Number(form.meter)>=lastM);
+  const ok=form.operatorId&&form.machineId&&mOk&&form.liters&&Number(form.liters)>0&&Number(form.liters)<=data.tankStock;
+  const submit=()=>{
     upd("fuelings",[...data.fuelings,{id:Date.now(),operatorId:Number(form.operatorId),machineId:Number(form.machineId),meter:Number(form.meter),liters:Number(form.liters),date:tsNow(),registeredBy:role}]);
     upd("tankStock",data.tankStock-Number(form.liters));
     setForm({operatorId:"",machineId:"",meter:"",liters:""});
     setConfirm(false);
     showToast(`Abastecimento registrado: ${form.liters}L`);
   };
-
   return (
     <div>
-      {data.tankStock<=threshold(data) && <div className="alert" style={{marginBottom:18}}>⚠ Estoque CRÍTICO: {fmtNum(data.tankStock)} L restantes. Solicite reabastecimento!</div>}
+      {data.tankStock<=threshold(data)&&<div className="alert" style={{marginBottom:18}}>⚠ Estoque CRÍTICO: {fmtNum(data.tankStock)} L restantes. Solicite reabastecimento!</div>}
       <div className="sec">⛽ Registrar Abastecimento</div>
       <div className="card" style={{maxWidth:520}}>
         <div style={{display:"flex",flexDirection:"column",gap:18}}>
-
           <div className="fg">
             <div className="flbl">Operador</div>
             <select value={form.operatorId} onChange={e=>sf("operatorId",e.target.value)} style={{fontSize:17}}>
@@ -387,7 +391,6 @@ function TabFuel({ data, upd, role, showToast }) {
               {data.operators.filter(o=>o.active).map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
-
           <div className="fg">
             <div className="flbl">Máquina / Equipamento</div>
             <select value={form.machineId} onChange={e=>{sf("machineId",e.target.value);sf("meter","");}} style={{fontSize:17}}>
@@ -397,49 +400,33 @@ function TabFuel({ data, upd, role, showToast }) {
               ))}
             </select>
           </div>
-
-          {mc && (
+          {mc&&(
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
               <span className={`badge ${mt==="odometer"?"bp":"bb"}`}>{mt==="odometer"?"🚗 Odômetro":"⏱ Horímetro"}</span>
-              {lastM && (
-                <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between",padding:"6px 12px"}}>
-                  <span>Último registro:</span>
-                  <strong style={{color:blu}}>{fmtNum(lastM)} {mUnit(mt)}</strong>
-                </div>
-              )}
+              {lastM&&<div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between",padding:"6px 12px"}}><span>Último registro:</span><strong style={{color:blu}}>{fmtNum(lastM)} {mUnit(mt)}</strong></div>}
             </div>
           )}
-
           <div className="fg">
-            <div className="flbl">{mc ? mLbl(mt) : "Horímetro / Odômetro"}</div>
+            <div className="flbl">{mc?mLbl(mt):"Horímetro / Odômetro"}</div>
             <input type="number" placeholder={lastM?`Mínimo: ${lastM}`:mt==="odometer"?"Ex: 46200":"Ex: 1350"}
-              value={form.meter} onChange={e=>sf("meter",e.target.value)}
-              style={{fontSize:22,fontWeight:700,textAlign:"center"}} />
-            {form.meter && lastM && Number(form.meter)<lastM && (
-              <div style={{color:red,fontSize:12,marginTop:4}}>⚠ Valor menor que o último registro ({fmtNum(lastM)} {mUnit(mt)})</div>
-            )}
+              value={form.meter} onChange={e=>sf("meter",e.target.value)} style={{fontSize:22,fontWeight:700,textAlign:"center"}} />
+            {form.meter&&lastM&&Number(form.meter)<lastM&&<div style={{color:red,fontSize:12,marginTop:4}}>⚠ Valor menor que o último registro ({fmtNum(lastM)} {mUnit(mt)})</div>}
           </div>
-
           <div className="fg">
             <div className="flbl">Quantidade (Litros)</div>
-            <input type="number" placeholder="Ex: 45" value={form.liters} onChange={e=>sf("liters",e.target.value)}
-              style={{fontSize:22,fontWeight:700,textAlign:"center"}} />
-            {form.liters && Number(form.liters)>data.tankStock && (
-              <div style={{color:red,fontSize:12,marginTop:4}}>⚠ Quantidade maior que o estoque ({fmtNum(data.tankStock)} L)</div>
-            )}
+            <input type="number" placeholder="Ex: 45" value={form.liters} onChange={e=>sf("liters",e.target.value)} style={{fontSize:22,fontWeight:700,textAlign:"center"}} />
+            {form.liters&&Number(form.liters)>data.tankStock&&<div style={{color:red,fontSize:12,marginTop:4}}>⚠ Quantidade maior que o estoque ({fmtNum(data.tankStock)} L)</div>}
           </div>
-
           <Btn full onClick={()=>setConfirm(true)} disabled={!ok} style={{padding:"16px",fontSize:18,marginTop:4}}>REGISTRAR ABASTECIMENTO</Btn>
         </div>
       </div>
-
-      {confirm && (
+      {confirm&&(
         <Modal title="Confirmar Abastecimento" onClose={()=>setConfirm(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:24}}>
-            <Row label="Operador"     value={data.operators.find(o=>o.id===Number(form.operatorId))?.name} />
-            <Row label="Máquina"      value={`${mc?.code} — ${mc?.description}`} />
-            <Row label={mLbl(mt)}     value={`${fmtNum(form.meter)} ${mUnit(mt)}`} />
-            <Row label="Quantidade"   value={<strong style={{color:acc,fontSize:18}}>{form.liters} L</strong>} />
+            <Row label="Operador" value={data.operators.find(o=>o.id===Number(form.operatorId))?.name} />
+            <Row label="Máquina" value={`${mc?.code} — ${mc?.description}`} />
+            <Row label={mLbl(mt)} value={`${fmtNum(form.meter)} ${mUnit(mt)}`} />
+            <Row label="Quantidade" value={<strong style={{color:acc,fontSize:18}}>{form.liters} L</strong>} />
             <Row label="Estoque após" value={`${fmtNum(data.tankStock-Number(form.liters))} L`} />
           </div>
           <div style={{display:"flex",gap:10}}>
@@ -454,19 +441,16 @@ function TabFuel({ data, upd, role, showToast }) {
 
 // ─── ABA PAINEL ───────────────────────────────────────────────────────────────
 function TabDash({ data }) {
-  const totSup = data.supplies.reduce((s,f)=>s+f.liters,0);
-  const last30 = data.fuelings.filter(f=>(Date.now()-new Date(f.date.replace(" ","T")).getTime())<30*86400000).reduce((s,f)=>s+f.liters,0);
-
-  const mcons = data.machines.map(m=>{
-    const mf = data.fuelings.filter(f=>f.machineId===m.id);
-    const tot = mf.reduce((s,f)=>s+f.liters,0);
-    const sr  = [...mf].sort((a,b)=>b.meter-a.meter);
-    const df  = sr.length>=2 ? sr[0].meter-sr[sr.length-1].meter : 0;
-    return {...m, tot, eff:effCalc(tot,df,m.meterType), cnt:mf.length};
+  const totSup=data.supplies.reduce((s,f)=>s+f.liters,0);
+  const last30=data.fuelings.filter(f=>(Date.now()-new Date(f.date.replace(" ","T")).getTime())<30*86400000).reduce((s,f)=>s+f.liters,0);
+  const mcons=data.machines.map(m=>{
+    const mf=data.fuelings.filter(f=>f.machineId===m.id);
+    const tot=mf.reduce((s,f)=>s+f.liters,0);
+    const sr=[...mf].sort((a,b)=>b.meter-a.meter);
+    const df=sr.length>=2?sr[0].meter-sr[sr.length-1].meter:0;
+    return {...m,tot,eff:effCalc(tot,df,m.meterType),cnt:mf.length};
   }).filter(m=>m.tot>0).sort((a,b)=>b.tot-a.tot);
-
-  const recFuel = [...data.fuelings].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
-
+  const recFuel=[...data.fuelings].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
   return (
     <div style={{display:"flex",flexDirection:"column",gap:24}}>
       <div className="sec">📊 Painel Geral</div>
@@ -476,11 +460,10 @@ function TabDash({ data }) {
         <div className="sbox"><div className="slbl">Total Abastecimentos</div><div className="sval">{data.fuelings.length}</div></div>
         <div className="sbox"><div className="slbl">Total Recebido</div><div className="sval">{fmtNum(totSup)}<span className="sunit"> L</span></div></div>
       </div>
-
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:20}}>
         <div className="card">
           <div className="sec" style={{fontSize:16}}>🚜 Consumo por Equipamento</div>
-          {mcons.length===0 ? <div style={{color:muted}}>Nenhum dado ainda.</div> : (
+          {mcons.length===0?<div style={{color:muted}}>Nenhum dado ainda.</div>:(
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {mcons.map(m=>(
                 <div key={m.id}>
@@ -494,18 +477,15 @@ function TabDash({ data }) {
                   <div style={{background:bgIn,borderRadius:6,height:8,overflow:"hidden"}}>
                     <div style={{height:"100%",background:`linear-gradient(90deg,${accD},${acc})`,borderRadius:6,width:`${(m.tot/mcons[0].tot)*100}%`,transition:"width .6s"}} />
                   </div>
-                  <div style={{fontSize:12,color:dim,marginTop:3}}>
-                    {m.cnt} abastecimentos{m.eff?` · ${m.eff} ${effLbl(m.meterType)} médio`:" · dados insuficientes"}
-                  </div>
+                  <div style={{fontSize:12,color:dim,marginTop:3}}>{m.cnt} abastecimentos{m.eff?` · ${m.eff} ${effLbl(m.meterType)} médio`:" · dados insuficientes"}</div>
                 </div>
               ))}
             </div>
           )}
         </div>
-
         <div className="card">
           <div className="sec" style={{fontSize:16}}>🕐 Últimos Abastecimentos</div>
-          {recFuel.map(f=>{
+          {recFuel.length===0?<div style={{color:muted}}>Nenhum abastecimento ainda.</div>:recFuel.map(f=>{
             const op=data.operators.find(o=>o.id===f.operatorId);
             const mc=data.machines.find(m=>m.id===f.machineId);
             return (
@@ -526,18 +506,16 @@ function TabDash({ data }) {
 
 // ─── ABA ENTRADA DIESEL ───────────────────────────────────────────────────────
 function TabSupply({ data, upd, showToast }) {
-  const [form,setForm] = useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
+  const [form,setForm]=useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
   const sf=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const ok   = form.supplier&&form.date&&form.liters&&Number(form.liters)>0&&form.pricePerLiter;
-  const total= (Number(form.liters)*Number(form.pricePerLiter))||0;
-
-  const submit = () => {
+  const ok=form.supplier&&form.date&&form.liters&&Number(form.liters)>0&&form.pricePerLiter;
+  const total=(Number(form.liters)*Number(form.pricePerLiter))||0;
+  const submit=()=>{
     upd("supplies",[...data.supplies,{id:Date.now(),...form,liters:Number(form.liters),pricePerLiter:Number(form.pricePerLiter)}]);
     upd("tankStock",Math.min(data.tankCapacity,data.tankStock+Number(form.liters)));
     setForm({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
     showToast(`Entrada registrada: ${form.liters}L adicionados ao estoque`);
   };
-
   return (
     <div style={{display:"flex",flexDirection:"column",gap:24}}>
       <div className="sec">🚚 Entrada de Diesel</div>
@@ -545,15 +523,15 @@ function TabSupply({ data, upd, showToast }) {
         <div className="card">
           <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:18}}>REGISTRAR NOVA ENTRADA</div>
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
-            <Field label="Fornecedor"           value={form.supplier}     onChange={v=>sf("supplier",v)}     placeholder="Nome do fornecedor" />
-            <Field label="NF / Documento"       value={form.nf}           onChange={v=>sf("nf",v)}           placeholder="Número da nota fiscal" />
-            <Field label="Data de Recebimento"  type="date" value={form.date} onChange={v=>sf("date",v)} />
+            <Field label="Fornecedor" value={form.supplier} onChange={v=>sf("supplier",v)} placeholder="Nome do fornecedor" />
+            <Field label="NF / Documento" value={form.nf} onChange={v=>sf("nf",v)} placeholder="Número da nota fiscal" />
+            <Field label="Data de Recebimento" type="date" value={form.date} onChange={v=>sf("date",v)} />
             <Field label="Condição de Pagamento" value={form.paymentTerm} onChange={v=>sf("paymentTerm",v)} placeholder="Ex: 30 dias, À vista" />
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <Field label="Preço/Litro (R$)" type="number" value={form.pricePerLiter} onChange={v=>sf("pricePerLiter",v)} placeholder="0,00" />
-              <Field label="Volume (L)"       type="number" value={form.liters}         onChange={v=>sf("liters",v)}        placeholder="0" />
+              <Field label="Volume (L)" type="number" value={form.liters} onChange={v=>sf("liters",v)} placeholder="0" />
             </div>
-            {total>0 && <div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Total da nota:</span><strong style={{color:acc}}>{fmtCurr(total)}</strong></div>}
+            {total>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Total da nota:</span><strong style={{color:acc}}>{fmtCurr(total)}</strong></div>}
             <Btn full onClick={submit} disabled={!ok} style={{marginTop:4}}>REGISTRAR ENTRADA</Btn>
           </div>
         </div>
@@ -583,43 +561,36 @@ function TabSupply({ data, upd, showToast }) {
 
 // ─── ABA CADASTROS ────────────────────────────────────────────────────────────
 function TabReg({ data, upd, showToast }) {
-  const [sub,  setSub]  = useState("op");
-  const [modal,setModal]= useState(null);
-  const [form, setForm] = useState({});
-
-  const openAdd  = (t)    => { setModal({t,item:null}); setForm(t==="mc"?{meterType:"hourmeter"}:{}); };
-  const openEdit = (t,it) => { setModal({t,item:it}); setForm({...it}); };
-
-  const saveOp = () => {
-    if (!form.name?.trim()) return;
-    if (modal.item) upd("operators",data.operators.map(o=>o.id===modal.item.id?{...o,...form}:o));
-    else            upd("operators",[...data.operators,{id:Date.now(),name:form.name,active:true}]);
-    showToast(modal.item?"Operador atualizado":"Operador cadastrado"); setModal(null);
+  const [sub,setSub]=useState("op");
+  const [modal,setModal]=useState(null);
+  const [form,setForm]=useState({});
+  const openAdd=(t)=>{setModal({t,item:null});setForm(t==="mc"?{meterType:"hourmeter"}:{});};
+  const openEdit=(t,it)=>{setModal({t,item:it});setForm({...it});};
+  const saveOp=()=>{
+    if(!form.name?.trim())return;
+    if(modal.item)upd("operators",data.operators.map(o=>o.id===modal.item.id?{...o,...form}:o));
+    else upd("operators",[...data.operators,{id:Date.now(),name:form.name,active:true}]);
+    showToast(modal.item?"Operador atualizado":"Operador cadastrado");setModal(null);
   };
-  const saveMc = () => {
-    if (!form.code?.trim()) return;
-    if (modal.item) upd("machines",data.machines.map(m=>m.id===modal.item.id?{...m,...form}:m));
-    else            upd("machines",[...data.machines,{id:Date.now(),code:form.code,description:form.description||"",active:true,meterType:form.meterType||"hourmeter"}]);
-    showToast(modal.item?"Máquina atualizada":"Máquina cadastrada"); setModal(null);
+  const saveMc=()=>{
+    if(!form.code?.trim())return;
+    if(modal.item)upd("machines",data.machines.map(m=>m.id===modal.item.id?{...m,...form}:m));
+    else upd("machines",[...data.machines,{id:Date.now(),code:form.code,description:form.description||"",active:true,meterType:form.meterType||"hourmeter"}]);
+    showToast(modal.item?"Máquina atualizada":"Máquina cadastrada");setModal(null);
   };
-  const toggle = (type,id) => {
-    if (type==="op") upd("operators",data.operators.map(o=>o.id===id?{...o,active:!o.active}:o));
-    else             upd("machines", data.machines.map(m=>m.id===id?{...m,active:!m.active}:m));
+  const toggle=(type,id)=>{
+    if(type==="op")upd("operators",data.operators.map(o=>o.id===id?{...o,active:!o.active}:o));
+    else upd("machines",data.machines.map(m=>m.id===id?{...m,active:!m.active}:m));
   };
-
   return (
     <div>
       <div className="sec">📋 Cadastros</div>
       <div style={{display:"flex",gap:10,marginBottom:20}}>
         {[["op","👷 Operadores"],["mc","🚜 Máquinas/Veículos"]].map(([id,lbl])=>(
-          <button key={id} onClick={()=>setSub(id)}
-            style={{background:sub===id?acc:bgIn,color:sub===id?"#000":muted,border:"none",borderRadius:8,padding:"9px 20px",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15}}>
-            {lbl}
-          </button>
+          <button key={id} onClick={()=>setSub(id)} style={{background:sub===id?acc:bgIn,color:sub===id?"#000":muted,border:"none",borderRadius:8,padding:"9px 20px",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15}}>{lbl}</button>
         ))}
       </div>
-
-      {sub==="op" && (
+      {sub==="op"&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17}}>Operadores Cadastrados</span>
@@ -640,8 +611,7 @@ function TabReg({ data, upd, showToast }) {
           </table>
         </div>
       )}
-
-      {sub==="mc" && (
+      {sub==="mc"&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17}}>Máquinas / Veículos</span>
@@ -664,10 +634,9 @@ function TabReg({ data, upd, showToast }) {
           </table>
         </div>
       )}
-
-      {modal && (
+      {modal&&(
         <Modal title={`${modal.item?"Editar":"Novo"} ${modal.t==="op"?"Operador":"Equipamento"}`} onClose={()=>setModal(null)}>
-          {modal.t==="op" ? (
+          {modal.t==="op"?(
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
               <Field label="Nome Completo" value={form.name||""} onChange={v=>setForm(f=>({...f,name:v}))} placeholder="Nome do operador" />
               <div style={{display:"flex",gap:10,marginTop:6}}>
@@ -675,19 +644,17 @@ function TabReg({ data, upd, showToast }) {
                 <Btn full onClick={saveOp} disabled={!form.name?.trim()}>Salvar</Btn>
               </div>
             </div>
-          ) : (
+          ):(
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <Field label="Código"    value={form.code||""}        onChange={v=>setForm(f=>({...f,code:v}))}        placeholder="Ex: CAM-02" />
+              <Field label="Código" value={form.code||""} onChange={v=>setForm(f=>({...f,code:v}))} placeholder="Ex: CAM-02" />
               <Field label="Descrição" value={form.description||""} onChange={v=>setForm(f=>({...f,description:v}))} placeholder="Ex: Caminhão Ford F-350" />
               <div className="fg">
                 <div className="flbl">Tipo de Medidor</div>
                 <div className="mtog">
                   <button className={form.meterType!=="odometer"?"on":""} onClick={()=>setForm(f=>({...f,meterType:"hourmeter"}))}>⏱ Horímetro (horas)</button>
-                  <button className={form.meterType==="odometer"?"on":""}  onClick={()=>setForm(f=>({...f,meterType:"odometer"}))}>🚗 Odômetro (Km)</button>
+                  <button className={form.meterType==="odometer"?"on":""} onClick={()=>setForm(f=>({...f,meterType:"odometer"}))}>🚗 Odômetro (Km)</button>
                 </div>
-                <div style={{fontSize:12,color:dim,marginTop:6}}>
-                  {form.meterType==="odometer"?"Relatório em Km/L":"Relatório em L/h"}
-                </div>
+                <div style={{fontSize:12,color:dim,marginTop:6}}>{form.meterType==="odometer"?"Relatório em Km/L":"Relatório em L/h"}</div>
               </div>
               <div style={{display:"flex",gap:10,marginTop:6}}>
                 <Btn full onClick={()=>setModal(null)} color={bgIn} style={{color:txt}}>Cancelar</Btn>
@@ -703,29 +670,24 @@ function TabReg({ data, upd, showToast }) {
 
 // ─── ABA RELATÓRIOS ───────────────────────────────────────────────────────────
 function TabReport({ data }) {
-  const [fil,setFil] = useState({machineId:"",operatorId:"",from:"",to:""});
+  const [fil,setFil]=useState({machineId:"",operatorId:"",from:"",to:""});
   const sf=(k,v)=>setFil(f=>({...f,[k]:v}));
-
-  const rows = data.fuelings.filter(f=>{
-    if (fil.machineId  && f.machineId !==Number(fil.machineId))  return false;
-    if (fil.operatorId && f.operatorId!==Number(fil.operatorId)) return false;
-    if (fil.from && f.date<fil.from)              return false;
-    if (fil.to   && f.date>fil.to+" 23:59")       return false;
+  const rows=data.fuelings.filter(f=>{
+    if(fil.machineId&&f.machineId!==Number(fil.machineId))return false;
+    if(fil.operatorId&&f.operatorId!==Number(fil.operatorId))return false;
+    if(fil.from&&f.date<fil.from)return false;
+    if(fil.to&&f.date>fil.to+" 23:59")return false;
     return true;
   }).sort((a,b)=>new Date(b.date)-new Date(a.date));
-
-  const totL    = rows.reduce((s,f)=>s+f.liters,0);
-  const avgP    = data.supplies.length>0
-    ? data.supplies.reduce((s,e)=>s+e.pricePerLiter*e.liters,0)/data.supplies.reduce((s,e)=>s+e.liters,0) : 0;
-
-  const mStats = data.machines.map(m=>{
+  const totL=rows.reduce((s,f)=>s+f.liters,0);
+  const avgP=data.supplies.length>0?data.supplies.reduce((s,e)=>s+e.pricePerLiter*e.liters,0)/data.supplies.reduce((s,e)=>s+e.liters,0):0;
+  const mStats=data.machines.map(m=>{
     const mf=rows.filter(f=>f.machineId===m.id);
-    if (mf.length<2) return null;
+    if(mf.length<2)return null;
     const tot=mf.reduce((s,f)=>s+f.liters,0);
     const sr=[...mf].sort((a,b)=>b.meter-a.meter);
-    return {...m,tot,eff:effCalc(tot,sr[0].meter-sr[sr.length-1].meter,m.meterType),cnt:mf.length};
+    return{...m,tot,eff:effCalc(tot,sr[0].meter-sr[sr.length-1].meter,m.meterType),cnt:mf.length};
   }).filter(Boolean);
-
   return (
     <div>
       <div className="sec">📈 Relatórios de Consumo</div>
@@ -733,18 +695,16 @@ function TabReport({ data }) {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14}}>
           <div className="fg"><div className="flbl">Máquina</div>
             <select value={fil.machineId} onChange={e=>sf("machineId",e.target.value)}>
-              <option value="">Todas</option>
-              {data.machines.map(m=><option key={m.id} value={m.id}>{m.code}</option>)}
+              <option value="">Todas</option>{data.machines.map(m=><option key={m.id} value={m.id}>{m.code}</option>)}
             </select>
           </div>
           <div className="fg"><div className="flbl">Operador</div>
             <select value={fil.operatorId} onChange={e=>sf("operatorId",e.target.value)}>
-              <option value="">Todos</option>
-              {data.operators.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+              <option value="">Todos</option>{data.operators.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
           <div className="fg"><div className="flbl">De</div><input type="date" value={fil.from} onChange={e=>sf("from",e.target.value)} /></div>
-          <div className="fg"><div className="flbl">Até</div><input type="date" value={fil.to}   onChange={e=>sf("to",  e.target.value)} /></div>
+          <div className="fg"><div className="flbl">Até</div><input type="date" value={fil.to} onChange={e=>sf("to",e.target.value)} /></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginTop:18}}>
           <div className="sbox"><div className="slbl">Registros</div><div className="sval">{rows.length}</div></div>
@@ -752,8 +712,7 @@ function TabReport({ data }) {
           <div className="sbox"><div className="slbl">Custo Estimado</div><div className="sval" style={{fontSize:20}}>{fmtCurr(totL*avgP)}</div></div>
         </div>
       </div>
-
-      {mStats.length>0 && (
+      {mStats.length>0&&(
         <div className="card" style={{marginBottom:20}}>
           <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:14}}>EFICIÊNCIA POR EQUIPAMENTO</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:12}}>
@@ -763,42 +722,37 @@ function TabReport({ data }) {
                   <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{m.code}</span>
                   <span className={`badge ${m.meterType==="odometer"?"bp":"bb"}`} style={{fontSize:10}}>{m.meterType==="odometer"?"ODO":"HOR"}</span>
                 </div>
-                <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800}}>
-                  {m.eff??"—"}<span style={{fontSize:14,color:muted,fontWeight:400}}> {effLbl(m.meterType)}</span>
-                </div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800}}>{m.eff??"—"}<span style={{fontSize:14,color:muted,fontWeight:400}}> {effLbl(m.meterType)}</span></div>
                 <div style={{fontSize:12,color:dim,marginTop:4}}>{m.tot} L · {m.cnt} abastecimentos</div>
               </div>
             ))}
           </div>
         </div>
       )}
-
       <div className="card">
         <div style={{overflowX:"auto"}}>
           <table>
             <thead><tr><th>Data</th><th>Máquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>Custo Est.</th><th>Origem</th></tr></thead>
             <tbody>
-              {rows.length===0
-                ? <tr><td colSpan="7" style={{textAlign:"center",color:muted,padding:30}}>Nenhum registro encontrado</td></tr>
-                : rows.map(f=>{
-                    const op=data.operators.find(o=>o.id===f.operatorId);
-                    const mc=data.machines.find(m=>m.id===f.machineId);
-                    return (
-                      <tr key={f.id}>
-                        <td style={{whiteSpace:"nowrap",fontSize:13}}>{fmtDate(f.date)}</td>
-                        <td><div style={{display:"flex",gap:6,alignItems:"center"}}>
-                          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{mc?.code}</span>
-                          <span className={`badge ${mc?.meterType==="odometer"?"bp":"bb"}`} style={{fontSize:10}}>{mc?.meterType==="odometer"?"ODO":"HOR"}</span>
-                        </div></td>
-                        <td>{op?.name}</td>
-                        <td>{fmtNum(f.meter)} {mUnit(mc?.meterType)}</td>
-                        <td><strong style={{color:blu}}>{f.liters} L</strong></td>
-                        <td style={{color:muted}}>{fmtCurr(f.liters*avgP)}</td>
-                        <td><span className={`badge ${f.registeredBy==="ADMINISTRADOR"?"by":f.registeredBy==="ESCRITORIO"?"bb":"bg"}`}>{f.registeredBy}</span></td>
-                      </tr>
-                    );
-                  })
-              }
+              {rows.length===0?<tr><td colSpan="7" style={{textAlign:"center",color:muted,padding:30}}>Nenhum registro encontrado</td></tr>
+              :rows.map(f=>{
+                const op=data.operators.find(o=>o.id===f.operatorId);
+                const mc=data.machines.find(m=>m.id===f.machineId);
+                return(
+                  <tr key={f.id}>
+                    <td style={{whiteSpace:"nowrap",fontSize:13}}>{fmtDate(f.date)}</td>
+                    <td><div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{mc?.code}</span>
+                      <span className={`badge ${mc?.meterType==="odometer"?"bp":"bb"}`} style={{fontSize:10}}>{mc?.meterType==="odometer"?"ODO":"HOR"}</span>
+                    </div></td>
+                    <td>{op?.name}</td>
+                    <td>{fmtNum(f.meter)} {mUnit(mc?.meterType)}</td>
+                    <td><strong style={{color:blu}}>{f.liters} L</strong></td>
+                    <td style={{color:muted}}>{fmtCurr(f.liters*avgP)}</td>
+                    <td><span className={`badge ${f.registeredBy==="ADMINISTRADOR"?"by":f.registeredBy==="ESCRITORIO"?"bb":"bg"}`}>{f.registeredBy}</span></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -809,75 +763,44 @@ function TabReport({ data }) {
 
 // ─── ABA AJUSTES ──────────────────────────────────────────────────────────────
 function TabAdj({ data, upd, showToast }) {
-  const [form,  setForm]  = useState({type:"correcao",liters:"",note:""});
-  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
-
-  const [thr, setThr] = useState(String(data.lowStockThreshold??1000));
-  const saveThr = () => {
-    const v=Number(thr);
-    if (!v||v<0) return;
-    upd("lowStockThreshold",v);
-    showToast(`Nível crítico atualizado para ${fmtNum(v)} L`);
-  };
-
-  const applyAdj = () => {
+  const [form,setForm]=useState({type:"correcao",liters:"",note:""});
+  const sf=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const [thr,setThr]=useState(String(data.lowStockThreshold??1000));
+  const saveThr=()=>{const v=Number(thr);if(!v||v<0)return;upd("lowStockThreshold",v);showToast(`Nível crítico atualizado para ${fmtNum(v)} L`);};
+  const applyAdj=()=>{
     const adj={id:Date.now(),date:tsNow(),type:form.type,liters:Number(form.liters),note:form.note,by:"ADMINISTRADOR"};
     let ns=data.tankStock;
-    if (form.type==="inicial"||form.type==="adicao") ns=Math.min(data.tankCapacity,ns+Number(form.liters));
-    else if (form.type==="correcao") ns=Number(form.liters);
-    else if (form.type==="remocao")  ns=Math.max(0,ns-Number(form.liters));
+    if(form.type==="inicial"||form.type==="adicao")ns=Math.min(data.tankCapacity,ns+Number(form.liters));
+    else if(form.type==="correcao")ns=Number(form.liters);
+    else if(form.type==="remocao")ns=Math.max(0,ns-Number(form.liters));
     upd("stockAdjustments",[...data.stockAdjustments,adj]);
     upd("tankStock",ns);
     setForm({type:"correcao",liters:"",note:""});
     showToast("Ajuste de estoque aplicado");
   };
-
   const [eMod,setEMod]=useState(null);
   const [eForm,setEForm]=useState({});
   const openE=(f)=>{setEMod({item:f});setEForm({...f});};
-  const saveE=()=>{
-    upd("fuelings",data.fuelings.map(f=>f.id===eMod.item.id?{...f,liters:Number(eForm.liters),meter:Number(eForm.meter)}:f));
-    setEMod(null); showToast("Abastecimento atualizado");
-  };
-  const delE=(id)=>{
-    const f=data.fuelings.find(f=>f.id===id);
-    upd("fuelings",data.fuelings.filter(f=>f.id!==id));
-    upd("tankStock",data.tankStock+f.liters);
-    showToast("Abastecimento removido e estoque restaurado"); setEMod(null);
-  };
-
+  const saveE=()=>{upd("fuelings",data.fuelings.map(f=>f.id===eMod.item.id?{...f,liters:Number(eForm.liters),meter:Number(eForm.meter)}:f));setEMod(null);showToast("Abastecimento atualizado");};
+  const delE=(id)=>{const f=data.fuelings.find(f=>f.id===id);upd("fuelings",data.fuelings.filter(f=>f.id!==id));upd("tankStock",data.tankStock+f.liters);showToast("Abastecimento removido e estoque restaurado");setEMod(null);};
   return (
     <div style={{display:"flex",flexDirection:"column",gap:24}}>
       <div className="sec">⚙️ Ajustes Administrativos</div>
-
-      {/* NÍVEL CRÍTICO */}
       <div className="card" style={{borderColor:red+"88"}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:6,color:red}}>⚠ NÍVEL CRÍTICO DE ESTOQUE</div>
-        <div style={{fontSize:13,color:muted,marginBottom:16}}>
-          Quando o estoque cair abaixo deste valor, um alerta vermelho aparece para todos os usuários.
-        </div>
+        <div style={{fontSize:13,color:muted,marginBottom:16}}>Quando o estoque cair abaixo deste valor, um alerta vermelho aparece para todos os usuários.</div>
         <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
           <div className="fg" style={{flex:1,minWidth:180}}>
             <div className="flbl">Limite de Alerta (Litros)</div>
-            <input type="number" value={thr} onChange={e=>setThr(e.target.value)}
-              style={{fontSize:20,fontWeight:700,textAlign:"center",borderColor:red+"88"}} />
+            <input type="number" value={thr} onChange={e=>setThr(e.target.value)} style={{fontSize:20,fontWeight:700,textAlign:"center",borderColor:red+"88"}} />
           </div>
           <Btn onClick={saveThr} color={red} disabled={!thr||Number(thr)<0} style={{whiteSpace:"nowrap"}}>SALVAR LIMITE</Btn>
         </div>
         <div style={{display:"flex",gap:16,marginTop:14,flexWrap:"wrap"}}>
-          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}>
-            <span>Limite atual:</span><strong style={{color:red}}>{fmtNum(data.lowStockThreshold??1000)} L</strong>
-          </div>
-          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}>
-            <span>Estoque atual:</span>
-            <strong style={{color:data.tankStock<=threshold(data)?red:blu}}>
-              {fmtNum(data.tankStock)} L {data.tankStock<=threshold(data)?"⚠":"✔"}
-            </strong>
-          </div>
+          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Limite atual:</span><strong style={{color:red}}>{fmtNum(data.lowStockThreshold??1000)} L</strong></div>
+          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque atual:</span><strong style={{color:data.tankStock<=threshold(data)?red:blu}}>{fmtNum(data.tankStock)} L {data.tankStock<=threshold(data)?"⚠":"✔"}</strong></div>
         </div>
       </div>
-
-      {/* AJUSTE DE ESTOQUE */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:20}}>
         <div className="card">
           <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:18}}>AJUSTE DE ESTOQUE</div>
@@ -891,33 +814,26 @@ function TabAdj({ data, upd, showToast }) {
                 <option value="remocao">Remoção manual</option>
               </select>
             </div>
-            <Field label={form.type==="correcao"||form.type==="inicial"?"Novo Valor do Estoque (L)":"Quantidade (L)"}
-              type="number" value={form.liters} onChange={v=>sf("liters",v)} placeholder="0" />
+            <Field label={form.type==="correcao"||form.type==="inicial"?"Novo Valor do Estoque (L)":"Quantidade (L)"} type="number" value={form.liters} onChange={v=>sf("liters",v)} placeholder="0" />
             <Field label="Motivo / Observação" value={form.note} onChange={v=>sf("note",v)} placeholder="Descreva o motivo do ajuste" />
-            <div className="pill" style={{display:"flex",justifyContent:"space-between"}}>
-              <span>Estoque atual:</span><strong style={{color:blu}}>{fmtNum(data.tankStock)} L</strong>
-            </div>
+            <div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Estoque atual:</span><strong style={{color:blu}}>{fmtNum(data.tankStock)} L</strong></div>
             <Btn full onClick={applyAdj} disabled={!form.liters||Number(form.liters)<0}>APLICAR AJUSTE</Btn>
           </div>
         </div>
         <div className="card">
           <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:18}}>HISTÓRICO DE AJUSTES</div>
-          {data.stockAdjustments.length===0
-            ? <div style={{color:muted}}>Nenhum ajuste realizado.</div>
-            : [...data.stockAdjustments].reverse().map(a=>(
-                <div key={a.id} style={{padding:"10px 0",borderBottom:`1px solid ${bdr}33`}}>
-                  <div style={{display:"flex",justifyContent:"space-between"}}>
-                    <span className="badge by">{a.type.toUpperCase()}</span>
-                    <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{fmtNum(a.liters)} L</span>
-                  </div>
-                  <div style={{fontSize:12,color:muted,marginTop:4}}>{a.note} · {fmtDate(a.date)}</div>
-                </div>
-              ))
-          }
+          {data.stockAdjustments.length===0?<div style={{color:muted}}>Nenhum ajuste realizado.</div>
+          :[...data.stockAdjustments].reverse().map(a=>(
+            <div key={a.id} style={{padding:"10px 0",borderBottom:`1px solid ${bdr}33`}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <span className="badge by">{a.type.toUpperCase()}</span>
+                <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{fmtNum(a.liters)} L</span>
+              </div>
+              <div style={{fontSize:12,color:muted,marginTop:4}}>{a.note} · {fmtDate(a.date)}</div>
+            </div>
+          ))}
         </div>
       </div>
-
-      {/* EDITAR ABASTECIMENTOS */}
       <div className="card">
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:18}}>EDITAR ABASTECIMENTOS</div>
         <div style={{overflowX:"auto"}}>
@@ -927,7 +843,7 @@ function TabAdj({ data, upd, showToast }) {
               {[...data.fuelings].reverse().map(f=>{
                 const op=data.operators.find(o=>o.id===f.operatorId);
                 const mc=data.machines.find(m=>m.id===f.machineId);
-                return (
+                return(
                   <tr key={f.id}>
                     <td style={{fontSize:13}}>{fmtDate(f.date)}</td>
                     <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{mc?.code}</td>
@@ -942,14 +858,13 @@ function TabAdj({ data, upd, showToast }) {
           </table>
         </div>
       </div>
-
-      {eMod && (()=>{
+      {eMod&&(()=>{
         const mc=data.machines.find(m=>m.id===eMod.item.machineId);
-        return (
+        return(
           <Modal title="Editar Abastecimento" onClose={()=>setEMod(null)}>
             <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:18}}>
-              <Field label={mLbl(mc?.meterType)} type="number" value={eForm.meter}  onChange={v=>setEForm(f=>({...f,meter:v}))} />
-              <Field label="Litros"              type="number" value={eForm.liters} onChange={v=>setEForm(f=>({...f,liters:v}))} />
+              <Field label={mLbl(mc?.meterType)} type="number" value={eForm.meter} onChange={v=>setEForm(f=>({...f,meter:v}))} />
+              <Field label="Litros" type="number" value={eForm.liters} onChange={v=>setEForm(f=>({...f,liters:v}))} />
             </div>
             <div style={{display:"flex",gap:10}}>
               <Btn onClick={()=>delE(eMod.item.id)} color={red} style={{padding:"10px 16px",fontSize:14}}>🗑 Excluir</Btn>
@@ -964,8 +879,7 @@ function TabAdj({ data, upd, showToast }) {
   );
 }
 
-// ─── INICIAR APP ──────────────────────────────────────────────────────────────
-const root = ReactDOM.createRoot(document.getElementById("root"));
+const root=ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
 </script>
 </body>

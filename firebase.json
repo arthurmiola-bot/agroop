@@ -1,0 +1,16 @@
+{
+  "hosting": {
+    "site": "posto-diesel",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/posto-diesel-fazenda.html"
+      }
+    ]
+  }
+}
