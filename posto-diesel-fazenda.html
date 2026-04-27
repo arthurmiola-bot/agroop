@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Posto Diesel — Fazenda</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ─── DADOS INICIAIS ───────────────────────────────────────────────────────────
+const INITIAL_DATA = {
+  operators: [
+    { id: 1, name: "João Silva",   active: true },
+    { id: 2, name: "Pedro Alves",  active: true },
+    { id: 3, name: "Carlos Souza", active: true },
+  ],
+  machines: [
+    { id: 1, code: "TT-01",  description: "Trator John Deere 6110J",    active: true, meterType: "hourmeter" },
+    { id: 2, code: "TT-02",  description: "Trator New Holland T7",       active: true, meterType: "hourmeter" },
+    { id: 3, code: "COL-01", description: "Colheitadeira Case IH 8250",  active: true, meterType: "hourmeter" },
+    { id: 4, code: "ESC-01", description: "Escavadeira Caterpillar 320", active: true, meterType: "hourmeter" },
+    { id: 5, code: "CAM-01", description: "Caminhão Iveco 4x4",          active: true, meterType: "odometer"  },
+  ],
+  fuelings: [
+    { id: 1, operatorId: 1, machineId: 1, meter: 1250,  liters: 45, date: "2026-04-20 08:30", registeredBy: "OPERADOR"   },
+    { id: 2, operatorId: 2, machineId: 2, meter: 890,   liters: 60, date: "2026-04-21 14:15", registeredBy: "ESCRITORIO" },
+    { id: 3, operatorId: 1, machineId: 3, meter: 2100,  liters: 80, date: "2026-04-22 09:00", registeredBy: "OPERADOR"   },
+    { id: 4, operatorId: 3, machineId: 1, meter: 1298,  liters: 50, date: "2026-04-23 07:45", registeredBy: "OPERADOR"   },
+    { id: 5, operatorId: 2, machineId: 4, meter: 3420,  liters: 70, date: "2026-04-24 11:30", registeredBy: "ESCRITORIO" },
+    { id: 6, operatorId: 2, machineId: 5, meter: 45800, liters: 55, date: "2026-04-22 13:00", registeredBy: "ESCRITORIO" },
+    { id: 7, operatorId: 3, machineId: 5, meter: 46150, liters: 50, date: "2026-04-24 16:00", registeredBy: "OPERADOR"   },
+  ],
+  supplies: [
+    { id: 1, supplier: "Petrobrás Distribuidora", date: "2026-04-10", paymentTerm: "30 dias", pricePerLiter: 6.45, liters: 5000, nf: "001234" },
+    { id: 2, supplier: "Ipiranga",                date: "2026-04-18", paymentTerm: "À vista",  pricePerLiter: 6.38, liters: 3000, nf: "005678" },
+  ],
+  tankCapacity: 10000,
+  tankStock: 7540,
+  lowStockThreshold: 1000,
+  stockAdjustments: [
+    { id: 1, date: "2026-04-01", type: "inicial", liters: 2000, note: "Estoque inicial do sistema", by: "ADMINISTRADOR" }
+  ],
+  users: [
+    { id: 1, role: "OPERADOR",      pin: "1111" },
+    { id: 2, role: "ESCRITORIO",    pin: "2222" },
+    { id: 3, role: "ADMINISTRADOR", pin: "1441" },
+  ]
+};
+
+// ─── UTILITÁRIOS ─────────────────────────────────────────────────────────────
+const tsNow    = () => new Date().toLocaleString("pt-BR", { hour12: false }).replace(",", "").slice(0, 16);
+const fmtDate  = (d) => d ? new Date(d.replace(" ", "T")).toLocaleDateString("pt-BR") : "-";
+const fmtNum   = (n) => Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 0 });
+const fmtCurr  = (n) => Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const mLbl     = (mt) => mt === "odometer" ? "Odômetro (Km)" : "Horímetro (horas)";
+const mUnit    = (mt) => mt === "odometer" ? "Km" : "h";
+const effLbl   = (mt) => mt === "odometer" ? "Km/L" : "L/h";
+const effCalc  = (totalL, diff, mt) => {
+  if (!diff || diff <= 0 || totalL <= 0) return null;
+  return mt === "odometer" ? (diff / totalL).toFixed(2) : (totalL / diff).toFixed(2);
+};
+const threshold = (d) => d.lowStockThreshold ?? 1000;
+
+// ─── CORES ───────────────────────────────────────────────────────────────────
+const bg="#0f1923",bgCard="#16232e",bgIn="#1e3040",bdr="#2a4a60";
+const acc="#f0a500",accD="#b87b00",grn="#22c55e",red="#ef4444",blu="#38bdf8",pur="#c084fc";
+const txt="#e8f0f7",muted="#6b8fa8",dim="#4a6e85";
+
+// ─── CSS GLOBAL ───────────────────────────────────────────────────────────────
+const STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:${bg};color:${txt};font-family:'Barlow',sans-serif;min-height:100vh}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:${bg}}::-webkit-scrollbar-thumb{background:${bdr};border-radius:3px}
+input,select{background:${bgIn};border:1.5px solid ${bdr};color:${txt};border-radius:8px;padding:10px 14px;font-family:'Barlow',sans-serif;font-size:15px;width:100%;outline:none;transition:border .2s}
+input:focus,select:focus{border-color:${acc}}
+input::placeholder{color:${dim}}
+select option{background:${bgCard}}
+button{cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:700;border:none;border-radius:8px;transition:all .15s;letter-spacing:.5px}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.bg{background:#16401f;color:${grn}}.br{background:#4a1515;color:${red}}
+.by{background:#3d2e00;color:${acc}}.bb{background:#0c2a3d;color:${blu}}.bp{background:#1e0a3d;color:${pur}}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 14px;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:1px;color:${muted};border-bottom:1.5px solid ${bdr};text-transform:uppercase}
+td{padding:11px 14px;border-bottom:1px solid ${bdr}22;font-size:14px;vertical-align:middle}
+tr:hover td{background:${bgIn}55}
+.tank-bar{width:100%;height:28px;background:${bgIn};border-radius:14px;overflow:hidden;border:1.5px solid ${bdr}}
+.tank-fill{height:100%;border-radius:14px;transition:width .8s;background:linear-gradient(90deg,#0d6eab,${blu})}
+.tank-fill.low{background:linear-gradient(90deg,#7c1d1d,${red})}
+.sec{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;letter-spacing:1.5px;color:${acc};text-transform:uppercase;margin-bottom:18px}
+.card{background:${bgCard};border:1.5px solid ${bdr};border-radius:14px;padding:22px}
+.sbox{background:${bgCard};border:1.5px solid ${bdr};border-radius:14px;padding:18px 22px;display:flex;flex-direction:column;gap:4px}
+.slbl{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:${muted};font-family:'Barlow Condensed',sans-serif}
+.sval{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800}
+.sunit{font-size:13px;color:${muted};font-weight:400}
+.flbl{font-size:13px;color:${muted};margin-bottom:6px;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;font-weight:600}
+.fg{display:flex;flex-direction:column}
+.pill{background:${bgIn};border:1px solid ${bdr};border-radius:8px;padding:10px 14px;font-size:14px;color:${muted}}
+.alert{background:#3d0000;border:1.5px solid ${red};border-radius:10px;padding:12px 16px;color:${red};font-size:14px;font-weight:500}
+.mtog{display:flex;border:1.5px solid ${bdr};border-radius:8px;overflow:hidden}
+.mtog button{flex:1;padding:10px 8px;background:none;color:${muted};font-size:14px;border:none;border-radius:0;font-family:'Barlow',sans-serif}
+.mtog button.on{background:${acc};color:#000;font-weight:700}
+@keyframes fi{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.fi{animation:fi .3s ease forwards}
+@keyframes pu{0%,100%{opacity:1}50%{opacity:.5}}
+.pu{animation:pu 1.5s infinite}
+`;
+
+// ─── COMPONENTES BASE ─────────────────────────────────────────────────────────
+const Btn = ({ onClick, children, color=acc, style={}, disabled=false, full=false }) => (
+  <button onClick={onClick} disabled={disabled} style={{
+    background: disabled ? bgIn : color,
+    color: disabled ? dim : (color===acc ? "#000" : "#fff"),
+    padding:"11px 22px", fontSize:"15px", width: full?"100%":"auto",
+    opacity: disabled?.5:1, ...style
+  }}>{children}</button>
+);
+
+const Modal = ({ title, onClose, children }) => (
+  <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{
+    position:"fixed",inset:0,background:"#000a",zIndex:100,
+    display:"flex",alignItems:"center",justifyContent:"center",padding:16
+  }}>
+    <div className="card fi" style={{width:"100%",maxWidth:520,maxHeight:"90vh",overflowY:"auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <span style={{fontFamily:"'Barlow Condensed'",fontSize:20,fontWeight:700,color:acc,textTransform:"uppercase"}}>{title}</span>
+        <button onClick={onClose} style={{background:"none",color:muted,fontSize:22,padding:"0 6px"}}>✕</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+const Field = ({ label, value, onChange, placeholder, type="text" }) => (
+  <div className="fg">
+    <div className="flbl">{label}</div>
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} />
+  </div>
+);
+
+const Row = ({ label, value }) => (
+  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${bdr}33`}}>
+    <span style={{color:muted,fontSize:14}}>{label}</span>
+    <span style={{fontWeight:600,fontSize:14}}>{value}</span>
+  </div>
+);
+
+// ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
+function App() {
+  const [data,  setData]  = useState(() => { try { const s=localStorage.getItem("posto_v3"); return s?JSON.parse(s):INITIAL_DATA; } catch { return INITIAL_DATA; } });
+  const [role,  setRole]  = useState(null);
+  const [tab,   setTab]   = useState(null);
+  const [toast, setToast] = useState(null);
+  const tmr = useRef(null);
+
+  useEffect(() => { try { localStorage.setItem("posto_v3", JSON.stringify(data)); } catch {} }, [data]);
+
+  const showToast = (msg, type="success") => {
+    setToast({msg,type});
+    clearTimeout(tmr.current);
+    tmr.current = setTimeout(()=>setToast(null), 3200);
+  };
+
+  const upd = (key, val) => setData(d=>({...d,[key]:val}));
+  const pct = Math.max(0, Math.min(100, (data.tankStock/data.tankCapacity)*100));
+  const low = data.tankStock <= threshold(data);
+
+  if (!role) return <Login users={data.users} onLogin={r=>{ setRole(r); setTab(r==="OPERADOR"?"fuel":"dash"); }} />;
+
+  const TABS = {
+    OPERADOR:      [{id:"fuel",  lbl:"⛽ Abastecer"}],
+    ESCRITORIO:    [{id:"dash",  lbl:"📊 Painel"},{id:"fuel",lbl:"⛽ Abastecer"},{id:"supply",lbl:"🚚 Entrada Diesel"},{id:"reg",lbl:"📋 Cadastros"}],
+    ADMINISTRADOR: [{id:"dash",  lbl:"📊 Painel"},{id:"fuel",lbl:"⛽ Abastecer"},{id:"supply",lbl:"🚚 Entrada Diesel"},{id:"reg",lbl:"📋 Cadastros"},{id:"rep",lbl:"📈 Relatórios"},{id:"adj",lbl:"⚙️ Ajustes"}],
+  }[role];
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      <style>{STYLE}</style>
+
+      {/* CABEÇALHO */}
+      <header style={{background:bgCard,borderBottom:`2px solid ${acc}`,padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:26}}>⛽</span>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:20,letterSpacing:1,color:acc}}>POSTO DIESEL</div>
+            <div style={{fontSize:11,color:muted,letterSpacing:2,textTransform:"uppercase"}}>Controle da Fazenda</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,color:muted}}>Logado como</div>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{role}</div>
+          </div>
+          <Btn onClick={()=>setRole(null)} color={bgIn} style={{color:txt,padding:"7px 14px",fontSize:13}}>Sair</Btn>
+        </div>
+      </header>
+
+      {/* BARRA DO TANQUE */}
+      <div style={{background:bgCard,padding:"10px 20px",borderBottom:`1px solid ${bdr}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <span style={{fontFamily:"'Barlow Condensed'",fontSize:13,letterSpacing:1,color:muted,textTransform:"uppercase"}}>
+            Estoque no Tanque {low && <span className="pu" style={{color:red}}>⚠ ESTOQUE BAIXO</span>}
+          </span>
+          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:low?red:blu}}>
+            {fmtNum(data.tankStock)} L <span style={{color:dim,fontWeight:400}}>/ {fmtNum(data.tankCapacity)} L</span>
+          </span>
+        </div>
+        <div className="tank-bar"><div className={`tank-fill${low?" low":""}`} style={{width:`${pct}%`}} /></div>
+      </div>
+
+      {/* ABAS */}
+      <nav style={{background:bgCard,padding:"0 20px",borderBottom:`1px solid ${bdr}`,display:"flex",overflowX:"auto"}}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{
+            background:"none",border:"none",borderBottom:tab===t.id?`3px solid ${acc}`:"3px solid transparent",
+            color:tab===t.id?acc:muted,padding:"13px 16px",fontFamily:"'Barlow Condensed'",
+            fontWeight:700,fontSize:15,whiteSpace:"nowrap",transition:"all .15s"
+          }}>{t.lbl}</button>
+        ))}
+      </nav>
+
+      {/* CONTEÚDO */}
+      <main style={{flex:1,padding:20,maxWidth:1100,margin:"0 auto",width:"100%"}}>
+        {toast && (
+          <div style={{background:toast.type==="success"?"#0e3d1a":"#3d0e0e",border:`1.5px solid ${toast.type==="success"?grn:red}`,
+            borderRadius:10,padding:"12px 18px",marginBottom:16,color:toast.type==="success"?grn:red,
+            fontSize:14,fontWeight:500,display:"flex",alignItems:"center",gap:8}}>
+            {toast.type==="success"?"✔":"✖"} {toast.msg}
+          </div>
+        )}
+        <div className="fi" key={tab}>
+          {tab==="fuel"   && <TabFuel    data={data} upd={upd} role={role} showToast={showToast} />}
+          {tab==="dash"   && <TabDash    data={data} />}
+          {tab==="supply" && <TabSupply  data={data} upd={upd} showToast={showToast} />}
+          {tab==="reg"    && <TabReg     data={data} upd={upd} showToast={showToast} />}
+          {tab==="rep"    && <TabReport  data={data} />}
+          {tab==="adj"    && <TabAdj     data={data} upd={upd} showToast={showToast} />}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── TELA DE LOGIN ────────────────────────────────────────────────────────────
+function Login({ users, onLogin }) {
+  const [pin, setPin]     = useState("");
+  const [err, setErr]     = useState("");
+
+  const tryLogin = (p) => {
+    const u = users.find(u=>u.pin===p);
+    if (u) { setErr(""); onLogin(u.role); }
+    else   { setErr("PIN incorreto. Tente novamente."); setPin(""); }
+  };
+  const addDigit = (d) => {
+    if (pin.length>=6) return;
+    const next = pin+d;
+    setPin(next);
+    if (next.length>=4) setTimeout(()=>tryLogin(next), 80);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
+      <style>{STYLE}</style>
+      <div style={{textAlign:"center",marginBottom:32}}>
+        <div style={{fontSize:56,marginBottom:8}}>⛽</div>
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:32,color:acc,letterSpacing:2}}>POSTO DIESEL</div>
+        <div style={{color:muted,letterSpacing:3,fontSize:12,textTransform:"uppercase",marginTop:4}}>Controle da Fazenda</div>
+      </div>
+      <div className="card" style={{width:"100%",maxWidth:320,textAlign:"center"}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontSize:16,color:muted,letterSpacing:1,textTransform:"uppercase",marginBottom:18}}>
+          Digite seu PIN
+        </div>
+        <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:20}}>
+          {[0,1,2,3].map(i=>(
+            <div key={i} style={{width:18,height:18,borderRadius:"50%",
+              background:i<pin.length?acc:bgIn,border:`2px solid ${i<pin.length?acc:bdr}`,transition:"all .15s"}} />
+          ))}
+        </div>
+        {err && <div style={{color:red,fontSize:13,marginBottom:14}}>{err}</div>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:10}}>
+          {[1,2,3,4,5,6,7,8,9].map(d=>(
+            <button key={d} onClick={()=>addDigit(String(d))}
+              style={{background:bgIn,border:`1.5px solid ${bdr}`,color:txt,borderRadius:10,padding:"16px 0",fontSize:22,fontFamily:"'Barlow Condensed'",fontWeight:700}}
+              onMouseDown={e=>e.currentTarget.style.background=bdr}
+              onMouseUp={e=>e.currentTarget.style.background=bgIn}>{d}</button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+          <button onClick={()=>setPin("")} style={{background:bgIn,border:`1.5px solid ${bdr}`,color:muted,borderRadius:10,padding:"16px 0",fontSize:14,fontFamily:"'Barlow Condensed'",fontWeight:700}}>LIMPAR</button>
+          <button onClick={()=>addDigit("0")} style={{background:bgIn,border:`1.5px solid ${bdr}`,color:txt,borderRadius:10,padding:"16px 0",fontSize:22,fontFamily:"'Barlow Condensed'",fontWeight:700}}>0</button>
+          <button onClick={()=>setPin(p=>p.slice(0,-1))} style={{background:bgIn,border:`1.5px solid ${bdr}`,color:muted,borderRadius:10,padding:"16px 0",fontSize:18,fontFamily:"'Barlow Condensed'"}}>⌫</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ABA ABASTECER ────────────────────────────────────────────────────────────
+function TabFuel({ data, upd, role, showToast }) {
+  const [form, setForm]       = useState({ operatorId:"", machineId:"", meter:"", liters:"" });
+  const [confirm, setConfirm] = useState(false);
+  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const mc      = data.machines.find(m=>m.id===Number(form.machineId));
+  const mt      = mc?.meterType||"hourmeter";
+  const lastM   = form.machineId
+    ? data.fuelings.filter(f=>f.machineId===Number(form.machineId)).sort((a,b)=>new Date(b.date)-new Date(a.date))[0]?.meter
+    : null;
+
+  const mOk  = form.meter && Number(form.meter)>0 && (!lastM||Number(form.meter)>=lastM);
+  const ok   = form.operatorId && form.machineId && mOk && form.liters && Number(form.liters)>0 && Number(form.liters)<=data.tankStock;
+
+  const submit = () => {
+    upd("fuelings",[...data.fuelings,{id:Date.now(),operatorId:Number(form.operatorId),machineId:Number(form.machineId),meter:Number(form.meter),liters:Number(form.liters),date:tsNow(),registeredBy:role}]);
+    upd("tankStock",data.tankStock-Number(form.liters));
+    setForm({operatorId:"",machineId:"",meter:"",liters:""});
+    setConfirm(false);
+    showToast(`Abastecimento registrado: ${form.liters}L`);
+  };
+
+  return (
+    <div>
+      {data.tankStock<=threshold(data) && <div className="alert" style={{marginBottom:18}}>⚠ Estoque CRÍTICO: {fmtNum(data.tankStock)} L restantes. Solicite reabastecimento!</div>}
+      <div className="sec">⛽ Registrar Abastecimento</div>
+      <div className="card" style={{maxWidth:520}}>
+        <div style={{display:"flex",flexDirection:"column",gap:18}}>
+
+          <div className="fg">
+            <div className="flbl">Operador</div>
+            <select value={form.operatorId} onChange={e=>sf("operatorId",e.target.value)} style={{fontSize:17}}>
+              <option value="">— Selecione o operador —</option>
+              {data.operators.filter(o=>o.active).map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+
+          <div className="fg">
+            <div className="flbl">Máquina / Equipamento</div>
+            <select value={form.machineId} onChange={e=>{sf("machineId",e.target.value);sf("meter","");}} style={{fontSize:17}}>
+              <option value="">— Selecione a máquina —</option>
+              {data.machines.filter(m=>m.active).map(m=>(
+                <option key={m.id} value={m.id}>{m.code} — {m.description} {m.meterType==="odometer"?"🚗":"⏱"}</option>
+              ))}
+            </select>
+          </div>
+
+          {mc && (
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <span className={`badge ${mt==="odometer"?"bp":"bb"}`}>{mt==="odometer"?"🚗 Odômetro":"⏱ Horímetro"}</span>
+              {lastM && (
+                <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between",padding:"6px 12px"}}>
+                  <span>Último registro:</span>
+                  <strong style={{color:blu}}>{fmtNum(lastM)} {mUnit(mt)}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="fg">
+            <div className="flbl">{mc ? mLbl(mt) : "Horímetro / Odômetro"}</div>
+            <input type="number" placeholder={lastM?`Mínimo: ${lastM}`:mt==="odometer"?"Ex: 46200":"Ex: 1350"}
+              value={form.meter} onChange={e=>sf("meter",e.target.value)}
+              style={{fontSize:22,fontWeight:700,textAlign:"center"}} />
+            {form.meter && lastM && Number(form.meter)<lastM && (
+              <div style={{color:red,fontSize:12,marginTop:4}}>⚠ Valor menor que o último registro ({fmtNum(lastM)} {mUnit(mt)})</div>
+            )}
+          </div>
+
+          <div className="fg">
+            <div className="flbl">Quantidade (Litros)</div>
+            <input type="number" placeholder="Ex: 45" value={form.liters} onChange={e=>sf("liters",e.target.value)}
+              style={{fontSize:22,fontWeight:700,textAlign:"center"}} />
+            {form.liters && Number(form.liters)>data.tankStock && (
+              <div style={{color:red,fontSize:12,marginTop:4}}>⚠ Quantidade maior que o estoque ({fmtNum(data.tankStock)} L)</div>
+            )}
+          </div>
+
+          <Btn full onClick={()=>setConfirm(true)} disabled={!ok} style={{padding:"16px",fontSize:18,marginTop:4}}>REGISTRAR ABASTECIMENTO</Btn>
+        </div>
+      </div>
+
+      {confirm && (
+        <Modal title="Confirmar Abastecimento" onClose={()=>setConfirm(false)}>
+          <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:24}}>
+            <Row label="Operador"     value={data.operators.find(o=>o.id===Number(form.operatorId))?.name} />
+            <Row label="Máquina"      value={`${mc?.code} — ${mc?.description}`} />
+            <Row label={mLbl(mt)}     value={`${fmtNum(form.meter)} ${mUnit(mt)}`} />
+            <Row label="Quantidade"   value={<strong style={{color:acc,fontSize:18}}>{form.liters} L</strong>} />
+            <Row label="Estoque após" value={`${fmtNum(data.tankStock-Number(form.liters))} L`} />
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn full onClick={()=>setConfirm(false)} color={bgIn} style={{color:txt}}>Cancelar</Btn>
+            <Btn full onClick={submit} color={grn} style={{color:"#000"}}>✔ CONFIRMAR</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── ABA PAINEL ───────────────────────────────────────────────────────────────
+function TabDash({ data }) {
+  const totSup = data.supplies.reduce((s,f)=>s+f.liters,0);
+  const last30 = data.fuelings.filter(f=>(Date.now()-new Date(f.date.replace(" ","T")).getTime())<30*86400000).reduce((s,f)=>s+f.liters,0);
+
+  const mcons = data.machines.map(m=>{
+    const mf = data.fuelings.filter(f=>f.machineId===m.id);
+    const tot = mf.reduce((s,f)=>s+f.liters,0);
+    const sr  = [...mf].sort((a,b)=>b.meter-a.meter);
+    const df  = sr.length>=2 ? sr[0].meter-sr[sr.length-1].meter : 0;
+    return {...m, tot, eff:effCalc(tot,df,m.meterType), cnt:mf.length};
+  }).filter(m=>m.tot>0).sort((a,b)=>b.tot-a.tot);
+
+  const recFuel = [...data.fuelings].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:24}}>
+      <div className="sec">📊 Painel Geral</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14}}>
+        <div className="sbox"><div className="slbl">Estoque Atual</div><div className="sval" style={{color:data.tankStock<=threshold(data)?red:blu}}>{fmtNum(data.tankStock)}<span className="sunit"> L</span></div></div>
+        <div className="sbox"><div className="slbl">Consumo 30 dias</div><div className="sval">{fmtNum(last30)}<span className="sunit"> L</span></div></div>
+        <div className="sbox"><div className="slbl">Total Abastecimentos</div><div className="sval">{data.fuelings.length}</div></div>
+        <div className="sbox"><div className="slbl">Total Recebido</div><div className="sval">{fmtNum(totSup)}<span className="sunit"> L</span></div></div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:20}}>
+        <div className="card">
+          <div className="sec" style={{fontSize:16}}>🚜 Consumo por Equipamento</div>
+          {mcons.length===0 ? <div style={{color:muted}}>Nenhum dado ainda.</div> : (
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {mcons.map(m=>(
+                <div key={m.id}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,alignItems:"center"}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{m.code}</span>
+                      <span className={`badge ${m.meterType==="odometer"?"bp":"bb"}`} style={{fontSize:10}}>{m.meterType==="odometer"?"ODO":"HOR"}</span>
+                    </div>
+                    <span style={{color:acc,fontWeight:600}}>{fmtNum(m.tot)} L</span>
+                  </div>
+                  <div style={{background:bgIn,borderRadius:6,height:8,overflow:"hidden"}}>
+                    <div style={{height:"100%",background:`linear-gradient(90deg,${accD},${acc})`,borderRadius:6,width:`${(m.tot/mcons[0].tot)*100}%`,transition:"width .6s"}} />
+                  </div>
+                  <div style={{fontSize:12,color:dim,marginTop:3}}>
+                    {m.cnt} abastecimentos{m.eff?` · ${m.eff} ${effLbl(m.meterType)} médio`:" · dados insuficientes"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="sec" style={{fontSize:16}}>🕐 Últimos Abastecimentos</div>
+          {recFuel.map(f=>{
+            const op=data.operators.find(o=>o.id===f.operatorId);
+            const mc=data.machines.find(m=>m.id===f.machineId);
+            return (
+              <div key={f.id} style={{padding:"10px 0",borderBottom:`1px solid ${bdr}33`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:16}}>{mc?.code} — {op?.name}</div>
+                  <div style={{fontSize:12,color:muted}}>{fmtDate(f.date)} · {fmtNum(f.meter)} {mUnit(mc?.meterType)}</div>
+                </div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:20,color:acc}}>{f.liters}L</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ABA ENTRADA DIESEL ───────────────────────────────────────────────────────
+function TabSupply({ data, upd, showToast }) {
+  const [form,setForm] = useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
+  const sf=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const ok   = form.supplier&&form.date&&form.liters&&Number(form.liters)>0&&form.pricePerLiter;
+  const total= (Number(form.liters)*Number(form.pricePerLiter))||0;
+
+  const submit = () => {
+    upd("supplies",[...data.supplies,{id:Date.now(),...form,liters:Number(form.liters),pricePerLiter:Number(form.pricePerLiter)}]);
+    upd("tankStock",Math.min(data.tankCapacity,data.tankStock+Number(form.liters)));
+    setForm({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
+    showToast(`Entrada registrada: ${form.liters}L adicionados ao estoque`);
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:24}}>
+      <div className="sec">🚚 Entrada de Diesel</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:20}}>
+        <div className="card">
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:18}}>REGISTRAR NOVA ENTRADA</div>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <Field label="Fornecedor"           value={form.supplier}     onChange={v=>sf("supplier",v)}     placeholder="Nome do fornecedor" />
+            <Field label="NF / Documento"       value={form.nf}           onChange={v=>sf("nf",v)}           placeholder="Número da nota fiscal" />
+            <Field label="Data de Recebimento"  type="date" value={form.date} onChange={v=>sf("date",v)} />
+            <Field label="Condição de Pagamento" value={form.paymentTerm} onChange={v=>sf("paymentTerm",v)} placeholder="Ex: 30 dias, À vista" />
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Field label="Preço/Litro (R$)" type="number" value={form.pricePerLiter} onChange={v=>sf("pricePerLiter",v)} placeholder="0,00" />
+              <Field label="Volume (L)"       type="number" value={form.liters}         onChange={v=>sf("liters",v)}        placeholder="0" />
+            </div>
+            {total>0 && <div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Total da nota:</span><strong style={{color:acc}}>{fmtCurr(total)}</strong></div>}
+            <Btn full onClick={submit} disabled={!ok} style={{marginTop:4}}>REGISTRAR ENTRADA</Btn>
+          </div>
+        </div>
+        <div className="card">
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:18}}>HISTÓRICO DE ENTRADAS</div>
+          <div style={{overflowX:"auto"}}>
+            <table>
+              <thead><tr><th>Data</th><th>Fornecedor</th><th>Volume</th><th>Preço</th><th>Total</th></tr></thead>
+              <tbody>
+                {[...data.supplies].reverse().map(s=>(
+                  <tr key={s.id}>
+                    <td style={{whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
+                    <td>{s.supplier}</td>
+                    <td><span style={{color:blu,fontWeight:600}}>{fmtNum(s.liters)} L</span></td>
+                    <td>{fmtCurr(s.pricePerLiter)}/L</td>
+                    <td style={{color:acc}}>{fmtCurr(s.liters*s.pricePerLiter)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ABA CADASTROS ────────────────────────────────────────────────────────────
+function TabReg({ data, upd, showToast }) {
+  const [sub,  setSub]  = useState("op");
+  const [modal,setModal]= useState(null);
+  const [form, setForm] = useState({});
+
+  const openAdd  = (t)    => { setModal({t,item:null}); setForm(t==="mc"?{meterType:"hourmeter"}:{}); };
+  const openEdit = (t,it) => { setModal({t,item:it}); setForm({...it}); };
+
+  const saveOp = () => {
+    if (!form.name?.trim()) return;
+    if (modal.item) upd("operators",data.operators.map(o=>o.id===modal.item.id?{...o,...form}:o));
+    else            upd("operators",[...data.operators,{id:Date.now(),name:form.name,active:true}]);
+    showToast(modal.item?"Operador atualizado":"Operador cadastrado"); setModal(null);
+  };
+  const saveMc = () => {
+    if (!form.code?.trim()) return;
+    if (modal.item) upd("machines",data.machines.map(m=>m.id===modal.item.id?{...m,...form}:m));
+    else            upd("machines",[...data.machines,{id:Date.now(),code:form.code,description:form.description||"",active:true,meterType:form.meterType||"hourmeter"}]);
+    showToast(modal.item?"Máquina atualizada":"Máquina cadastrada"); setModal(null);
+  };
+  const toggle = (type,id) => {
+    if (type==="op") upd("operators",data.operators.map(o=>o.id===id?{...o,active:!o.active}:o));
+    else             upd("machines", data.machines.map(m=>m.id===id?{...m,active:!m.active}:m));
+  };
+
+  return (
+    <div>
+      <div className="sec">📋 Cadastros</div>
+      <div style={{display:"flex",gap:10,marginBottom:20}}>
+        {[["op","👷 Operadores"],["mc","🚜 Máquinas/Veículos"]].map(([id,lbl])=>(
+          <button key={id} onClick={()=>setSub(id)}
+            style={{background:sub===id?acc:bgIn,color:sub===id?"#000":muted,border:"none",borderRadius:8,padding:"9px 20px",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15}}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {sub==="op" && (
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17}}>Operadores Cadastrados</span>
+            <Btn onClick={()=>openAdd("op")} style={{padding:"8px 16px",fontSize:14}}>+ Novo</Btn>
+          </div>
+          <table>
+            <thead><tr><th>Nome</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>{data.operators.map(o=>(
+              <tr key={o.id}>
+                <td style={{fontWeight:500}}>{o.name}</td>
+                <td><span className={`badge ${o.active?"bg":"br"}`}>{o.active?"Ativo":"Inativo"}</span></td>
+                <td><div style={{display:"flex",gap:8}}>
+                  <Btn onClick={()=>openEdit("op",o)} color={bgIn} style={{color:txt,padding:"5px 12px",fontSize:13}}>Editar</Btn>
+                  <Btn onClick={()=>toggle("op",o.id)} color={bgIn} style={{color:o.active?red:grn,padding:"5px 12px",fontSize:13}}>{o.active?"Desativar":"Ativar"}</Btn>
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+
+      {sub==="mc" && (
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17}}>Máquinas / Veículos</span>
+            <Btn onClick={()=>openAdd("mc")} style={{padding:"8px 16px",fontSize:14}}>+ Nova</Btn>
+          </div>
+          <table>
+            <thead><tr><th>Código</th><th>Descrição</th><th>Medidor</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>{data.machines.map(m=>(
+              <tr key={m.id}>
+                <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{m.code}</td>
+                <td>{m.description}</td>
+                <td><span className={`badge ${m.meterType==="odometer"?"bp":"bb"}`}>{m.meterType==="odometer"?"🚗 Odômetro":"⏱ Horímetro"}</span></td>
+                <td><span className={`badge ${m.active?"bg":"br"}`}>{m.active?"Ativa":"Inativa"}</span></td>
+                <td><div style={{display:"flex",gap:8}}>
+                  <Btn onClick={()=>openEdit("mc",m)} color={bgIn} style={{color:txt,padding:"5px 12px",fontSize:13}}>Editar</Btn>
+                  <Btn onClick={()=>toggle("mc",m.id)} color={bgIn} style={{color:m.active?red:grn,padding:"5px 12px",fontSize:13}}>{m.active?"Desativar":"Ativar"}</Btn>
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+
+      {modal && (
+        <Modal title={`${modal.item?"Editar":"Novo"} ${modal.t==="op"?"Operador":"Equipamento"}`} onClose={()=>setModal(null)}>
+          {modal.t==="op" ? (
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <Field label="Nome Completo" value={form.name||""} onChange={v=>setForm(f=>({...f,name:v}))} placeholder="Nome do operador" />
+              <div style={{display:"flex",gap:10,marginTop:6}}>
+                <Btn full onClick={()=>setModal(null)} color={bgIn} style={{color:txt}}>Cancelar</Btn>
+                <Btn full onClick={saveOp} disabled={!form.name?.trim()}>Salvar</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <Field label="Código"    value={form.code||""}        onChange={v=>setForm(f=>({...f,code:v}))}        placeholder="Ex: CAM-02" />
+              <Field label="Descrição" value={form.description||""} onChange={v=>setForm(f=>({...f,description:v}))} placeholder="Ex: Caminhão Ford F-350" />
+              <div className="fg">
+                <div className="flbl">Tipo de Medidor</div>
+                <div className="mtog">
+                  <button className={form.meterType!=="odometer"?"on":""} onClick={()=>setForm(f=>({...f,meterType:"hourmeter"}))}>⏱ Horímetro (horas)</button>
+                  <button className={form.meterType==="odometer"?"on":""}  onClick={()=>setForm(f=>({...f,meterType:"odometer"}))}>🚗 Odômetro (Km)</button>
+                </div>
+                <div style={{fontSize:12,color:dim,marginTop:6}}>
+                  {form.meterType==="odometer"?"Relatório em Km/L":"Relatório em L/h"}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:6}}>
+                <Btn full onClick={()=>setModal(null)} color={bgIn} style={{color:txt}}>Cancelar</Btn>
+                <Btn full onClick={saveMc} disabled={!form.code?.trim()}>Salvar</Btn>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── ABA RELATÓRIOS ───────────────────────────────────────────────────────────
+function TabReport({ data }) {
+  const [fil,setFil] = useState({machineId:"",operatorId:"",from:"",to:""});
+  const sf=(k,v)=>setFil(f=>({...f,[k]:v}));
+
+  const rows = data.fuelings.filter(f=>{
+    if (fil.machineId  && f.machineId !==Number(fil.machineId))  return false;
+    if (fil.operatorId && f.operatorId!==Number(fil.operatorId)) return false;
+    if (fil.from && f.date<fil.from)              return false;
+    if (fil.to   && f.date>fil.to+" 23:59")       return false;
+    return true;
+  }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  const totL    = rows.reduce((s,f)=>s+f.liters,0);
+  const avgP    = data.supplies.length>0
+    ? data.supplies.reduce((s,e)=>s+e.pricePerLiter*e.liters,0)/data.supplies.reduce((s,e)=>s+e.liters,0) : 0;
+
+  const mStats = data.machines.map(m=>{
+    const mf=rows.filter(f=>f.machineId===m.id);
+    if (mf.length<2) return null;
+    const tot=mf.reduce((s,f)=>s+f.liters,0);
+    const sr=[...mf].sort((a,b)=>b.meter-a.meter);
+    return {...m,tot,eff:effCalc(tot,sr[0].meter-sr[sr.length-1].meter,m.meterType),cnt:mf.length};
+  }).filter(Boolean);
+
+  return (
+    <div>
+      <div className="sec">📈 Relatórios de Consumo</div>
+      <div className="card" style={{marginBottom:20}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14}}>
+          <div className="fg"><div className="flbl">Máquina</div>
+            <select value={fil.machineId} onChange={e=>sf("machineId",e.target.value)}>
+              <option value="">Todas</option>
+              {data.machines.map(m=><option key={m.id} value={m.id}>{m.code}</option>)}
+            </select>
+          </div>
+          <div className="fg"><div className="flbl">Operador</div>
+            <select value={fil.operatorId} onChange={e=>sf("operatorId",e.target.value)}>
+              <option value="">Todos</option>
+              {data.operators.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+          <div className="fg"><div className="flbl">De</div><input type="date" value={fil.from} onChange={e=>sf("from",e.target.value)} /></div>
+          <div className="fg"><div className="flbl">Até</div><input type="date" value={fil.to}   onChange={e=>sf("to",  e.target.value)} /></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginTop:18}}>
+          <div className="sbox"><div className="slbl">Registros</div><div className="sval">{rows.length}</div></div>
+          <div className="sbox"><div className="slbl">Total Consumido</div><div className="sval">{fmtNum(totL)}<span className="sunit"> L</span></div></div>
+          <div className="sbox"><div className="slbl">Custo Estimado</div><div className="sval" style={{fontSize:20}}>{fmtCurr(totL*avgP)}</div></div>
+        </div>
+      </div>
+
+      {mStats.length>0 && (
+        <div className="card" style={{marginBottom:20}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:14}}>EFICIÊNCIA POR EQUIPAMENTO</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:12}}>
+            {mStats.map(m=>(
+              <div key={m.id} style={{background:bgIn,borderRadius:10,padding:"14px 16px",border:`1px solid ${bdr}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{m.code}</span>
+                  <span className={`badge ${m.meterType==="odometer"?"bp":"bb"}`} style={{fontSize:10}}>{m.meterType==="odometer"?"ODO":"HOR"}</span>
+                </div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800}}>
+                  {m.eff??"—"}<span style={{fontSize:14,color:muted,fontWeight:400}}> {effLbl(m.meterType)}</span>
+                </div>
+                <div style={{fontSize:12,color:dim,marginTop:4}}>{m.tot} L · {m.cnt} abastecimentos</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div style={{overflowX:"auto"}}>
+          <table>
+            <thead><tr><th>Data</th><th>Máquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>Custo Est.</th><th>Origem</th></tr></thead>
+            <tbody>
+              {rows.length===0
+                ? <tr><td colSpan="7" style={{textAlign:"center",color:muted,padding:30}}>Nenhum registro encontrado</td></tr>
+                : rows.map(f=>{
+                    const op=data.operators.find(o=>o.id===f.operatorId);
+                    const mc=data.machines.find(m=>m.id===f.machineId);
+                    return (
+                      <tr key={f.id}>
+                        <td style={{whiteSpace:"nowrap",fontSize:13}}>{fmtDate(f.date)}</td>
+                        <td><div style={{display:"flex",gap:6,alignItems:"center"}}>
+                          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{mc?.code}</span>
+                          <span className={`badge ${mc?.meterType==="odometer"?"bp":"bb"}`} style={{fontSize:10}}>{mc?.meterType==="odometer"?"ODO":"HOR"}</span>
+                        </div></td>
+                        <td>{op?.name}</td>
+                        <td>{fmtNum(f.meter)} {mUnit(mc?.meterType)}</td>
+                        <td><strong style={{color:blu}}>{f.liters} L</strong></td>
+                        <td style={{color:muted}}>{fmtCurr(f.liters*avgP)}</td>
+                        <td><span className={`badge ${f.registeredBy==="ADMINISTRADOR"?"by":f.registeredBy==="ESCRITORIO"?"bb":"bg"}`}>{f.registeredBy}</span></td>
+                      </tr>
+                    );
+                  })
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ABA AJUSTES ──────────────────────────────────────────────────────────────
+function TabAdj({ data, upd, showToast }) {
+  const [form,  setForm]  = useState({type:"correcao",liters:"",note:""});
+  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const [thr, setThr] = useState(String(data.lowStockThreshold??1000));
+  const saveThr = () => {
+    const v=Number(thr);
+    if (!v||v<0) return;
+    upd("lowStockThreshold",v);
+    showToast(`Nível crítico atualizado para ${fmtNum(v)} L`);
+  };
+
+  const applyAdj = () => {
+    const adj={id:Date.now(),date:tsNow(),type:form.type,liters:Number(form.liters),note:form.note,by:"ADMINISTRADOR"};
+    let ns=data.tankStock;
+    if (form.type==="inicial"||form.type==="adicao") ns=Math.min(data.tankCapacity,ns+Number(form.liters));
+    else if (form.type==="correcao") ns=Number(form.liters);
+    else if (form.type==="remocao")  ns=Math.max(0,ns-Number(form.liters));
+    upd("stockAdjustments",[...data.stockAdjustments,adj]);
+    upd("tankStock",ns);
+    setForm({type:"correcao",liters:"",note:""});
+    showToast("Ajuste de estoque aplicado");
+  };
+
+  const [eMod,setEMod]=useState(null);
+  const [eForm,setEForm]=useState({});
+  const openE=(f)=>{setEMod({item:f});setEForm({...f});};
+  const saveE=()=>{
+    upd("fuelings",data.fuelings.map(f=>f.id===eMod.item.id?{...f,liters:Number(eForm.liters),meter:Number(eForm.meter)}:f));
+    setEMod(null); showToast("Abastecimento atualizado");
+  };
+  const delE=(id)=>{
+    const f=data.fuelings.find(f=>f.id===id);
+    upd("fuelings",data.fuelings.filter(f=>f.id!==id));
+    upd("tankStock",data.tankStock+f.liters);
+    showToast("Abastecimento removido e estoque restaurado"); setEMod(null);
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:24}}>
+      <div className="sec">⚙️ Ajustes Administrativos</div>
+
+      {/* NÍVEL CRÍTICO */}
+      <div className="card" style={{borderColor:red+"88"}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:6,color:red}}>⚠ NÍVEL CRÍTICO DE ESTOQUE</div>
+        <div style={{fontSize:13,color:muted,marginBottom:16}}>
+          Quando o estoque cair abaixo deste valor, um alerta vermelho aparece para todos os usuários.
+        </div>
+        <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <div className="fg" style={{flex:1,minWidth:180}}>
+            <div className="flbl">Limite de Alerta (Litros)</div>
+            <input type="number" value={thr} onChange={e=>setThr(e.target.value)}
+              style={{fontSize:20,fontWeight:700,textAlign:"center",borderColor:red+"88"}} />
+          </div>
+          <Btn onClick={saveThr} color={red} disabled={!thr||Number(thr)<0} style={{whiteSpace:"nowrap"}}>SALVAR LIMITE</Btn>
+        </div>
+        <div style={{display:"flex",gap:16,marginTop:14,flexWrap:"wrap"}}>
+          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}>
+            <span>Limite atual:</span><strong style={{color:red}}>{fmtNum(data.lowStockThreshold??1000)} L</strong>
+          </div>
+          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}>
+            <span>Estoque atual:</span>
+            <strong style={{color:data.tankStock<=threshold(data)?red:blu}}>
+              {fmtNum(data.tankStock)} L {data.tankStock<=threshold(data)?"⚠":"✔"}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      {/* AJUSTE DE ESTOQUE */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:20}}>
+        <div className="card">
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:18}}>AJUSTE DE ESTOQUE</div>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div className="fg">
+              <div className="flbl">Tipo de Ajuste</div>
+              <select value={form.type} onChange={e=>sf("type",e.target.value)}>
+                <option value="correcao">Correção (definir valor exato)</option>
+                <option value="inicial">Estoque Inicial</option>
+                <option value="adicao">Adição manual</option>
+                <option value="remocao">Remoção manual</option>
+              </select>
+            </div>
+            <Field label={form.type==="correcao"||form.type==="inicial"?"Novo Valor do Estoque (L)":"Quantidade (L)"}
+              type="number" value={form.liters} onChange={v=>sf("liters",v)} placeholder="0" />
+            <Field label="Motivo / Observação" value={form.note} onChange={v=>sf("note",v)} placeholder="Descreva o motivo do ajuste" />
+            <div className="pill" style={{display:"flex",justifyContent:"space-between"}}>
+              <span>Estoque atual:</span><strong style={{color:blu}}>{fmtNum(data.tankStock)} L</strong>
+            </div>
+            <Btn full onClick={applyAdj} disabled={!form.liters||Number(form.liters)<0}>APLICAR AJUSTE</Btn>
+          </div>
+        </div>
+        <div className="card">
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:18}}>HISTÓRICO DE AJUSTES</div>
+          {data.stockAdjustments.length===0
+            ? <div style={{color:muted}}>Nenhum ajuste realizado.</div>
+            : [...data.stockAdjustments].reverse().map(a=>(
+                <div key={a.id} style={{padding:"10px 0",borderBottom:`1px solid ${bdr}33`}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span className="badge by">{a.type.toUpperCase()}</span>
+                    <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{fmtNum(a.liters)} L</span>
+                  </div>
+                  <div style={{fontSize:12,color:muted,marginTop:4}}>{a.note} · {fmtDate(a.date)}</div>
+                </div>
+              ))
+          }
+        </div>
+      </div>
+
+      {/* EDITAR ABASTECIMENTOS */}
+      <div className="card">
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,marginBottom:18}}>EDITAR ABASTECIMENTOS</div>
+        <div style={{overflowX:"auto"}}>
+          <table>
+            <thead><tr><th>Data</th><th>Máquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th></th></tr></thead>
+            <tbody>
+              {[...data.fuelings].reverse().map(f=>{
+                const op=data.operators.find(o=>o.id===f.operatorId);
+                const mc=data.machines.find(m=>m.id===f.machineId);
+                return (
+                  <tr key={f.id}>
+                    <td style={{fontSize:13}}>{fmtDate(f.date)}</td>
+                    <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:acc}}>{mc?.code}</td>
+                    <td>{op?.name}</td>
+                    <td>{fmtNum(f.meter)} {mUnit(mc?.meterType)}</td>
+                    <td><strong style={{color:blu}}>{f.liters} L</strong></td>
+                    <td><Btn onClick={()=>openE(f)} color={bgIn} style={{color:txt,padding:"5px 12px",fontSize:13}}>Editar</Btn></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {eMod && (()=>{
+        const mc=data.machines.find(m=>m.id===eMod.item.machineId);
+        return (
+          <Modal title="Editar Abastecimento" onClose={()=>setEMod(null)}>
+            <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:18}}>
+              <Field label={mLbl(mc?.meterType)} type="number" value={eForm.meter}  onChange={v=>setEForm(f=>({...f,meter:v}))} />
+              <Field label="Litros"              type="number" value={eForm.liters} onChange={v=>setEForm(f=>({...f,liters:v}))} />
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <Btn onClick={()=>delE(eMod.item.id)} color={red} style={{padding:"10px 16px",fontSize:14}}>🗑 Excluir</Btn>
+              <div style={{flex:1}} />
+              <Btn onClick={()=>setEMod(null)} color={bgIn} style={{color:txt}}>Cancelar</Btn>
+              <Btn onClick={saveE}>Salvar</Btn>
+            </div>
+          </Modal>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ─── INICIAR APP ──────────────────────────────────────────────────────────────
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
