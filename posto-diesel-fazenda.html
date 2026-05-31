@@ -29,13 +29,11 @@ const firebaseConfig = {
   messagingSenderId: "591049190246",
   appId: "1:591049190246:web:0a21a937f978ade855b6a7"
 };
-
 const fbApp = initializeApp(firebaseConfig, "postodiesel");
 const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 });
 const DOC_REF = doc(db, "posto-diesel", "dados");
-
 window._fbSave = async (data) => {
   try { await setDoc(DOC_REF, { payload: JSON.stringify(data) }); } catch(e) { console.error(e); }
 };
@@ -50,9 +48,9 @@ window.dispatchEvent(new Event("fb-ready"));
 const { useState, useEffect, useRef } = React;
 
 // ── DADOS INICIAIS ──────────────────────────────────────────────────────────
-const INIT = {
+var INIT = {
   operators: [
-    { id:1, name:"João Silva",   active:true },
+    { id:1, name:"Joao Silva",   active:true },
     { id:2, name:"Pedro Alves",  active:true },
     { id:3, name:"Carlos Souza", active:true },
   ],
@@ -61,95 +59,100 @@ const INIT = {
     { id:2, code:"TT-02",  desc:"Trator New Holland T7",       active:true, mt:"hourmeter" },
     { id:3, code:"COL-01", desc:"Colheitadeira Case IH 8250",  active:true, mt:"hourmeter" },
     { id:4, code:"ESC-01", desc:"Escavadeira Caterpillar 320", active:true, mt:"hourmeter" },
-    { id:5, code:"CAM-01", desc:"Caminhão Iveco 4x4",          active:true, mt:"odometer"  },
+    { id:5, code:"CAM-01", desc:"Caminhao Iveco 4x4",          active:true, mt:"odometer"  },
   ],
-  fuelings: [], supplies: [],
+  fuelings:[], supplies:[],
   tankCapacity:10000, tankStock:0, avgCostPerLiter:0, lowStockThreshold:1000,
-  stockAdjustments: [],
-  users: [
+  stockAdjustments:[],
+  users:[
     { id:1, role:"OPERADOR",      pin:"1111" },
     { id:2, role:"ESCRITORIO",    pin:"2222" },
     { id:3, role:"ADMINISTRADOR", pin:"1441" },
   ]
 };
 
+// ── CONSTANTES ──────────────────────────────────────────────────────────────
+var ADJ_PIN = "284284";
+
 // ── UTILS ───────────────────────────────────────────────────────────────────
-const pad = x => String(x).padStart(2,"0");
-const tsNow = () => { const n=new Date(); return `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())} ${pad(n.getHours())}:${pad(n.getMinutes())}`; };
-const fmtDate = (d) => {
-  if (!d) return "-";
-  try {
-    const s = String(d).trim();
-    let dt = /^\d{4}/.test(s) ? new Date(s.replace(" ","T")) : new Date(s);
-    return isNaN(dt) ? s.slice(0,10) : dt.toLocaleDateString("pt-BR");
-  } catch(e) { return String(d).slice(0,10); }
-};
-const fmtN = n => Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0});
-const fmtR = n => Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-const mLbl = mt => mt==="odometer" ? "Odômetro (Km)" : "Horímetro (horas)";
-const mUnit= mt => mt==="odometer" ? "Km" : "h";
-const eLbl = mt => mt==="odometer" ? "Km/L" : "L/h";
-const eCalc= (L,d,mt) => (!d||d<=0||L<=0) ? null : mt==="odometer" ? (d/L).toFixed(2) : (L/d).toFixed(2);
-const thr  = d => d.lowStockThreshold ?? 1000;
+function pad(x){ return String(x).padStart(2,"0"); }
+function tsNow(){
+  var n=new Date();
+  return n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate())+" "+pad(n.getHours())+":"+pad(n.getMinutes());
+}
+function fmtDate(d){
+  if(!d) return "-";
+  try{
+    var s=String(d).trim();
+    var dt=/^\d{4}/.test(s)?new Date(s.replace(" ","T")):new Date(s);
+    return isNaN(dt)?s.slice(0,10):dt.toLocaleDateString("pt-BR");
+  }catch(e){ return String(d).slice(0,10); }
+}
+function fmtN(n){ return Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0}); }
+function fmtR(n){ return Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); }
+function mLbl(mt){ return mt==="odometer"?"Odometro (Km)":"Horimetro (horas)"; }
+function mUnit(mt){ return mt==="odometer"?"Km":"h"; }
+function eLbl(mt){ return mt==="odometer"?"Km/L":"L/h"; }
+function eCalc(L,d,mt){
+  if(!d||d<=0||L<=0) return null;
+  return mt==="odometer"?(d/L).toFixed(2):(L/d).toFixed(2);
+}
+function thr(d){ return d.lowStockThreshold||1000; }
 
 // ── CORES ───────────────────────────────────────────────────────────────────
-const GN="#2a7a2a", GN2="#1d561d", GN3="#d4f0a0";
-const BG="#f0f4f0", CARD="#ffffff", INP="#e8f0e8", BDR="#b8d4b8";
-const TXT="#1a2e1a", MUT="#4a6e4a", DIM="#7a9a7a";
-const RED="#dc2626", BLU="#0369a1", PUR="#7c3aed", AMB="#854d0e";
+var GN="#2a7a2a", GN2="#1d561d", GN3="#d4f0a0";
+var BG="#f0f4f0", CARD="#ffffff", INP="#e8f0e8", BDR="#b8d4b8";
+var TXT="#1a2e1a", MUT="#4a6e4a", DIM="#7a9a7a";
+var RED="#dc2626", BLU="#0369a1", PUR="#7c3aed", AMB="#854d0e";
 
 // ── CSS ─────────────────────────────────────────────────────────────────────
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:${BG};color:${TXT};font-family:'Barlow',sans-serif;min-height:100vh}
-::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${BDR};border-radius:3px}
-input,select{background:#fff;border:2px solid ${BDR};color:${TXT};border-radius:8px;padding:10px 14px;
-  font-family:'Barlow',sans-serif;font-size:15px;width:100%;outline:none;transition:border .2s;box-shadow:0 1px 3px #0001}
-input:focus,select:focus{border-color:${GN};box-shadow:0 0 0 3px #2a7a2a22}
-input::placeholder{color:${DIM}}
-select option{background:#fff}
-button{cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:700;border:none;border-radius:8px;transition:all .15s}
-.bdg{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}
-.bg{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0}
-.br{background:#fee2e2;color:${RED};border:1px solid #fca5a5}
-.by{background:#fef9c3;color:${AMB};border:1px solid #fde047}
-.bb{background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd}
-.bp{background:#f3e8ff;color:${PUR};border:1px solid #d8b4fe}
-table{width:100%;border-collapse:collapse}
-th{text-align:left;padding:9px 12px;font-family:'Barlow Condensed',sans-serif;font-size:12px;
-   letter-spacing:1px;color:${MUT};border-bottom:2px solid ${BDR};text-transform:uppercase;background:#f7faf7}
-td{padding:10px 12px;border-bottom:1px solid ${BDR};font-size:14px;vertical-align:middle}
-tr:hover td{background:#f0f7f0}
-.tbar{width:100%;height:30px;background:#d1e8d1;border-radius:15px;overflow:hidden;border:2px solid ${BDR}}
-.tfill{height:100%;border-radius:15px;transition:width .8s;background:linear-gradient(90deg,#15803d,#22c55e)}
-.tfill.low{background:linear-gradient(90deg,${RED},#f87171)}
-.sec{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:700;letter-spacing:1.5px;
-     color:${GN};text-transform:uppercase;margin-bottom:16px}
-.card{background:${CARD};border:1.5px solid ${BDR};border-radius:12px;padding:20px;box-shadow:0 2px 8px #0000000d}
-.sbox{background:${CARD};border:1.5px solid ${BDR};border-radius:12px;padding:16px 20px;
-      display:flex;flex-direction:column;gap:3px;box-shadow:0 2px 8px #0000000d}
-.slbl{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:${MUT};font-family:'Barlow Condensed',sans-serif}
-.sval{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:${TXT}}
-.sunit{font-size:12px;color:${MUT};font-weight:400}
-.flbl{font-size:12px;color:${MUT};margin-bottom:5px;font-family:'Barlow Condensed',sans-serif;
-      text-transform:uppercase;font-weight:600;letter-spacing:.5px}
-.fg{display:flex;flex-direction:column}
-.pill{background:${INP};border:1.5px solid ${BDR};border-radius:8px;padding:9px 13px;font-size:14px;color:${MUT}}
-.alrt{background:#fef2f2;border:2px solid #fca5a5;border-radius:10px;padding:12px 16px;color:${RED};font-size:14px;font-weight:600}
-.mtog{display:flex;border:2px solid ${BDR};border-radius:8px;overflow:hidden;background:#fff}
-.mtog button{flex:1;padding:9px 8px;background:none;color:${MUT};font-size:14px;border:none;border-radius:0;font-family:'Barlow',sans-serif}
-.mtog button.on{background:${GN};color:#fff;font-weight:700}
-@keyframes fi{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.fi{animation:fi .3s ease forwards}
-@keyframes pu{0%,100%{opacity:1}50%{opacity:.4}}
-.pu{animation:pu 1.5s infinite}
-`;
+var CSS = [
+  "@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap');",
+  "*{box-sizing:border-box;margin:0;padding:0}",
+  "body{background:"+BG+";color:"+TXT+";font-family:'Barlow',sans-serif;min-height:100vh}",
+  "::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:"+BDR+";border-radius:3px}",
+  "input,select{background:#fff;border:2px solid "+BDR+";color:"+TXT+";border-radius:8px;padding:10px 14px;font-family:'Barlow',sans-serif;font-size:15px;width:100%;outline:none;transition:border .2s;box-shadow:0 1px 3px #0001}",
+  "input:focus,select:focus{border-color:"+GN+";box-shadow:0 0 0 3px #2a7a2a22}",
+  "input::placeholder{color:"+DIM+"}",
+  "select option{background:#fff}",
+  "button{cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:700;border:none;border-radius:8px;transition:all .15s}",
+  ".bdg{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}",
+  ".bg{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0}",
+  ".br{background:#fee2e2;color:"+RED+";border:1px solid #fca5a5}",
+  ".by{background:#fef9c3;color:"+AMB+";border:1px solid #fde047}",
+  ".bb{background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd}",
+  ".bp{background:#f3e8ff;color:"+PUR+";border:1px solid #d8b4fe}",
+  "table{width:100%;border-collapse:collapse}",
+  "th{text-align:left;padding:9px 12px;font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:1px;color:"+MUT+";border-bottom:2px solid "+BDR+";text-transform:uppercase;background:#f7faf7}",
+  "td{padding:10px 12px;border-bottom:1px solid "+BDR+";font-size:14px;vertical-align:middle}",
+  "tr:hover td{background:#f0f7f0}",
+  ".tbar{width:100%;height:30px;background:#d1e8d1;border-radius:15px;overflow:hidden;border:2px solid "+BDR+"}",
+  ".tfill{height:100%;border-radius:15px;transition:width .8s;background:linear-gradient(90deg,#15803d,#22c55e)}",
+  ".tfill.low{background:linear-gradient(90deg,"+RED+",#f87171)}",
+  ".sec{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:700;letter-spacing:1.5px;color:"+GN+";text-transform:uppercase;margin-bottom:16px}",
+  ".card{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:12px;padding:20px;box-shadow:0 2px 8px #0000000d}",
+  ".sbox{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:12px;padding:16px 20px;display:flex;flex-direction:column;gap:3px;box-shadow:0 2px 8px #0000000d}",
+  ".slbl{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:"+MUT+";font-family:'Barlow Condensed',sans-serif}",
+  ".sval{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;color:"+TXT+"}",
+  ".sunit{font-size:12px;color:"+MUT+";font-weight:400}",
+  ".flbl{font-size:12px;color:"+MUT+";margin-bottom:5px;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;font-weight:600;letter-spacing:.5px}",
+  ".fg{display:flex;flex-direction:column}",
+  ".pill{background:"+INP+";border:1.5px solid "+BDR+";border-radius:8px;padding:9px 13px;font-size:14px;color:"+MUT+"}",
+  ".alrt{background:#fef2f2;border:2px solid #fca5a5;border-radius:10px;padding:12px 16px;color:"+RED+";font-size:14px;font-weight:600}",
+  ".mtog{display:flex;border:2px solid "+BDR+";border-radius:8px;overflow:hidden;background:#fff}",
+  ".mtog button{flex:1;padding:9px 8px;background:none;color:"+MUT+";font-size:14px;border:none;border-radius:0;font-family:'Barlow',sans-serif}",
+  ".mtog button.on{background:"+GN+";color:#fff;font-weight:700}",
+  "@keyframes fi{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}",
+  ".fi{animation:fi .3s ease forwards}",
+  "@keyframes pu{0%,100%{opacity:1}50%{opacity:.4}}",
+  ".pu{animation:pu 1.5s infinite}"
+].join("\n");
 
-// ── LOGO ACF (SVG inline, sem atributos HTML) ────────────────────────────────
-function Logo({ size, white }) {
-  const c  = white ? "#ffffff" : GN;
-  const c2 = white ? GN3 : "#3a7a1a";
+// ── LOGO ACF ────────────────────────────────────────────────────────────────
+function Logo(props){
+  var size=props.size||40, white=props.white||false;
+  var c=white?"#ffffff":GN;
+  var c2=white?GN3:"#3a7a1a";
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
       <path d="M8 72 Q30 62 50 64 Q70 66 92 58" stroke={c2} strokeWidth={2} strokeLinecap="round" fillOpacity={0} opacity={0.7}/>
@@ -168,112 +171,133 @@ function Logo({ size, white }) {
 }
 
 // ── COMPONENTES BASE ────────────────────────────────────────────────────────
-const Btn = ({onClick,children,color=GN,style={},disabled=false,full=false}) => (
-  <button onClick={onClick} disabled={disabled} style={{
-    background:disabled?INP:color, color:disabled?DIM:"#fff",
-    padding:"10px 20px", fontSize:"15px", width:full?"100%":"auto",
-    opacity:disabled?.5:1, ...style
-  }}>{children}</button>
-);
+function Btn(props){
+  var onClick=props.onClick, children=props.children, color=props.color||GN;
+  var style=props.style||{}, disabled=props.disabled||false, full=props.full||false;
+  return (
+    <button onClick={onClick} disabled={disabled} style={Object.assign({
+      background:disabled?INP:color, color:disabled?DIM:"#fff",
+      padding:"10px 20px", fontSize:"15px", width:full?"100%":"auto",
+      opacity:disabled?0.5:1
+    },style)}>{children}</button>
+  );
+}
 
-const Modal = ({title,onClose,children}) => (
-  <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{
-    position:"fixed",inset:0,background:"#0007",zIndex:100,
-    display:"flex",alignItems:"center",justifyContent:"center",padding:16
-  }}>
-    <div className="card fi" style={{width:"100%",maxWidth:500,maxHeight:"90vh",overflowY:"auto"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <span style={{fontFamily:"'Barlow Condensed'",fontSize:18,fontWeight:700,color:GN,textTransform:"uppercase"}}>{title}</span>
-        <button onClick={onClose} style={{background:"none",color:MUT,fontSize:22,padding:"0 4px"}}>✕</button>
+function Modal(props){
+  var title=props.title, onClose=props.onClose, children=props.children;
+  return (
+    <div onClick={function(e){if(e.target===e.currentTarget)onClose();}} style={{
+      position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.45)",zIndex:100,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16
+    }}>
+      <div className="card fi" style={{width:"100%",maxWidth:500,maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+          <span style={{fontFamily:"'Barlow Condensed'",fontSize:18,fontWeight:700,color:GN,textTransform:"uppercase"}}>{title}</span>
+          <button onClick={onClose} style={{background:"none",color:MUT,fontSize:22,padding:"0 4px"}}>x</button>
+        </div>
+        {children}
       </div>
-      {children}
     </div>
-  </div>
-);
+  );
+}
 
-const Fld = ({label,value,onChange,placeholder,type="text"}) => (
-  <div className="fg">
-    <div className="flbl">{label}</div>
-    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
-  </div>
-);
+function Fld(props){
+  var label=props.label, value=props.value, onChange=props.onChange;
+  var placeholder=props.placeholder, type=props.type||"text";
+  return (
+    <div className="fg">
+      <div className="flbl">{label}</div>
+      <input type={type} value={value} onChange={function(e){onChange(e.target.value);}} placeholder={placeholder}/>
+    </div>
+  );
+}
 
-const Rw = ({label,value}) => (
-  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${BDR}44`}}>
-    <span style={{color:MUT,fontSize:14}}>{label}</span>
-    <span style={{fontWeight:600,fontSize:14}}>{value}</span>
-  </div>
-);
+function Rw(props){
+  return (
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid "+BDR+"44"}}>
+      <span style={{color:MUT,fontSize:14}}>{props.label}</span>
+      <span style={{fontWeight:600,fontSize:14}}>{props.value}</span>
+    </div>
+  );
+}
 
 // ── LOADING ─────────────────────────────────────────────────────────────────
-const Loading = () => (
-  <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:GN}}>
-    <style>{CSS}</style>
-    <Logo size={80} white={true}/>
-    <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800,color:"#e6b800",letterSpacing:2,marginTop:12}}>POSTO DIESEL</div>
-    <div style={{color:GN3,fontSize:13,marginTop:6}} className="pu">Conectando ao banco de dados...</div>
-  </div>
-);
+function Loading(){
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:GN}}>
+      <style>{CSS}</style>
+      <Logo size={80} white={true}/>
+      <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800,color:"#e6b800",letterSpacing:2,marginTop:12}}>POSTO DIESEL</div>
+      <div style={{color:GN3,fontSize:13,marginTop:6}} className="pu">Conectando ao banco de dados...</div>
+    </div>
+  );
+}
 
 // ── APP ─────────────────────────────────────────────────────────────────────
-export default function App() {
-  const [data,  setData]  = useState(null);
-  const [role,  setRole]  = useState(null);
-  const [tab,   setTab]   = useState(null);
-  const [toast, setToast] = useState(null);
-  const [ready, setReady] = useState(!!window._fbReady);
-  const tmr = useRef(null), sav = useRef(null);
+function App(){
+  var _data=useState(null), data=_data[0], setData=_data[1];
+  var _role=useState(null), role=_role[0], setRole=_role[1];
+  var _tab=useState(null), tab=_tab[0], setTab=_tab[1];
+  var _toast=useState(null), toast=_toast[0], setToast=_toast[1];
+  var _ready=useState(!!window._fbReady), ready=_ready[0], setReady=_ready[1];
+  var tmr=useRef(null), sav=useRef(null);
 
-  useEffect(()=>{
-    if (window._fbReady){setReady(true);return;}
-    const h=()=>setReady(true);
+  useEffect(function(){
+    if(window._fbReady){setReady(true);return;}
+    function h(){setReady(true);}
     window.addEventListener("fb-ready",h);
-    return()=>window.removeEventListener("fb-ready",h);
+    return function(){window.removeEventListener("fb-ready",h);};
   },[]);
 
-  useEffect(()=>{
-    if (!ready||!window._fbListen) return;
-    return window._fbListen(d=>setData(d||INIT));
+  useEffect(function(){
+    if(!ready||!window._fbListen) return;
+    return window._fbListen(function(d){setData(d||INIT);});
   },[ready]);
 
-  useEffect(()=>{
-    if (!data||!window._fbSave) return;
+  useEffect(function(){
+    if(!data||!window._fbSave) return;
     clearTimeout(sav.current);
-    sav.current=setTimeout(()=>window._fbSave(data),800);
+    sav.current=setTimeout(function(){window._fbSave(data);},800);
   },[data]);
 
-  const showToast=(msg,type="success")=>{
-    setToast({msg,type});
+  function showToast(msg,type){
+    type=type||"success";
+    setToast({msg:msg,type:type});
     clearTimeout(tmr.current);
-    tmr.current=setTimeout(()=>setToast(null),3200);
-  };
-  const upd=(k,v)=>setData(d=>({...d,[k]:v}));
+    tmr.current=setTimeout(function(){setToast(null);},3200);
+  }
+  function upd(k,v){setData(function(d){return Object.assign({},d,{[k]:v});});}
 
-  if (!data) return <Loading/>;
+  if(!data) return <Loading/>;
 
-  const pct=Math.max(0,Math.min(100,(data.tankStock/data.tankCapacity)*100));
-  const low=data.tankStock<=thr(data);
+  var pct=Math.max(0,Math.min(100,(data.tankStock/data.tankCapacity)*100));
+  var low=data.tankStock<=thr(data);
 
-  if (!role) return <Login users={data.users} onLogin={r=>{setRole(r);setTab(r==="OPERADOR"?"fuel":"dash");}} onGuest={()=>{setRole("OPERADOR");setTab("fuel");}}/>;
+  if(!role) return (
+    <Login
+      users={data.users}
+      onLogin={function(r){setRole(r);setTab(r==="OPERADOR"?"fuel":"dash");}}
+      onGuest={function(){setRole("OPERADOR");setTab("fuel");}}
+    />
+  );
 
-  const TABS={
-    OPERADOR:      [{id:"fuel",  lb:"Abastecer"}],
-    ESCRITORIO:    [{id:"dash",lb:"📊 Painel"},{id:"fuel",lb:"Abastecer"},{id:"sup",lb:"🚚 Entrada"},{id:"reg",lb:"📋 Cadastros"}],
-    ADMINISTRADOR: [{id:"dash",lb:"📊 Painel"},{id:"fuel",lb:"Abastecer"},{id:"sup",lb:"🚚 Entrada"},{id:"reg",lb:"📋 Cadastros"},{id:"rep",lb:"📈 Relatórios"},{id:"adj",lb:"⚙️ Ajustes"}],
+  var TABS={
+    OPERADOR:      [{id:"fuel",lb:"Abastecer"}],
+    ESCRITORIO:    [{id:"dash",lb:"Painel"},{id:"fuel",lb:"Abastecer"},{id:"sup",lb:"Entrada"},{id:"reg",lb:"Cadastros"}],
+    ADMINISTRADOR: [{id:"dash",lb:"Painel"},{id:"fuel",lb:"Abastecer"},{id:"sup",lb:"Entrada"},{id:"reg",lb:"Cadastros"},{id:"rep",lb:"Relatorios"},{id:"adj",lb:"Ajustes"}],
   }[role];
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <style>{CSS}</style>
 
-      {/* HEADER */}
-      <header style={{background:GN,borderBottom:`3px solid #e6b800`,padding:"10px 18px",
-        display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 2px 8px #0003"}}>
+      <header style={{background:GN,borderBottom:"3px solid #e6b800",padding:"10px 18px",
+        display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 2px 8px rgba(0,0,0,0.2)"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <Logo size={42} white={true}/>
           <div>
             <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:"#e6b800",letterSpacing:1}}>POSTO DIESEL</div>
-            <div style={{fontSize:10,color:GN3,letterSpacing:1.5,textTransform:"uppercase"}}>Agropecuária Córrego das Flores</div>
+            <div style={{fontSize:10,color:GN3,letterSpacing:1.5,textTransform:"uppercase"}}>Agropecuaria Corrego das Flores</div>
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -281,54 +305,55 @@ export default function App() {
             <div style={{fontSize:11,color:GN3}}>Logado como</div>
             <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:"#e6b800"}}>{role}</div>
           </div>
-          <Btn onClick={()=>setRole(null)} color={GN2} style={{padding:"6px 13px",fontSize:13}}>Sair</Btn>
+          <Btn onClick={function(){setRole(null);}} color={GN2} style={{padding:"6px 13px",fontSize:13}}>Sair</Btn>
         </div>
       </header>
 
-      {/* TANQUE */}
-      <div style={{background:"#e8f5e8",padding:"9px 18px",borderBottom:`2px solid ${BDR}`}}>
+      <div style={{background:"#e8f5e8",padding:"9px 18px",borderBottom:"2px solid "+BDR}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
           <span style={{fontFamily:"'Barlow Condensed'",fontSize:12,color:GN,textTransform:"uppercase",fontWeight:700,letterSpacing:1}}>
-            Estoque no Tanque {low&&<span className="pu" style={{color:RED}}>⚠ ESTOQUE BAIXO</span>}
+            Estoque no Tanque {low&&<span className="pu" style={{color:RED}}>ESTOQUE BAIXO</span>}
           </span>
           <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,color:low?RED:GN}}>
-            {fmtN(data.tankStock)} L <span style={{color:MUT,fontWeight:400}}>/ {fmtN(data.tankCapacity)} L</span>
+            {fmtN(data.tankStock)} L / {fmtN(data.tankCapacity)} L
           </span>
         </div>
-        <div className="tbar"><div className={"tfill"+(low?" low":"")} style={{width:`${pct}%`}}/></div>
+        <div className="tbar"><div className={"tfill"+(low?" low":"")} style={{width:pct+"%"}}/></div>
       </div>
 
-      {/* TABS */}
-      <nav style={{background:"#fff",padding:"0 18px",borderBottom:`2px solid ${BDR}`,display:"flex",overflowX:"auto",boxShadow:"0 2px 4px #0001"}}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{
-            background:"none",border:"none",borderBottom:tab===t.id?`3px solid ${GN}`:"3px solid transparent",
-            color:tab===t.id?GN:MUT,padding:"12px 14px",fontFamily:"'Barlow Condensed'",
-            fontWeight:700,fontSize:15,whiteSpace:"nowrap",transition:"all .15s",
-            display:"flex",alignItems:"center",gap:5
-          }}>
-            {t.id==="fuel" ? <><Logo size={17} white={false}/>{t.lb}</> : t.lb}
-          </button>
-        ))}
+      <nav style={{background:"#fff",padding:"0 18px",borderBottom:"2px solid "+BDR,display:"flex",overflowX:"auto",boxShadow:"0 2px 4px rgba(0,0,0,0.05)"}}>
+        {TABS.map(function(t){
+          return (
+            <button key={t.id} onClick={function(){setTab(t.id);}} style={{
+              background:"none",border:"none",borderBottom:tab===t.id?"3px solid "+GN:"3px solid transparent",
+              color:tab===t.id?GN:MUT,padding:"12px 14px",fontFamily:"'Barlow Condensed'",
+              fontWeight:700,fontSize:15,whiteSpace:"nowrap",transition:"all .15s",
+              display:"flex",alignItems:"center",gap:5
+            }}>
+              {t.id==="fuel"?<><Logo size={17} white={false}/> {t.lb}</>:t.lb}
+            </button>
+          );
+        })}
       </nav>
 
-      {/* MAIN */}
       <main style={{flex:1,padding:18,maxWidth:1100,margin:"0 auto",width:"100%"}}>
         {toast&&(
-          <div style={{background:toast.type==="success"?"#dcfce7":"#fee2e2",
-            border:`1.5px solid ${toast.type==="success"?"#16a34a":RED}`,
+          <div style={{
+            background:toast.type==="success"?"#dcfce7":"#fee2e2",
+            border:"1.5px solid "+(toast.type==="success"?"#16a34a":RED),
             borderRadius:10,padding:"11px 16px",marginBottom:14,
-            color:toast.type==="success"?"#15803d":RED,fontSize:14,fontWeight:600,display:"flex",alignItems:"center",gap:8}}>
-            {toast.type==="success"?"✔":"✖"} {toast.msg}
+            color:toast.type==="success"?"#15803d":RED,fontSize:14,fontWeight:600,display:"flex",alignItems:"center",gap:8
+          }}>
+            {toast.type==="success"?"OK: ":"ERRO: "}{toast.msg}
           </div>
         )}
         <div className="fi" key={tab}>
-          {tab==="fuel" && <Fuel  data={data} upd={upd} role={role} toast={showToast}/>}
-          {tab==="dash" && <Dash  data={data}/>}
-          {tab==="sup"  && <Sup   data={data} upd={upd} toast={showToast}/>}
-          {tab==="reg"  && <Reg   data={data} upd={upd} toast={showToast}/>}
-          {tab==="rep"  && <Rep   data={data}/>}
-          {tab==="adj"  && <Adj   data={data} upd={upd} toast={showToast}/>}
+          {tab==="fuel"&&<Fuel data={data} upd={upd} role={role} toast={showToast}/>}
+          {tab==="dash"&&<Dash data={data}/>}
+          {tab==="sup"&&<Sup data={data} upd={upd} toast={showToast}/>}
+          {tab==="reg"&&<Reg data={data} upd={upd} toast={showToast}/>}
+          {tab==="rep"&&<Rep data={data}/>}
+          {tab==="adj"&&<Adj data={data} upd={upd} toast={showToast}/>}
         </div>
       </main>
     </div>
@@ -336,121 +361,146 @@ export default function App() {
 }
 
 // ── LOGIN ────────────────────────────────────────────────────────────────────
-function Login({users,onLogin,onGuest}) {
-  const [pin,setPin]=useState(""), [err,setErr]=useState("");
-  const try_=(p)=>{const u=users.find(u=>u.pin===p);if(u){setErr("");onLogin(u.role);}else{setErr("PIN incorreto.");setPin("");}};
-  const add=(d)=>{if(pin.length>=6)return;const n=pin+d;setPin(n);if(n.length>=4)setTimeout(()=>try_(n),80);};
+function Login(props){
+  var users=props.users, onLogin=props.onLogin, onGuest=props.onGuest;
+  var _pin=useState(""), pin=_pin[0], setPin=_pin[1];
+  var _err=useState(""), err=_err[0], setErr=_err[1];
+
+  function tryLogin(p){
+    var u=null;
+    for(var i=0;i<users.length;i++){if(users[i].pin===p){u=users[i];break;}}
+    if(u){setErr("");onLogin(u.role);}
+    else{setErr("PIN incorreto.");setPin("");}
+  }
+  function add(d){
+    if(pin.length>=6) return;
+    var n=pin+d;
+    setPin(n);
+    if(n.length>=4) setTimeout(function(){tryLogin(n);},80);
+  }
+
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,background:GN}}>
       <style>{CSS}</style>
       <div style={{textAlign:"center",marginBottom:28}}>
         <Logo size={88} white={true}/>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:30,color:"#e6b800",letterSpacing:2,marginTop:8}}>POSTO DIESEL</div>
-        <div style={{color:GN3,fontSize:12,textTransform:"uppercase",letterSpacing:2,marginTop:3}}>Agropecuária Córrego das Flores</div>
+        <div style={{color:GN3,fontSize:12,textTransform:"uppercase",letterSpacing:2,marginTop:3}}>Agropecuaria Corrego das Flores</div>
       </div>
       <div className="card" style={{width:"100%",maxWidth:300,textAlign:"center"}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontSize:15,color:MUT,letterSpacing:1,textTransform:"uppercase",marginBottom:16}}>Digite seu PIN</div>
         <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:18}}>
-          {[0,1,2,3].map(i=>(
-            <div key={i} style={{width:18,height:18,borderRadius:"50%",
-              background:i<pin.length?GN:INP,border:`2px solid ${i<pin.length?GN:BDR}`,transition:"all .15s"}}/>
-          ))}
+          {[0,1,2,3].map(function(i){
+            return <div key={i} style={{width:18,height:18,borderRadius:"50%",background:i<pin.length?GN:INP,border:"2px solid "+(i<pin.length?GN:BDR),transition:"all .15s"}}/>;
+          })}
         </div>
         {err&&<div style={{color:RED,fontSize:13,marginBottom:12,fontWeight:600}}>{err}</div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:9}}>
-          {[1,2,3,4,5,6,7,8,9].map(d=>(
-            <button key={d} onClick={()=>add(String(d))}
-              style={{background:"#f0f7f0",border:`2px solid ${BDR}`,color:TXT,borderRadius:9,padding:"15px 0",
-                fontSize:22,fontFamily:"'Barlow Condensed'",fontWeight:800,boxShadow:"0 2px 4px #0001"}}
-              onMouseDown={e=>e.currentTarget.style.background=GN}
-              onMouseUp={e=>e.currentTarget.style.background="#f0f7f0"}>{d}</button>
-          ))}
+          {[1,2,3,4,5,6,7,8,9].map(function(d){
+            return (
+              <button key={d} onClick={function(){add(String(d));}}
+                style={{background:"#f0f7f0",border:"2px solid "+BDR,color:TXT,borderRadius:9,padding:"15px 0",fontSize:22,fontFamily:"'Barlow Condensed'",fontWeight:800,boxShadow:"0 2px 4px rgba(0,0,0,0.06)"}}
+                onMouseDown={function(e){e.currentTarget.style.background=GN;e.currentTarget.style.color="#fff";}}
+                onMouseUp={function(e){e.currentTarget.style.background="#f0f7f0";e.currentTarget.style.color=TXT;}}>
+                {d}
+              </button>
+            );
+          })}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>
-          <button onClick={()=>setPin("")} style={{background:"#fee2e2",border:`2px solid #fca5a5`,color:RED,borderRadius:9,padding:"15px 0",fontSize:13,fontFamily:"'Barlow Condensed'",fontWeight:700}}>LIMPAR</button>
-          <button onClick={()=>add("0")} style={{background:"#f0f7f0",border:`2px solid ${BDR}`,color:TXT,borderRadius:9,padding:"15px 0",fontSize:22,fontFamily:"'Barlow Condensed'",fontWeight:800,boxShadow:"0 2px 4px #0001"}}>0</button>
-          <button onClick={()=>setPin(p=>p.slice(0,-1))} style={{background:"#fef9c3",border:`2px solid #fde047`,color:AMB,borderRadius:9,padding:"15px 0",fontSize:18,fontFamily:"'Barlow Condensed'"}}>⌫</button>
+          <button onClick={function(){setPin("");}} style={{background:"#fee2e2",border:"2px solid #fca5a5",color:RED,borderRadius:9,padding:"15px 0",fontSize:13,fontFamily:"'Barlow Condensed'",fontWeight:700}}>LIMPAR</button>
+          <button onClick={function(){add("0");}} style={{background:"#f0f7f0",border:"2px solid "+BDR,color:TXT,borderRadius:9,padding:"15px 0",fontSize:22,fontFamily:"'Barlow Condensed'",fontWeight:800,boxShadow:"0 2px 4px rgba(0,0,0,0.06)"}}>0</button>
+          <button onClick={function(){setPin(function(p){return p.slice(0,-1);});}} style={{background:"#fef9c3",border:"2px solid #fde047",color:AMB,borderRadius:9,padding:"15px 0",fontSize:18,fontFamily:"'Barlow Condensed'"}}>&lt;</button>
         </div>
       </div>
-      <button onClick={onGuest} style={{marginTop:18,background:"none",border:`2px solid ${GN3}`,color:GN3,borderRadius:9,padding:"12px 24px",fontSize:15,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5,cursor:"pointer",width:"100%",maxWidth:300}}>
-        ⛽ ABASTECER SEM SENHA
+      <button onClick={onGuest} style={{marginTop:18,background:"none",border:"2px solid "+GN3,color:GN3,borderRadius:9,padding:"12px 24px",fontSize:15,fontFamily:"'Barlow Condensed'",fontWeight:700,cursor:"pointer",width:"100%",maxWidth:300}}>
+        ABASTECER SEM SENHA
       </button>
     </div>
   );
 }
 
 // ── ABASTECER ────────────────────────────────────────────────────────────────
-function Fuel({data,upd,role,toast}) {
-  const [f,setF]=useState({op:"",mc:"",meter:"",lts:""});
-  const [conf,setConf]=useState(false);
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
-  const mc=data.machines.find(m=>m.id===Number(f.mc));
-  const mt=mc?.mt||"hourmeter";
-  const lastM=f.mc?data.fuelings.filter(x=>x.machineId===Number(f.mc)).sort((a,b)=>new Date(b.date)-new Date(a.date))[0]?.meter:null;
-  const mOk=f.meter&&Number(f.meter)>0&&(!lastM||Number(f.meter)>=lastM);
-  const ok=f.op&&f.mc&&mOk&&f.lts&&Number(f.lts)>0&&Number(f.lts)<=data.tankStock;
+function Fuel(props){
+  var data=props.data, upd=props.upd, role=props.role, toast=props.toast;
+  var _f=useState({op:"",mc:"",meter:"",lts:""}), f=_f[0], setF=_f[1];
+  var _conf=useState(false), conf=_conf[0], setConf=_conf[1];
 
-  const submit=()=>{
-    upd("fuelings",[...data.fuelings,{id:Date.now(),operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:Number(f.lts),date:tsNow(),registeredBy:role}]);
+  function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
+
+  var mc=null;
+  for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===Number(f.mc)){mc=data.machines[i];break;}}
+  var mt=mc?mc.mt:"hourmeter";
+  var lastM=null;
+  if(f.mc){
+    var mf=data.fuelings.filter(function(x){return x.machineId===Number(f.mc);}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+    if(mf.length>0) lastM=mf[0].meter;
+  }
+  var mOk=f.meter&&Number(f.meter)>0&&(!lastM||Number(f.meter)>=lastM);
+  var ok=f.op&&f.mc&&mOk&&f.lts&&Number(f.lts)>0&&Number(f.lts)<=data.tankStock;
+
+  function submit(){
+    upd("fuelings",data.fuelings.concat([{id:Date.now(),operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:Number(f.lts),date:tsNow(),registeredBy:role}]));
     upd("tankStock",data.tankStock-Number(f.lts));
-    setF({op:"",mc:"",meter:"",lts:""});setConf(false);
-    toast(`Abastecimento registrado: ${f.lts}L`);
-  };
+    setF({op:"",mc:"",meter:"",lts:""});
+    setConf(false);
+    toast("Abastecimento registrado: "+f.lts+"L");
+  }
 
   return (
     <div>
-      {data.tankStock<=thr(data)&&<div className="alrt" style={{marginBottom:16}}>⚠ Estoque CRÍTICO: {fmtN(data.tankStock)} L. Solicite reabastecimento!</div>}
+      {data.tankStock<=thr(data)&&<div className="alrt" style={{marginBottom:16}}>ESTOQUE CRITICO: {fmtN(data.tankStock)} L. Solicite reabastecimento!</div>}
       <div className="sec" style={{display:"flex",alignItems:"center",gap:8}}><Logo size={22} white={false}/> Registrar Abastecimento</div>
       <div className="card" style={{maxWidth:500}}>
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           <div className="fg">
             <div className="flbl">Operador</div>
-            <select value={f.op} onChange={e=>sf("op",e.target.value)} style={{fontSize:16}}>
-              <option value="">— Selecione o operador —</option>
-              {data.operators.filter(o=>o.active).map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+            <select value={f.op} onChange={function(e){sf("op",e.target.value);}} style={{fontSize:16}}>
+              <option value="">Selecione o operador</option>
+              {data.operators.filter(function(o){return o.active;}).map(function(o){return <option key={o.id} value={o.id}>{o.name}</option>;})}
             </select>
           </div>
           <div className="fg">
-            <div className="flbl">Máquina / Equipamento</div>
-            <select value={f.mc} onChange={e=>{sf("mc",e.target.value);sf("meter","");}} style={{fontSize:16}}>
-              <option value="">— Selecione a máquina —</option>
-              {data.machines.filter(m=>m.active).map(m=><option key={m.id} value={m.id}>{m.code} — {m.desc}</option>)}
+            <div className="flbl">Maquina / Equipamento</div>
+            <select value={f.mc} onChange={function(e){sf("mc",e.target.value);sf("meter","");}} style={{fontSize:16}}>
+              <option value="">Selecione a maquina</option>
+              {data.machines.filter(function(m){return m.active;}).map(function(m){return <option key={m.id} value={m.id}>{m.code} - {m.desc}</option>;})}
             </select>
           </div>
           {mc&&(
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-              <span className={"bdg "+(mt==="odometer"?"bp":"bb")}>{mt==="odometer"?"🚗 Odômetro":"⏱ Horímetro"}</span>
+              <span className={"bdg "+(mt==="odometer"?"bp":"bb")}>{mt==="odometer"?"Odometro":"Horimetro"}</span>
               {lastM&&<div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between",padding:"6px 12px"}}>
-                <span>Último registro:</span><strong style={{color:BLU}}>{fmtN(lastM)} {mUnit(mt)}</strong>
+                <span>Ultimo registro:</span><strong style={{color:BLU}}>{fmtN(lastM)} {mUnit(mt)}</strong>
               </div>}
             </div>
           )}
           <div className="fg">
-            <div className="flbl">{mc?mLbl(mt):"Horímetro / Odômetro"}</div>
-            <input type="number" placeholder={lastM?`Mínimo: ${lastM}`:mt==="odometer"?"Ex: 46200":"Ex: 1350"}
-              value={f.meter} onChange={e=>sf("meter",e.target.value)} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
-            {f.meter&&lastM&&Number(f.meter)<lastM&&<div style={{color:RED,fontSize:12,marginTop:4}}>⚠ Valor menor que o último registro ({fmtN(lastM)} {mUnit(mt)})</div>}
+            <div className="flbl">{mc?mLbl(mt):"Horimetro / Odometro"}</div>
+            <input type="number" placeholder={lastM?"Minimo: "+lastM:mt==="odometer"?"Ex: 46200":"Ex: 1350"}
+              value={f.meter} onChange={function(e){sf("meter",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
+            {f.meter&&lastM&&Number(f.meter)<lastM&&<div style={{color:RED,fontSize:12,marginTop:4}}>Valor menor que o ultimo registro ({fmtN(lastM)} {mUnit(mt)})</div>}
           </div>
           <div className="fg">
             <div className="flbl">Quantidade (Litros)</div>
-            <input type="number" placeholder="Ex: 45" value={f.lts} onChange={e=>sf("lts",e.target.value)} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
-            {f.lts&&Number(f.lts)>data.tankStock&&<div style={{color:RED,fontSize:12,marginTop:4}}>⚠ Quantidade maior que o estoque ({fmtN(data.tankStock)} L)</div>}
+            <input type="number" placeholder="Ex: 45" value={f.lts} onChange={function(e){sf("lts",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
+            {f.lts&&Number(f.lts)>data.tankStock&&<div style={{color:RED,fontSize:12,marginTop:4}}>Quantidade maior que o estoque ({fmtN(data.tankStock)} L)</div>}
           </div>
-          <Btn full onClick={()=>setConf(true)} disabled={!ok} style={{padding:"15px",fontSize:17,marginTop:4}}>REGISTRAR ABASTECIMENTO</Btn>
+          <Btn full={true} onClick={function(){setConf(true);}} disabled={!ok} style={{padding:"15px",fontSize:17,marginTop:4}}>REGISTRAR ABASTECIMENTO</Btn>
         </div>
       </div>
       {conf&&(
-        <Modal title="Confirmar Abastecimento" onClose={()=>setConf(false)}>
+        <Modal title="Confirmar Abastecimento" onClose={function(){setConf(false);}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
-            <Rw label="Operador" value={data.operators.find(o=>o.id===Number(f.op))?.name}/>
-            <Rw label="Máquina" value={`${mc?.code} — ${mc?.desc}`}/>
-            <Rw label={mLbl(mt)} value={`${fmtN(f.meter)} ${mUnit(mt)}`}/>
-            <Rw label="Quantidade" value={<strong style={{color:"#e6b800",fontSize:18}}>{f.lts} L</strong>}/>
-            <Rw label="Estoque após" value={`${fmtN(data.tankStock-Number(f.lts))} L`}/>
+            <Rw label="Operador" value={function(){var o=data.operators.filter(function(o){return o.id===Number(f.op);})[0];return o?o.name:""}()}/>
+            <Rw label="Maquina" value={mc?mc.code+" - "+mc.desc:""}/>
+            <Rw label={mLbl(mt)} value={fmtN(f.meter)+" "+mUnit(mt)}/>
+            <Rw label="Quantidade" value={f.lts+" L"}/>
+            <Rw label="Estoque apos" value={fmtN(data.tankStock-Number(f.lts))+" L"}/>
           </div>
           <div style={{display:"flex",gap:10}}>
-            <Btn full onClick={()=>setConf(false)} color={INP} style={{color:TXT}}>Cancelar</Btn>
-            <Btn full onClick={submit} color="#16a34a">✔ CONFIRMAR</Btn>
+            <Btn full={true} onClick={function(){setConf(false);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn full={true} onClick={submit} color="#16a34a">CONFIRMAR</Btn>
           </div>
         </Modal>
       )}
@@ -459,62 +509,66 @@ function Fuel({data,upd,role,toast}) {
 }
 
 // ── PAINEL ───────────────────────────────────────────────────────────────────
-function Dash({data}) {
-  const totS=data.supplies.reduce((s,x)=>s+x.liters,0);
-  const l30=data.fuelings.filter(x=>(Date.now()-new Date(x.date.replace(" ","T")).getTime())<30*86400000).reduce((s,x)=>s+x.liters,0);
-  const mc=data.machines.map(m=>{
-    const mf=data.fuelings.filter(x=>x.machineId===m.id);
-    const tot=mf.reduce((s,x)=>s+x.liters,0);
-    const sr=[...mf].sort((a,b)=>b.meter-a.meter);
-    const df=sr.length>=2?sr[0].meter-sr[sr.length-1].meter:0;
-    return {...m,tot,eff:eCalc(tot,df,m.mt),cnt:mf.length};
-  }).filter(m=>m.tot>0).sort((a,b)=>b.tot-a.tot);
-  const rec=[...data.fuelings].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
-  const avg=data.avgCostPerLiter||0;
+function Dash(props){
+  var data=props.data;
+  var totS=data.supplies.reduce(function(s,x){return s+x.liters;},0);
+  var l30=data.fuelings.filter(function(x){return (Date.now()-new Date(x.date.replace(" ","T")).getTime())<30*86400000;}).reduce(function(s,x){return s+x.liters;},0);
+  var mc=data.machines.map(function(m){
+    var mf=data.fuelings.filter(function(x){return x.machineId===m.id;});
+    var tot=mf.reduce(function(s,x){return s+x.liters;},0);
+    var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
+    var df=sr.length>=2?sr[0].meter-sr[sr.length-1].meter:0;
+    return Object.assign({},m,{tot:tot,eff:eCalc(tot,df,m.mt),cnt:mf.length});
+  }).filter(function(m){return m.tot>0;}).sort(function(a,b){return b.tot-a.tot;});
+  var rec=data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).slice(0,5);
+  var avg=data.avgCostPerLiter||0;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:22}}>
-      <div className="sec">📊 Painel Geral</div>
+      <div className="sec">Painel Geral</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
         <div className="sbox"><div className="slbl">Estoque Atual</div><div className="sval" style={{color:data.tankStock<=thr(data)?RED:GN}}>{fmtN(data.tankStock)}<span className="sunit"> L</span></div></div>
         <div className="sbox"><div className="slbl">Consumo 30 dias</div><div className="sval">{fmtN(l30)}<span className="sunit"> L</span></div></div>
-        {avg>0&&<div className="sbox"><div className="slbl">Custo Médio/L</div><div className="sval" style={{fontSize:20,color:AMB}}>{fmtR(avg)}</div></div>}
+        {avg>0&&<div className="sbox"><div className="slbl">Custo Medio/L</div><div className="sval" style={{fontSize:20,color:AMB}}>{fmtR(avg)}</div></div>}
         {avg>0&&<div className="sbox"><div className="slbl">Valor em Estoque</div><div className="sval" style={{fontSize:18,color:AMB}}>{fmtR(data.tankStock*avg)}</div></div>}
         <div className="sbox"><div className="slbl">Abastecimentos</div><div className="sval">{data.fuelings.length}</div></div>
         <div className="sbox"><div className="slbl">Total Recebido</div><div className="sval">{fmtN(totS)}<span className="sunit"> L</span></div></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
         <div className="card">
-          <div className="sec" style={{fontSize:16}}>🚜 Consumo por Equipamento</div>
+          <div className="sec" style={{fontSize:16}}>Consumo por Equipamento</div>
           {mc.length===0?<div style={{color:MUT}}>Nenhum dado ainda.</div>:(
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              {mc.map(m=>(
-                <div key={m.id}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
-                    <div style={{display:"flex",gap:7,alignItems:"center"}}>
-                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{m.code}</span>
-                      <span className={"bdg "+(m.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{m.mt==="odometer"?"ODO":"HOR"}</span>
+              {mc.map(function(m){
+                return (
+                  <div key={m.id}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
+                      <div style={{display:"flex",gap:7,alignItems:"center"}}>
+                        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{m.code}</span>
+                        <span className={"bdg "+(m.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{m.mt==="odometer"?"ODO":"HOR"}</span>
+                      </div>
+                      <span style={{color:GN,fontWeight:600}}>{fmtN(m.tot)} L</span>
                     </div>
-                    <span style={{color:GN,fontWeight:600}}>{fmtN(m.tot)} L</span>
+                    <div style={{background:INP,borderRadius:5,height:7,overflow:"hidden"}}>
+                      <div style={{height:"100%",background:"linear-gradient(90deg,"+GN2+","+GN+")",borderRadius:5,width:(m.tot/mc[0].tot*100)+"%",transition:"width .6s"}}/>
+                    </div>
+                    <div style={{fontSize:11,color:DIM,marginTop:3}}>{m.cnt} abastec.{m.eff?" - "+m.eff+" "+eLbl(m.mt)+" medio":""}</div>
                   </div>
-                  <div style={{background:INP,borderRadius:5,height:7,overflow:"hidden"}}>
-                    <div style={{height:"100%",background:`linear-gradient(90deg,${GN2},${GN})`,borderRadius:5,width:`${(m.tot/mc[0].tot)*100}%`,transition:"width .6s"}}/>
-                  </div>
-                  <div style={{fontSize:11,color:DIM,marginTop:3}}>{m.cnt} abastec.{m.eff?` · ${m.eff} ${eLbl(m.mt)} médio`:""}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
         <div className="card">
-          <div className="sec" style={{fontSize:16}}>🕐 Últimos Abastecimentos</div>
-          {rec.length===0?<div style={{color:MUT}}>Nenhum registro ainda.</div>:rec.map(x=>{
-            const op=data.operators.find(o=>o.id===x.operatorId);
-            const mc=data.machines.find(m=>m.id===x.machineId);
+          <div className="sec" style={{fontSize:16}}>Ultimos Abastecimentos</div>
+          {rec.length===0?<div style={{color:MUT}}>Nenhum registro ainda.</div>:rec.map(function(x){
+            var op=null,mc2=null;
+            for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
+            for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc2=data.machines[i];break;}}
             return (
-              <div key={x.id} style={{padding:"9px 0",borderBottom:`1px solid ${BDR}44`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc?.code} — {op?.name}</div>
-                  <div style={{fontSize:12,color:MUT}}>{fmtDate(x.date)} · {fmtN(x.meter)} {mUnit(mc?.mt)}</div>
+                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"} - {op?op.name:"-"}</div>
+                  <div style={{fontSize:12,color:MUT}}>{fmtDate(x.date)} - {fmtN(x.meter)} {mUnit(mc2?mc2.mt:"hourmeter")}</div>
                 </div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
               </div>
@@ -527,48 +581,58 @@ function Dash({data}) {
 }
 
 // ── ENTRADA DIESEL ───────────────────────────────────────────────────────────
-function Sup({data,upd,toast}) {
-  const [f,setF]=useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
-  const ok=f.supplier&&f.date&&f.liters&&Number(f.liters)>0&&f.pricePerLiter;
-  const tot=(Number(f.liters)*Number(f.pricePerLiter))||0;
-  const submit=()=>{
-    const nL=Number(f.liters),nP=Number(f.pricePerLiter);
-    const cur=data.tankStock,ca=data.avgCostPerLiter||0;
-    const nA=cur+nL>0?((cur*ca)+(nL*nP))/(cur+nL):nP;
-    upd("supplies",[...data.supplies,{id:Date.now(),...f,liters:nL,pricePerLiter:nP}]);
+function Sup(props){
+  var data=props.data, upd=props.upd, toast=props.toast;
+  var _f=useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""}), f=_f[0], setF=_f[1];
+  function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
+  var ok=f.supplier&&f.date&&f.liters&&Number(f.liters)>0&&f.pricePerLiter;
+  var tot=(Number(f.liters)*Number(f.pricePerLiter))||0;
+
+  function submit(){
+    var nL=Number(f.liters), nP=Number(f.pricePerLiter);
+    var cur=data.tankStock, ca=data.avgCostPerLiter||0;
+    var nA=cur+nL>0?((cur*ca)+(nL*nP))/(cur+nL):nP;
+    upd("supplies",data.supplies.concat([Object.assign({id:Date.now()},f,{liters:nL,pricePerLiter:nP})]));
     upd("tankStock",Math.min(data.tankCapacity,cur+nL));
     upd("avgCostPerLiter",Math.round(nA*10000)/10000);
     setF({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
-    toast(`Entrada: ${f.liters}L — Custo médio: ${fmtR(nA)}/L`);
-  };
-  const previewAvg=f.liters&&f.pricePerLiter?((data.tankStock*(data.avgCostPerLiter||0))+(Number(f.liters)*Number(f.pricePerLiter)))/(data.tankStock+Number(f.liters)):0;
+    toast("Entrada: "+f.liters+"L - Custo medio: "+fmtR(nA)+"/L");
+  }
+
+  var previewAvg=0;
+  if(f.liters&&f.pricePerLiter&&data.tankStock+Number(f.liters)>0){
+    previewAvg=((data.tankStock*(data.avgCostPerLiter||0))+(Number(f.liters)*Number(f.pricePerLiter)))/(data.tankStock+Number(f.liters));
+  }
+
+  // Price chart data
+  var pts=data.supplies.slice().sort(function(a,b){return a.date>b.date?1:-1;});
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      <div className="sec">🚚 Entrada de Diesel</div>
+      <div className="sec">Entrada de Diesel</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
         <div className="card">
           <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:16}}>REGISTRAR NOVA ENTRADA</div>
           <div style={{display:"flex",flexDirection:"column",gap:13}}>
-            <Fld label="Fornecedor" value={f.supplier} onChange={v=>sf("supplier",v)} placeholder="Nome do fornecedor"/>
-            <Fld label="NF / Documento" value={f.nf} onChange={v=>sf("nf",v)} placeholder="Número da nota fiscal"/>
-            <Fld label="Data de Recebimento" type="date" value={f.date} onChange={v=>sf("date",v)}/>
-            <Fld label="Condição de Pagamento" value={f.paymentTerm} onChange={v=>sf("paymentTerm",v)} placeholder="Ex: 30 dias"/>
+            <Fld label="Fornecedor" value={f.supplier} onChange={function(v){sf("supplier",v);}} placeholder="Nome do fornecedor"/>
+            <Fld label="NF / Documento" value={f.nf} onChange={function(v){sf("nf",v);}} placeholder="Numero da nota fiscal"/>
+            <Fld label="Data de Recebimento" type="date" value={f.date} onChange={function(v){sf("date",v);}}/>
+            <Fld label="Condicao de Pagamento" value={f.paymentTerm} onChange={function(v){sf("paymentTerm",v);}} placeholder="Ex: 30 dias"/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <Fld label="Preço/Litro (R$)" type="number" value={f.pricePerLiter} onChange={v=>sf("pricePerLiter",v)} placeholder="0,00"/>
-              <Fld label="Volume (L)" type="number" value={f.liters} onChange={v=>sf("liters",v)} placeholder="0"/>
+              <Fld label="Preco/Litro (R$)" type="number" value={f.pricePerLiter} onChange={function(v){sf("pricePerLiter",v);}} placeholder="0,00"/>
+              <Fld label="Volume (L)" type="number" value={f.liters} onChange={function(v){sf("liters",v);}} placeholder="0"/>
             </div>
             {tot>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Total da nota:</span><strong style={{color:GN}}>{fmtR(tot)}</strong></div>}
-            {previewAvg>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between",background:"#fef9c3",borderColor:"#fde047"}}><span>Novo custo médio estimado:</span><strong style={{color:AMB}}>{fmtR(previewAvg)}/L</strong></div>}
-            <Btn full onClick={submit} disabled={!ok} style={{marginTop:4}}>REGISTRAR ENTRADA</Btn>
+            {previewAvg>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between",background:"#fef9c3",borderColor:"#fde047"}}><span>Novo custo medio estimado:</span><strong style={{color:AMB}}>{fmtR(previewAvg)}/L</strong></div>}
+            <Btn full={true} onClick={submit} disabled={!ok} style={{marginTop:4}}>REGISTRAR ENTRADA</Btn>
           </div>
         </div>
         <div className="card">
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:12}}>HISTÓRICO DE ENTRADAS</div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:12}}>HISTORICO DE ENTRADAS</div>
           {data.avgCostPerLiter>0&&(
-            <div style={{background:"#fef9c3",border:`2px solid #fde047`,borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{background:"#fef9c3",border:"2px solid #fde047",borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
-                <div style={{fontSize:11,color:AMB,textTransform:"uppercase",letterSpacing:.5,fontWeight:700}}>Custo Médio Ponderado Atual</div>
+                <div style={{fontSize:11,color:AMB,textTransform:"uppercase",letterSpacing:.5,fontWeight:700}}>Custo Medio Ponderado Atual</div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800,color:AMB}}>{fmtR(data.avgCostPerLiter)}/L</div>
               </div>
               <div style={{textAlign:"right",fontSize:12,color:AMB}}>
@@ -579,120 +643,195 @@ function Sup({data,upd,toast}) {
           )}
           <div style={{overflowX:"auto"}}>
             <table>
-              <thead><tr><th>Data</th><th>Fornecedor</th><th>Volume</th><th>Preço/L</th><th>Total</th></tr></thead>
-              <tbody>{[...data.supplies].reverse().map(s=>(
-                <tr key={s.id}>
-                  <td style={{whiteSpace:"nowrap",fontSize:13}}>{fmtDate(s.date)}</td>
-                  <td>{s.supplier}</td>
-                  <td><span style={{color:GN,fontWeight:600}}>{fmtN(s.liters)} L</span></td>
-                  <td style={{color:GN,fontWeight:600}}>{fmtR(s.pricePerLiter)}</td>
-                  <td style={{color:AMB}}>{fmtR(s.liters*s.pricePerLiter)}</td>
-                </tr>
-              ))}</tbody>
+              <thead><tr><th>Data</th><th>Fornecedor</th><th>Volume</th><th>Preco/L</th><th>Total</th></tr></thead>
+              <tbody>{data.supplies.slice().reverse().map(function(s){
+                return (
+                  <tr key={s.id}>
+                    <td style={{whiteSpace:"nowrap",fontSize:13}}>{fmtDate(s.date)}</td>
+                    <td>{s.supplier}</td>
+                    <td><span style={{color:GN,fontWeight:600}}>{fmtN(s.liters)} L</span></td>
+                    <td style={{color:GN,fontWeight:600}}>{fmtR(s.pricePerLiter)}</td>
+                    <td style={{color:AMB}}>{fmtR(s.liters*s.pricePerLiter)}</td>
+                  </tr>
+                );
+              })}</tbody>
             </table>
           </div>
         </div>
+      </div>
+
+      {pts.length>=2&&(
+        <div className="card">
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:12}}>HISTORICO DE PRECO DO DIESEL (R$/L)</div>
+          <PriceChart pts={pts}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── GRÁFICO DE PREÇO ─────────────────────────────────────────────────────────
+function PriceChart(props){
+  var pts=props.pts;
+  var prices=pts.map(function(s){return s.pricePerLiter;});
+  var mn=Math.min.apply(null,prices);
+  var mx=Math.max.apply(null,prices);
+  var range=mx-mn||0.1;
+  var W=460,H=110,PL=36,PR=10,PT=10,PB=24;
+  var iW=W-PL-PR, iH=H-PT-PB;
+  var n=pts.length;
+
+  function cx(i){ return PL+i*(iW/(n-1)); }
+  function cy(v){ return PT+iH-(((v-mn)/range)*iH); }
+
+  // Build polyline points string without template literals
+  var polyPts="";
+  for(var i=0;i<n;i++){
+    if(i>0) polyPts+=" ";
+    polyPts+=cx(i)+","+cy(pts[i].pricePerLiter);
+  }
+
+  // Build fill polygon
+  var fillPts=polyPts+" "+cx(n-1)+","+(PT+iH)+" "+PL+","+(PT+iH);
+
+  var gridVals=[mn, mn+range*0.5, mx];
+
+  return (
+    <div style={{overflowX:"auto"}}>
+      <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",minWidth:260,height:"auto",display:"block"}}>
+        {gridVals.map(function(v,i){
+          var yy=cy(v);
+          return (
+            <g key={i}>
+              <line x1={PL} y1={yy} x2={W-PR} y2={yy} stroke={BDR} strokeWidth={0.8}/>
+              <text x={PL-3} y={yy+3} textAnchor="end" fontSize={8} fill={MUT}>{v.toFixed(2)}</text>
+            </g>
+          );
+        })}
+        <polygon points={fillPts} fill={GN} fillOpacity={0.08}/>
+        <polyline points={polyPts} fill="none" stroke={GN} strokeWidth={2}/>
+        {pts.map(function(s,i){
+          var lbl=s.date?s.date.slice(5,10):"";
+          return (
+            <g key={i}>
+              <circle cx={cx(i)} cy={cy(s.pricePerLiter)} r={3.5} fill={GN} stroke="#fff" strokeWidth={1.5}/>
+              <text x={cx(i)} y={H-PB+12} textAnchor="middle" fontSize={7} fill={MUT}>{lbl}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{display:"flex",gap:16,marginTop:8,flexWrap:"wrap",fontSize:12,color:MUT}}>
+        <span>Min: <strong style={{color:GN}}>{fmtR(mn)}/L</strong></span>
+        <span>Max: <strong style={{color:RED}}>{fmtR(mx)}/L</strong></span>
+        <span>Ultimo: <strong style={{color:AMB}}>{fmtR(prices[prices.length-1])}/L</strong></span>
       </div>
     </div>
   );
 }
 
 // ── CADASTROS ────────────────────────────────────────────────────────────────
-function Reg({data,upd,toast}) {
-  const [sub,setSub]=useState("op");
-  const [modal,setModal]=useState(null);
-  const [form,setForm]=useState({});
-  const openA=(t)=>{setModal({t,item:null});setForm(t==="mc"?{mt:"hourmeter"}:{});};
-  const openE=(t,it)=>{setModal({t,item:it});setForm({...it});};
-  const saveOp=()=>{
-    if(!form.name?.trim())return;
-    if(modal.item)upd("operators",data.operators.map(o=>o.id===modal.item.id?{...o,...form}:o));
-    else upd("operators",[...data.operators,{id:Date.now(),name:form.name,active:true}]);
+function Reg(props){
+  var data=props.data, upd=props.upd, toast=props.toast;
+  var _sub=useState("op"), sub=_sub[0], setSub=_sub[1];
+  var _modal=useState(null), modal=_modal[0], setModal=_modal[1];
+  var _form=useState({}), form=_form[0], setForm=_form[1];
+
+  function openA(t){setModal({t:t,item:null});setForm(t==="mc"?{mt:"hourmeter"}:{});}
+  function openE(t,it){setModal({t:t,item:it});setForm(Object.assign({},it));}
+  function saveOp(){
+    if(!form.name||!form.name.trim()) return;
+    if(modal.item) upd("operators",data.operators.map(function(o){return o.id===modal.item.id?Object.assign({},o,form):o;}));
+    else upd("operators",data.operators.concat([{id:Date.now(),name:form.name,active:true}]));
     toast(modal.item?"Operador atualizado":"Operador cadastrado");setModal(null);
-  };
-  const saveMc=()=>{
-    if(!form.code?.trim())return;
-    if(modal.item)upd("machines",data.machines.map(m=>m.id===modal.item.id?{...m,...form}:m));
-    else upd("machines",[...data.machines,{id:Date.now(),code:form.code,desc:form.desc||"",active:true,mt:form.mt||"hourmeter"}]);
-    toast(modal.item?"Máquina atualizada":"Máquina cadastrada");setModal(null);
-  };
-  const tog=(t,id)=>{
-    if(t==="op")upd("operators",data.operators.map(o=>o.id===id?{...o,active:!o.active}:o));
-    else upd("machines",data.machines.map(m=>m.id===id?{...m,active:!m.active}:m));
-  };
+  }
+  function saveMc(){
+    if(!form.code||!form.code.trim()) return;
+    if(modal.item) upd("machines",data.machines.map(function(m){return m.id===modal.item.id?Object.assign({},m,form):m;}));
+    else upd("machines",data.machines.concat([{id:Date.now(),code:form.code,desc:form.desc||"",active:true,mt:form.mt||"hourmeter"}]));
+    toast(modal.item?"Maquina atualizada":"Maquina cadastrada");setModal(null);
+  }
+  function tog(t,id){
+    if(t==="op") upd("operators",data.operators.map(function(o){return o.id===id?Object.assign({},o,{active:!o.active}):o;}));
+    else upd("machines",data.machines.map(function(m){return m.id===id?Object.assign({},m,{active:!m.active}):m;}));
+  }
+
   return (
     <div>
-      <div className="sec">📋 Cadastros</div>
+      <div className="sec">Cadastros</div>
       <div style={{display:"flex",gap:10,marginBottom:18}}>
-        {[["op","👷 Operadores"],["mc","🚜 Máquinas/Veículos"]].map(([id,lb])=>(
-          <button key={id} onClick={()=>setSub(id)} style={{background:sub===id?GN:INP,color:sub===id?"#fff":MUT,border:"none",borderRadius:8,padding:"8px 18px",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:14}}>{lb}</button>
-        ))}
+        {[["op","Operadores"],["mc","Maquinas/Veiculos"]].map(function(pair){
+          return <button key={pair[0]} onClick={function(){setSub(pair[0]);}} style={{background:sub===pair[0]?GN:INP,color:sub===pair[0]?"#fff":MUT,border:"none",borderRadius:8,padding:"8px 18px",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:14}}>{pair[1]}</button>;
+        })}
       </div>
       {sub==="op"&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16}}>Operadores</span>
-            <Btn onClick={()=>openA("op")} style={{padding:"7px 14px",fontSize:13}}>+ Novo</Btn>
+            <Btn onClick={function(){openA("op");}} style={{padding:"7px 14px",fontSize:13}}>+ Novo</Btn>
           </div>
-          <table><thead><tr><th>Nome</th><th>Status</th><th>Ações</th></tr></thead>
-          <tbody>{data.operators.map(o=>(
-            <tr key={o.id}>
-              <td style={{fontWeight:500}}>{o.name}</td>
-              <td><span className={"bdg "+(o.active?"bg":"br")}>{o.active?"Ativo":"Inativo"}</span></td>
-              <td><div style={{display:"flex",gap:7}}>
-                <Btn onClick={()=>openE("op",o)} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
-                <Btn onClick={()=>tog("op",o.id)} color={INP} style={{color:o.active?RED:"#16a34a",padding:"4px 11px",fontSize:13}}>{o.active?"Desativar":"Ativar"}</Btn>
-              </div></td>
-            </tr>
-          ))}</tbody></table>
+          <table><thead><tr><th>Nome</th><th>Status</th><th>Acoes</th></tr></thead>
+          <tbody>{data.operators.map(function(o){
+            return (
+              <tr key={o.id}>
+                <td style={{fontWeight:500}}>{o.name}</td>
+                <td><span className={"bdg "+(o.active?"bg":"br")}>{o.active?"Ativo":"Inativo"}</span></td>
+                <td><div style={{display:"flex",gap:7}}>
+                  <Btn onClick={function(){openE("op",o);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
+                  <Btn onClick={function(){tog("op",o.id);}} color={INP} style={{color:o.active?RED:"#16a34a",padding:"4px 11px",fontSize:13}}>{o.active?"Desativar":"Ativar"}</Btn>
+                </div></td>
+              </tr>
+            );
+          })}</tbody></table>
         </div>
       )}
       {sub==="mc"&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16}}>Máquinas / Veículos</span>
-            <Btn onClick={()=>openA("mc")} style={{padding:"7px 14px",fontSize:13}}>+ Nova</Btn>
+            <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16}}>Maquinas / Veiculos</span>
+            <Btn onClick={function(){openA("mc");}} style={{padding:"7px 14px",fontSize:13}}>+ Nova</Btn>
           </div>
-          <table><thead><tr><th>Código</th><th>Descrição</th><th>Medidor</th><th>Status</th><th>Ações</th></tr></thead>
-          <tbody>{data.machines.map(m=>(
-            <tr key={m.id}>
-              <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{m.code}</td>
-              <td>{m.desc}</td>
-              <td><span className={"bdg "+(m.mt==="odometer"?"bp":"bb")}>{m.mt==="odometer"?"🚗 Odômetro":"⏱ Horímetro"}</span></td>
-              <td><span className={"bdg "+(m.active?"bg":"br")}>{m.active?"Ativa":"Inativa"}</span></td>
-              <td><div style={{display:"flex",gap:7}}>
-                <Btn onClick={()=>openE("mc",m)} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
-                <Btn onClick={()=>tog("mc",m.id)} color={INP} style={{color:m.active?RED:"#16a34a",padding:"4px 11px",fontSize:13}}>{m.active?"Desativar":"Ativar"}</Btn>
-              </div></td>
-            </tr>
-          ))}</tbody></table>
+          <table><thead><tr><th>Codigo</th><th>Descricao</th><th>Medidor</th><th>Status</th><th>Acoes</th></tr></thead>
+          <tbody>{data.machines.map(function(m){
+            return (
+              <tr key={m.id}>
+                <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{m.code}</td>
+                <td>{m.desc}</td>
+                <td><span className={"bdg "+(m.mt==="odometer"?"bp":"bb")}>{m.mt==="odometer"?"Odometro":"Horimetro"}</span></td>
+                <td><span className={"bdg "+(m.active?"bg":"br")}>{m.active?"Ativa":"Inativa"}</span></td>
+                <td><div style={{display:"flex",gap:7}}>
+                  <Btn onClick={function(){openE("mc",m);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
+                  <Btn onClick={function(){tog("mc",m.id);}} color={INP} style={{color:m.active?RED:"#16a34a",padding:"4px 11px",fontSize:13}}>{m.active?"Desativar":"Ativar"}</Btn>
+                </div></td>
+              </tr>
+            );
+          })}</tbody></table>
         </div>
       )}
       {modal&&(
-        <Modal title={`${modal.item?"Editar":"Novo"} ${modal.t==="op"?"Operador":"Equipamento"}`} onClose={()=>setModal(null)}>
+        <Modal title={(modal.item?"Editar ":"Novo ")+(modal.t==="op"?"Operador":"Equipamento")} onClose={function(){setModal(null);}}>
           {modal.t==="op"?(
             <div style={{display:"flex",flexDirection:"column",gap:13}}>
-              <Fld label="Nome Completo" value={form.name||""} onChange={v=>setForm(p=>({...p,name:v}))} placeholder="Nome do operador"/>
+              <Fld label="Nome Completo" value={form.name||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{name:v});});}} placeholder="Nome do operador"/>
               <div style={{display:"flex",gap:10,marginTop:5}}>
-                <Btn full onClick={()=>setModal(null)} color={INP} style={{color:TXT}}>Cancelar</Btn>
-                <Btn full onClick={saveOp} disabled={!form.name?.trim()}>Salvar</Btn>
+                <Btn full={true} onClick={function(){setModal(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+                <Btn full={true} onClick={saveOp} disabled={!form.name||!form.name.trim()}>Salvar</Btn>
               </div>
             </div>
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:13}}>
-              <Fld label="Código" value={form.code||""} onChange={v=>setForm(p=>({...p,code:v}))} placeholder="Ex: CAM-02"/>
-              <Fld label="Descrição" value={form.desc||""} onChange={v=>setForm(p=>({...p,desc:v}))} placeholder="Ex: Caminhão Ford F-350"/>
+              <Fld label="Codigo" value={form.code||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{code:v});});}} placeholder="Ex: CAM-02"/>
+              <Fld label="Descricao" value={form.desc||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder="Ex: Caminhao Ford F-350"/>
               <div className="fg">
                 <div className="flbl">Tipo de Medidor</div>
                 <div className="mtog">
-                  <button className={form.mt!=="odometer"?"on":""} onClick={()=>setForm(p=>({...p,mt:"hourmeter"}))}>⏱ Horímetro (horas)</button>
-                  <button className={form.mt==="odometer"?"on":""}  onClick={()=>setForm(p=>({...p,mt:"odometer"}))}>🚗 Odômetro (Km)</button>
+                  <button className={form.mt!=="odometer"?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"hourmeter"});});}}>Horimetro (horas)</button>
+                  <button className={form.mt==="odometer"?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"odometer"});});}}>Odometro (Km)</button>
                 </div>
-                <div style={{fontSize:12,color:DIM,marginTop:5}}>{form.mt==="odometer"?"Relatório em Km/L":"Relatório em L/h"}</div>
+                <div style={{fontSize:12,color:DIM,marginTop:5}}>{form.mt==="odometer"?"Relatorio em Km/L":"Relatorio em L/h"}</div>
               </div>
               <div style={{display:"flex",gap:10,marginTop:5}}>
-                <Btn full onClick={()=>setModal(null)} color={INP} style={{color:TXT}}>Cancelar</Btn>
-                <Btn full onClick={saveMc} disabled={!form.code?.trim()}>Salvar</Btn>
+                <Btn full={true} onClick={function(){setModal(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+                <Btn full={true} onClick={saveMc} disabled={!form.code||!form.code.trim()}>Salvar</Btn>
               </div>
             </div>
           )}
@@ -702,159 +841,120 @@ function Reg({data,upd,toast}) {
   );
 }
 
-// ── GRÁFICO PREÇO DIESEL ────────────────────────────────────────────────────
-function PriceChart({supplies}) {
-  if (!supplies||supplies.length<2) return null;
-  const pts=[...supplies].sort((a,b)=>a.date>b.date?1:-1);
-  const prices=pts.map(s=>s.pricePerLiter);
-  const mn=Math.min(...prices), mx=Math.max(...prices);
-  const range=mx-mn||0.1;
-  const W=500,H=120,PL=8,PR=8,PT=14,PB=28;
-  const iW=W-PL-PR, iH=H-PT-PB;
-  const x=(i)=>PL+i*(iW/(pts.length-1));
-  const y=(v)=>PT+iH-(((v-mn)/range)*iH);
-  const pathD=pts.map((s,i)=>`${i===0?"M":"L"}${x(i)} ${y(s.pricePerLiter)}`).join(" ");
-  return (
-    <div className="card" style={{marginTop:18}}>
-      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:12}}>📊 HISTÓRICO DE PREÇO DO DIESEL</div>
-      <div style={{overflowX:"auto"}}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:280,height:"auto",display:"block"}}>
-          <defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={GN} stopOpacity={0.15}/><stop offset="100%" stopColor={GN} stopOpacity={0}/></linearGradient></defs>
-          {[0,.25,.5,.75,1].map(t=>{
-            const v=mn+t*range;
-            const yy=y(v);
-            return <g key={t}><line x1={PL} y1={yy} x2={W-PR} y2={yy} stroke={BDR} strokeWidth={0.5}/><text x={PL-2} y={yy+3.5} textAnchor="end" fontSize={8} fill={MUT}>{v.toFixed(2)}</text></g>;
-          })}
-          <path d={pathD+" L"+x(pts.length-1)+" "+(H-PB)+" L"+PL+" "+(H-PB)+" Z"} fill="url(#pg)"/>
-          <path d={pathD} fill="none" stroke={GN} strokeWidth={2} strokeLinejoin="round"/>
-          {pts.map((s,i)=>(
-            <g key={i}>
-              <circle cx={x(i)} cy={y(s.pricePerLiter)} r={3.5} fill={GN} stroke="#fff" strokeWidth={1.5}/>
-              <text x={x(i)} y={H-PB+11} textAnchor="middle" fontSize={7} fill={MUT}>{s.date?s.date.slice(5,10):""}</text>
-            </g>
-          ))}
-          <text x={W/2} y={H-2} textAnchor="middle" fontSize={8} fill={MUT}>Data da compra</text>
-          <text x={4} y={PT-4} fontSize={8} fill={AMB} fontWeight="bold">R$/L</text>
-        </svg>
-      </div>
-      <div style={{display:"flex",gap:16,marginTop:10,flexWrap:"wrap"}}>
-        <div style={{fontSize:12,color:MUT}}>Mín: <strong style={{color:GN}}>{fmtR(mn)}/L</strong></div>
-        <div style={{fontSize:12,color:MUT}}>Máx: <strong style={{color:RED}}>{fmtR(mx)}/L</strong></div>
-        <div style={{fontSize:12,color:MUT}}>Atual médio: <strong style={{color:AMB}}>{fmtR(prices[prices.length-1])}/L</strong></div>
-        <div style={{fontSize:12,color:MUT}}>{pts.length} compras registradas</div>
-      </div>
-      <PriceChart supplies={data.supplies}/>
-    </div>
-  );
-}
-
 // ── RELATÓRIOS ───────────────────────────────────────────────────────────────
-function Rep({data}) {
-  const exportCSV=()=>{
-    const avg=data.avgCostPerLiter||0;
-    const rows=[...data.fuelings].sort((a,b)=>new Date(b.date)-new Date(a.date));
-    const header="Data;Maquina;Descricao;Operador;Medidor;Unidade;Litros;Custo Unit;Custo Total;Registrado Por";
-    const lines=rows.map(x=>{
-      const op=data.operators.find(o=>o.id===x.operatorId);
-      const mc=data.machines.find(m=>m.id===x.machineId);
-      const cu=avg>0?avg.toFixed(4):"";
-      const ct=avg>0?(x.liters*avg).toFixed(2):"";
-      return [x.date,mc?.code||"",mc?.desc||"",op?.name||"",x.meter,mUnit(mc?.mt),x.liters,cu,ct,x.registeredBy].join(";");
+function Rep(props){
+  var data=props.data;
+  var _fil=useState({mc:"",op:"",from:"",to:""}), fil=_fil[0], setFil=_fil[1];
+  function sf(k,v){setFil(function(p){return Object.assign({},p,{[k]:v});});}
+
+  var rows=data.fuelings.filter(function(x){
+    if(fil.mc&&x.machineId!==Number(fil.mc)) return false;
+    if(fil.op&&x.operatorId!==Number(fil.op)) return false;
+    if(fil.from&&x.date<fil.from) return false;
+    if(fil.to&&x.date>fil.to+" 23:59") return false;
+    return true;
+  }).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+
+  var totL=rows.reduce(function(s,x){return s+x.liters;},0);
+  var avg=data.avgCostPerLiter||0;
+
+  var mSt=data.machines.map(function(m){
+    var mf=rows.filter(function(x){return x.machineId===m.id;});
+    if(mf.length<2) return null;
+    var tot=mf.reduce(function(s,x){return s+x.liters;},0);
+    var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
+    return Object.assign({},m,{tot:tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,m.mt),cnt:mf.length});
+  }).filter(function(x){return x!==null;});
+
+  function exportCSV(){
+    var header="Data;Maquina;Descricao;Operador;Medidor;Unidade;Litros;CustoUnit;CustoTotal;RegistradoPor";
+    var lines=rows.map(function(x){
+      var op=null, mc=null;
+      for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
+      for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
+      var cu=avg>0?avg.toFixed(4):"";
+      var ct=avg>0?(x.liters*avg).toFixed(2):"";
+      return [x.date,mc?mc.code:"",mc?mc.desc:"",op?op.name:"",x.meter,mUnit(mc?mc.mt:"hourmeter"),x.liters,cu,ct,x.registeredBy].join(";");
     });
-    const bom="\uFEFF";
-    const csv=bom+header+"\n"+lines.join("\n");
-    const a=document.createElement("a");
+    var csv="\uFEFF"+header+"\n"+lines.join("\n");
+    var a=document.createElement("a");
     a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
     a.download="abastecimentos_acf.csv";
     a.click();
-  };
-  const [fil,setFil]=useState({mc:"",op:"",from:"",to:""});
-  const sf=(k,v)=>setFil(p=>({...p,[k]:v}));
-  const rows=data.fuelings.filter(x=>{
-    if(fil.mc&&x.machineId!==Number(fil.mc))return false;
-    if(fil.op&&x.operatorId!==Number(fil.op))return false;
-    if(fil.from&&x.date<fil.from)return false;
-    if(fil.to&&x.date>fil.to+" 23:59")return false;
-    return true;
-  }).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const totL=rows.reduce((s,x)=>s+x.liters,0);
-  const avg=data.avgCostPerLiter||0;
-  const mSt=data.machines.map(m=>{
-    const mf=rows.filter(x=>x.machineId===m.id);
-    if(mf.length<2)return null;
-    const tot=mf.reduce((s,x)=>s+x.liters,0);
-    const sr=[...mf].sort((a,b)=>b.meter-a.meter);
-    return{...m,tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,m.mt),cnt:mf.length};
-  }).filter(Boolean);
+  }
+
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
-        <div className="sec" style={{marginBottom:0}}>📈 Relatórios de Consumo</div>
-        <Btn onClick={exportCSV} color={BLU} style={{fontSize:13,padding:"8px 16px"}}>⬇ Exportar Excel/CSV</Btn>
+        <div className="sec" style={{marginBottom:0}}>Relatorios de Consumo</div>
+        <Btn onClick={exportCSV} color={BLU} style={{fontSize:13,padding:"8px 16px"}}>Exportar Excel/CSV</Btn>
       </div>
       <div className="card" style={{marginBottom:18}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
-          <div className="fg"><div className="flbl">Máquina</div>
-            <select value={fil.mc} onChange={e=>sf("mc",e.target.value)}>
-              <option value="">Todas</option>{data.machines.map(m=><option key={m.id} value={m.id}>{m.code}</option>)}
+          <div className="fg"><div className="flbl">Maquina</div>
+            <select value={fil.mc} onChange={function(e){sf("mc",e.target.value);}}>
+              <option value="">Todas</option>{data.machines.map(function(m){return <option key={m.id} value={m.id}>{m.code}</option>;})}
             </select>
           </div>
           <div className="fg"><div className="flbl">Operador</div>
-            <select value={fil.op} onChange={e=>sf("op",e.target.value)}>
-              <option value="">Todos</option>{data.operators.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+            <select value={fil.op} onChange={function(e){sf("op",e.target.value);}}>
+              <option value="">Todos</option>{data.operators.map(function(o){return <option key={o.id} value={o.id}>{o.name}</option>;})}
             </select>
           </div>
-          <div className="fg"><div className="flbl">De</div><input type="date" value={fil.from} onChange={e=>sf("from",e.target.value)}/></div>
-          <div className="fg"><div className="flbl">Até</div><input type="date" value={fil.to} onChange={e=>sf("to",e.target.value)}/></div>
+          <div className="fg"><div className="flbl">De</div><input type="date" value={fil.from} onChange={function(e){sf("from",e.target.value);}}/></div>
+          <div className="fg"><div className="flbl">Ate</div><input type="date" value={fil.to} onChange={function(e){sf("to",e.target.value);}}/></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginTop:16}}>
           <div className="sbox"><div className="slbl">Registros</div><div className="sval">{rows.length}</div></div>
           <div className="sbox"><div className="slbl">Total Consumido</div><div className="sval">{fmtN(totL)}<span className="sunit"> L</span></div></div>
-          <div className="sbox"><div className="slbl">Custo Médio/L</div><div className="sval" style={{fontSize:18,color:AMB}}>{avg>0?fmtR(avg):"—"}</div></div>
-          <div className="sbox"><div className="slbl">Custo Total</div><div className="sval" style={{fontSize:18,color:AMB}}>{avg>0?fmtR(totL*avg):"—"}</div></div>
+          <div className="sbox"><div className="slbl">Custo Medio/L</div><div className="sval" style={{fontSize:18,color:AMB}}>{avg>0?fmtR(avg):"--"}</div></div>
+          <div className="sbox"><div className="slbl">Custo Total</div><div className="sval" style={{fontSize:18,color:AMB}}>{avg>0?fmtR(totL*avg):"--"}</div></div>
         </div>
       </div>
       {mSt.length>0&&(
         <div className="card" style={{marginBottom:18}}>
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:12}}>EFICIÊNCIA POR EQUIPAMENTO</div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:12}}>EFICIENCIA POR EQUIPAMENTO</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(175px,1fr))",gap:10}}>
-            {mSt.map(m=>(
-              <div key={m.id} style={{background:"#f7faf7",borderRadius:10,padding:"13px 15px",border:`1.5px solid ${BDR}`}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                  <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:GN}}>{m.code}</span>
-                  <span className={"bdg "+(m.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{m.mt==="odometer"?"ODO":"HOR"}</span>
+            {mSt.map(function(m){
+              return (
+                <div key={m.id} style={{background:"#f7faf7",borderRadius:10,padding:"13px 15px",border:"1.5px solid "+BDR}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                    <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:GN}}>{m.code}</span>
+                    <span className={"bdg "+(m.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{m.mt==="odometer"?"ODO":"HOR"}</span>
+                  </div>
+                  <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800}}>{m.eff||"--"}<span style={{fontSize:13,color:MUT,fontWeight:400}}> {eLbl(m.mt)}</span></div>
+                  <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+BDR,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+                    <div><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Litros</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{fmtN(m.tot)} L</div></div>
+                    {avg>0&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Custo total</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:AMB}}>{fmtR(m.tot*avg)}</div></div>}
+                  </div>
+                  <div style={{fontSize:11,color:DIM,marginTop:4}}>{m.cnt} abastecimentos</div>
                 </div>
-                <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800}}>{m.eff??"—"}<span style={{fontSize:13,color:MUT,fontWeight:400}}> {eLbl(m.mt)}</span></div>
-                <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${BDR}`,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
-                  <div><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Litros</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{fmtN(m.tot)} L</div></div>
-                  {avg>0&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Custo total</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:AMB}}>{fmtR(m.tot*avg)}</div></div>}
-                </div>
-                <div style={{fontSize:11,color:DIM,marginTop:4}}>{m.cnt} abastecimentos</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
       <div className="card">
         <div style={{overflowX:"auto"}}>
           <table>
-            <thead><tr><th>Data</th><th>Máquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>Custo</th><th>Origem</th></tr></thead>
+            <thead><tr><th>Data</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>Custo</th><th>Origem</th></tr></thead>
             <tbody>
-              {rows.length===0?<tr><td colSpan="7" style={{textAlign:"center",color:MUT,padding:28}}>Nenhum registro encontrado</td></tr>
-              :rows.map(x=>{
-                const op=data.operators.find(o=>o.id===x.operatorId);
-                const mc=data.machines.find(m=>m.id===x.machineId);
-                return(
+              {rows.length===0?<tr><td colSpan={7} style={{textAlign:"center",color:MUT,padding:28}}>Nenhum registro encontrado</td></tr>
+              :rows.map(function(x){
+                var op=null, mc=null;
+                for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
+                for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
+                return (
                   <tr key={x.id}>
                     <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDate(x.date)}</td>
                     <td><div style={{display:"flex",gap:5,alignItems:"center"}}>
-                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?.code}</span>
-                      <span className={"bdg "+(mc?.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc?.mt==="odometer"?"ODO":"HOR"}</span>
+                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
+                      <span className={"bdg "+(mc&&mc.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&mc.mt==="odometer"?"ODO":"HOR"}</span>
                     </div></td>
-                    <td>{op?.name}</td>
-                    <td>{fmtN(x.meter)} {mUnit(mc?.mt)}</td>
+                    <td>{op?op.name:"-"}</td>
+                    <td>{fmtN(x.meter)} {mUnit(mc?mc.mt:"hourmeter")}</td>
                     <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
-                    <td style={{color:MUT}}>{avg>0?fmtR(x.liters*avg):"—"}</td>
+                    <td style={{color:MUT}}>{avg>0?fmtR(x.liters*avg):"--"}</td>
                     <td><span className={"bdg "+(x.registeredBy==="ADMINISTRADOR"?"by":x.registeredBy==="ESCRITORIO"?"bb":"bg")} style={{fontSize:11}}>{x.registeredBy}</span></td>
                   </tr>
                 );
@@ -868,160 +968,177 @@ function Rep({data}) {
 }
 
 // ── AJUSTES ──────────────────────────────────────────────────────────────────
-function Adj({data,upd,toast}) {
-  const [f,setF]=useState({type:"correcao",liters:"",note:"",cost:""});
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
-  const [thr2,setThr2]=useState(String(data.lowStockThreshold??1000));
+function Adj(props){
+  var data=props.data, upd=props.upd, toast=props.toast;
+  var _f=useState({type:"correcao",liters:"",note:"",cost:""}), f=_f[0], setF=_f[1];
+  function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
+  var _thr=useState(String(data.lowStockThreshold||1000)), thr2=_thr[0], setThr2=_thr[1];
+  var _pin=useState(""), adjPin=_pin[0], setAdjPin=_pin[1];
+  var _pinErr=useState(false), adjPinErr=_pinErr[0], setAdjPinErr=_pinErr[1];
+  var _pinOk=useState(false), adjPinOk=_pinOk[0], setAdjPinOk=_pinOk[1];
+  var _em=useState(null), em=_em[0], setEm=_em[1];
+  var _ef=useState({}), ef=_ef[0], setEf=_ef[1];
 
-  const saveThr=()=>{const v=Number(thr2);if(!v||v<0)return;upd("lowStockThreshold",v);toast(`Nível crítico: ${fmtN(v)} L`);};
-
-  const applyAdj=()=>{
-    const L=Number(f.liters),C=Number(f.cost)||0;
-    let ns=data.tankStock, na=data.avgCostPerLiter||0;
+  function checkPin(){
+    if(adjPin===ADJ_PIN){setAdjPinOk(true);setAdjPinErr(false);}
+    else{setAdjPinErr(true);setAdjPin("");}
+  }
+  function saveThr(){
+    var v=Number(thr2);
+    if(!v||v<0) return;
+    upd("lowStockThreshold",v);
+    toast("Nivel critico: "+fmtN(v)+" L");
+  }
+  function applyAdj(){
+    var L=Number(f.liters), C=Number(f.cost)||0;
+    var ns=data.tankStock, na=data.avgCostPerLiter||0;
     if(f.type==="inicial"){ns=L;if(C>0)na=C;}
     else if(f.type==="adicao"){if(C>0&&(ns+L>0))na=((ns*na)+(L*C))/(ns+L);ns=Math.min(data.tankCapacity,ns+L);}
     else if(f.type==="correcao"){ns=L;if(C>0)na=C;}
     else if(f.type==="remocao"){ns=Math.max(0,ns-L);}
-    upd("stockAdjustments",[...data.stockAdjustments,{id:Date.now(),date:tsNow(),type:f.type,liters:L,note:f.note,by:"ADMINISTRADOR",cost:C}]);
+    upd("stockAdjustments",data.stockAdjustments.concat([{id:Date.now(),date:tsNow(),type:f.type,liters:L,note:f.note,by:"ADMINISTRADOR",cost:C}]));
     upd("tankStock",ns);
-    if(na!==data.avgCostPerLiter)upd("avgCostPerLiter",Math.round(na*10000)/10000);
+    if(na!==data.avgCostPerLiter) upd("avgCostPerLiter",Math.round(na*10000)/10000);
     setF({type:"correcao",liters:"",note:"",cost:""});
     toast("Ajuste aplicado");
-  };
+  }
+  function saveE(){
+    upd("fuelings",data.fuelings.map(function(x){return x.id===em.id?Object.assign({},x,{liters:Number(ef.liters),meter:Number(ef.meter)}):x;}));
+    setEm(null);toast("Abastecimento atualizado");
+  }
+  function delE(id){
+    var x=null;
+    for(var i=0;i<data.fuelings.length;i++){if(data.fuelings[i].id===id){x=data.fuelings[i];break;}}
+    upd("fuelings",data.fuelings.filter(function(f){return f.id!==id;}));
+    upd("tankStock",data.tankStock+x.liters);
+    toast("Removido e estoque restaurado");setEm(null);
+  }
 
-  const [adjPin,setAdjPin]=useState(""); const [adjPinErr,setAdjPinErr]=useState(false); const [adjPinOk,setAdjPinOk]=useState(false);
-  const checkAdjPin=()=>{if(adjPin==="284284"){setAdjPinOk(true);setAdjPinErr(false);}else{setAdjPinErr(true);setAdjPin("");}};
-
-  const [em,setEm]=useState(null);
-  const [ef,setEf]=useState({});
-  const saveE=()=>{upd("fuelings",data.fuelings.map(x=>x.id===em.id?{...x,liters:Number(ef.liters),meter:Number(ef.meter)}:x));setEm(null);toast("Abastecimento atualizado");};
-  const delE=(id)=>{const x=data.fuelings.find(x=>x.id===id);upd("fuelings",data.fuelings.filter(x=>x.id!==id));upd("tankStock",data.tankStock+x.liters);toast("Removido e estoque restaurado");setEm(null);};
+  var emMc=null;
+  if(em){for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===em.machineId){emMc=data.machines[i];break;}}}
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:22}}>
-      <div className="sec">⚙️ Ajustes Administrativos</div>
+      <div className="sec">Ajustes Administrativos</div>
 
-      {/* VERIFICAÇÃO DE SENHA */}
       {!adjPinOk&&(
-        <div className="card" style={{borderColor:"#fde047",maxWidth:400}}>
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:AMB,marginBottom:8}}>🔐 CONFIRMAR IDENTIDADE</div>
+        <div className="card" style={{borderColor:"#fde047",maxWidth:420}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:AMB,marginBottom:8}}>CONFIRMAR IDENTIDADE</div>
           <div style={{fontSize:13,color:MUT,marginBottom:14}}>Digite a senha de administrador para liberar os ajustes.</div>
           <div style={{display:"flex",gap:10}}>
-            <input type="password" value={adjPin} onChange={e=>setAdjPin(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&checkAdjPin()}
+            <input type="password" value={adjPin}
+              onChange={function(e){setAdjPin(e.target.value);}}
+              onKeyDown={function(e){if(e.key==="Enter")checkPin();}}
               placeholder="Senha de ajustes" style={{fontSize:16,flex:1}}/>
-            <Btn onClick={checkAdjPin} color={AMB}>OK</Btn>
+            <Btn onClick={checkPin} color={AMB}>OK</Btn>
           </div>
-          {adjPinErr&&<div style={{color:RED,fontSize:13,marginTop:8,fontWeight:600}}>⚠ Senha incorreta.</div>}
+          {adjPinErr&&<div style={{color:RED,fontSize:13,marginTop:8,fontWeight:600}}>Senha incorreta.</div>}
         </div>
       )}
 
-      {adjPinOk&&<>
-
-      {/* NÍVEL CRÍTICO */}
-      <div className="card" style={{borderColor:"#fca5a5"}}>
-        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:RED,marginBottom:5}}>⚠ NÍVEL CRÍTICO DE ESTOQUE</div>
-        <div style={{fontSize:13,color:MUT,marginBottom:14}}>Abaixo deste valor, um alerta vermelho aparece para todos.</div>
-        <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
-          <div className="fg" style={{flex:1,minWidth:160}}>
-            <div className="flbl">Limite de Alerta (Litros)</div>
-            <input type="number" value={thr2} onChange={e=>setThr2(e.target.value)} style={{fontSize:20,fontWeight:700,textAlign:"center",borderColor:"#fca5a5"}}/>
-          </div>
-          <Btn onClick={saveThr} color={RED} disabled={!thr2||Number(thr2)<0} style={{whiteSpace:"nowrap"}}>SALVAR LIMITE</Btn>
-        </div>
-        <div style={{display:"flex",gap:14,marginTop:12,flexWrap:"wrap"}}>
-          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Limite atual:</span><strong style={{color:RED}}>{fmtN(data.lowStockThreshold??1000)} L</strong></div>
-          <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque:</span><strong style={{color:data.tankStock<=thr(data)?RED:GN}}>{fmtN(data.tankStock)} L {data.tankStock<=thr(data)?"⚠":"✔"}</strong></div>
-        </div>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
-        {/* AJUSTE ESTOQUE */}
-        <div className="card">
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>AJUSTE DE ESTOQUE</div>
-          <div style={{display:"flex",flexDirection:"column",gap:13}}>
-            <div className="fg">
-              <div className="flbl">Tipo de Ajuste</div>
-              <select value={f.type} onChange={e=>sf("type",e.target.value)}>
-                <option value="correcao">Correção (valor exato)</option>
-                <option value="inicial">Estoque Inicial</option>
-                <option value="adicao">Adição manual</option>
-                <option value="remocao">Remoção manual</option>
-              </select>
-            </div>
-            <Fld label={f.type==="correcao"||f.type==="inicial"?"Novo Valor do Estoque (L)":"Quantidade (L)"} type="number" value={f.liters} onChange={v=>sf("liters",v)} placeholder="0"/>
-            {(f.type==="inicial"||f.type==="adicao"||f.type==="correcao")&&(
-              <Fld label={f.type==="correcao"?"Custo/Litro atual (R$) — opcional":"Custo por Litro (R$)"} type="number" value={f.cost} onChange={v=>sf("cost",v)} placeholder="Ex: 6.45"/>
-            )}
-            {f.type==="inicial"&&f.liters&&f.cost&&(
-              <div className="pill" style={{display:"flex",justifyContent:"space-between",background:"#fef9c3",borderColor:"#fde047"}}>
-                <span>Valor total do estoque inicial:</span>
-                <strong style={{color:AMB}}>{fmtR(Number(f.liters)*Number(f.cost))}</strong>
+      {adjPinOk&&(
+        <div style={{display:"flex",flexDirection:"column",gap:22}}>
+          <div className="card" style={{borderColor:"#fca5a5"}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:RED,marginBottom:5}}>NIVEL CRITICO DE ESTOQUE</div>
+            <div style={{fontSize:13,color:MUT,marginBottom:14}}>Abaixo deste valor, um alerta vermelho aparece para todos.</div>
+            <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+              <div className="fg" style={{flex:1,minWidth:160}}>
+                <div className="flbl">Limite de Alerta (Litros)</div>
+                <input type="number" value={thr2} onChange={function(e){setThr2(e.target.value);}} style={{fontSize:20,fontWeight:700,textAlign:"center",borderColor:"#fca5a5"}}/>
               </div>
-            )}
-            <Fld label="Motivo / Observação" value={f.note} onChange={v=>sf("note",v)} placeholder="Descreva o motivo"/>
-            <div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Estoque atual:</span><strong style={{color:GN}}>{fmtN(data.tankStock)} L</strong></div>
-            <Btn full onClick={applyAdj} disabled={!f.liters||Number(f.liters)<0}>APLICAR AJUSTE</Btn>
+              <Btn onClick={saveThr} color={RED} disabled={!thr2||Number(thr2)<0} style={{whiteSpace:"nowrap"}}>SALVAR LIMITE</Btn>
+            </div>
+            <div style={{display:"flex",gap:14,marginTop:12,flexWrap:"wrap"}}>
+              <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Limite atual:</span><strong style={{color:RED}}>{fmtN(data.lowStockThreshold||1000)} L</strong></div>
+              <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque:</span><strong style={{color:data.tankStock<=(data.lowStockThreshold||1000)?RED:GN}}>{fmtN(data.tankStock)} L</strong></div>
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
+            <div className="card">
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>AJUSTE DE ESTOQUE</div>
+              <div style={{display:"flex",flexDirection:"column",gap:13}}>
+                <div className="fg">
+                  <div className="flbl">Tipo de Ajuste</div>
+                  <select value={f.type} onChange={function(e){sf("type",e.target.value);}}>
+                    <option value="correcao">Correcao (valor exato)</option>
+                    <option value="inicial">Estoque Inicial</option>
+                    <option value="adicao">Adicao manual</option>
+                    <option value="remocao">Remocao manual</option>
+                  </select>
+                </div>
+                <Fld label={(f.type==="correcao"||f.type==="inicial")?"Novo Valor do Estoque (L)":"Quantidade (L)"} type="number" value={f.liters} onChange={function(v){sf("liters",v);}} placeholder="0"/>
+                {(f.type==="inicial"||f.type==="adicao"||f.type==="correcao")&&(
+                  <Fld label={(f.type==="correcao")?"Custo/Litro atual (R$) - opcional":"Custo por Litro (R$)"} type="number" value={f.cost} onChange={function(v){sf("cost",v);}} placeholder="Ex: 6.45"/>
+                )}
+                {f.type==="inicial"&&f.liters&&f.cost&&(
+                  <div className="pill" style={{display:"flex",justifyContent:"space-between",background:"#fef9c3",borderColor:"#fde047"}}>
+                    <span>Valor total do estoque inicial:</span>
+                    <strong style={{color:AMB}}>{fmtR(Number(f.liters)*Number(f.cost))}</strong>
+                  </div>
+                )}
+                <Fld label="Motivo / Observacao" value={f.note} onChange={function(v){sf("note",v);}} placeholder="Descreva o motivo"/>
+                <div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Estoque atual:</span><strong style={{color:GN}}>{fmtN(data.tankStock)} L</strong></div>
+                <Btn full={true} onClick={applyAdj} disabled={!f.liters||Number(f.liters)<0}>APLICAR AJUSTE</Btn>
+              </div>
+            </div>
+            <div className="card">
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>HISTORICO DE AJUSTES</div>
+              {data.stockAdjustments.length===0?<div style={{color:MUT}}>Nenhum ajuste realizado.</div>
+              :data.stockAdjustments.slice().reverse().map(function(a){
+                return (
+                  <div key={a.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44"}}>
+                    <div style={{display:"flex",justifyContent:"space-between"}}>
+                      <span className="bdg by">{a.type.toUpperCase()}</span>
+                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fmtN(a.liters)} L</span>
+                    </div>
+                    <div style={{fontSize:12,color:MUT,marginTop:3}}>{a.note} - {fmtDate(a.date)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="card">
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>EDITAR ABASTECIMENTOS</div>
+            <div style={{overflowX:"auto"}}>
+              <table>
+                <thead><tr><th>Data</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th></th></tr></thead>
+                <tbody>{data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).map(function(x){
+                  var op=null, mc=null;
+                  for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
+                  for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
+                  return (
+                    <tr key={x.id}>
+                      <td style={{fontSize:13}}>{fmtDate(x.date)}</td>
+                      <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</td>
+                      <td>{op?op.name:"-"}</td>
+                      <td>{fmtN(x.meter)} {mUnit(mc?mc.mt:"hourmeter")}</td>
+                      <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
+                      <td><Btn onClick={function(){setEm(x);setEf(Object.assign({},x));}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn></td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
           </div>
         </div>
-        {/* HISTÓRICO AJUSTES */}
-        <div className="card">
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>HISTÓRICO DE AJUSTES</div>
-          {data.stockAdjustments.length===0?<div style={{color:MUT}}>Nenhum ajuste realizado.</div>
-          :[...data.stockAdjustments].reverse().map(a=>(
-            <div key={a.id} style={{padding:"9px 0",borderBottom:`1px solid ${BDR}44`}}>
-              <div style={{display:"flex",justifyContent:"space-between"}}>
-                <span className="bdg by">{a.type.toUpperCase()}</span>
-                <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fmtN(a.liters)} L</span>
-              </div>
-              <div style={{fontSize:12,color:MUT,marginTop:3}}>{a.note} · {fmtDate(a.date)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
-      {/* EDITAR ABASTECIMENTOS */}
-      <div className="card">
-        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>EDITAR ABASTECIMENTOS</div>
-        <div style={{overflowX:"auto"}}>
-          <table>
-            <thead><tr><th>Data</th><th>Máquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th></th></tr></thead>
-            <tbody>{[...data.fuelings].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(x=>{
-              const op=data.operators.find(o=>o.id===x.operatorId);
-              const mc=data.machines.find(m=>m.id===x.machineId);
-              return(
-                <tr key={x.id}>
-                  <td style={{fontSize:13}}>{fmtDate(x.date)}</td>
-                  <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?.code}</td>
-                  <td>{op?.name}</td>
-                  <td>{fmtN(x.meter)} {mUnit(mc?.mt)}</td>
-                  <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
-                  <td><Btn onClick={()=>{setEm(x);setEf({...x});}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn></td>
-                </tr>
-              );
-            })}</tbody>
-          </table>
-        </div>
-      </div>
-
-      {em&&(()=>{
-        const mc=data.machines.find(m=>m.id===em.machineId);
-        return(
-          <Modal title="Editar Abastecimento" onClose={()=>setEm(null)}>
-            <div style={{display:"flex",flexDirection:"column",gap:13,marginBottom:16}}>
-              <Fld label={mLbl(mc?.mt)} type="number" value={ef.meter} onChange={v=>setEf(p=>({...p,meter:v}))}/>
-              <Fld label="Litros" type="number" value={ef.liters} onChange={v=>setEf(p=>({...p,liters:v}))}/>
-            </div>
-            <div style={{display:"flex",gap:10}}>
-              <Btn onClick={()=>delE(em.id)} color={RED} style={{padding:"9px 14px",fontSize:14}}>🗑 Excluir</Btn>
-              <div style={{flex:1}}/>
-              <Btn onClick={()=>setEm(null)} color={INP} style={{color:TXT}}>Cancelar</Btn>
-              <Btn onClick={saveE}>Salvar</Btn>
-            </div>
-          </Modal>
-        );
-      })()}
-      </>}
+      {em&&(
+        <Modal title="Editar Abastecimento" onClose={function(){setEm(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:13,marginBottom:16}}>
+            <Fld label={mLbl(emMc?emMc.mt:"hourmeter")} type="number" value={ef.meter||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{meter:v});});}}/>
+            <Fld label="Litros" type="number" value={ef.liters||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{liters:v});});}}/>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn onClick={function(){delE(em.id);}} color={RED} style={{padding:"9px 14px",fontSize:14}}>Excluir</Btn>
+            <div style={{flex:1}}/>
+            <Btn onClick={function(){setEm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn onClick={saveE}>Salvar</Btn>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
