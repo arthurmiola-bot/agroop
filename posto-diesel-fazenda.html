@@ -84,9 +84,22 @@ function fmtDate(d){
   if(!d) return "-";
   try{
     var s=String(d).trim();
-    var dt=/^\d{4}/.test(s)?new Date(s.replace(" ","T")):new Date(s);
-    return isNaN(dt)?s.slice(0,10):dt.toLocaleDateString("pt-BR");
+    // Format: "2026-05-22" or "2026-05-22 14:30"
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)){
+      var parts=s.slice(0,10).split("-");
+      return parts[2]+"/"+parts[1]+"/"+parts[0];
+    }
+    // Already dd/mm/yyyy
+    if(/^\d{2}\/\d{2}\/\d{4}/.test(s)) return s.slice(0,10);
+    return s.slice(0,10);
   }catch(e){ return String(d).slice(0,10); }
+}
+function fmtDateTime(d){
+  if(!d) return "-";
+  var date=fmtDate(d);
+  var s=String(d).trim();
+  if(s.length>=16) return date+" "+s.slice(11,16);
+  return date;
 }
 function fmtN(n){ return Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0}); }
 function fmtR(n){ return Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); }
@@ -577,7 +590,7 @@ function Dash(props){
               <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"} - {op?op.name:"-"}</div>
-                  <div style={{fontSize:12,color:MUT}}>{fmtDate(x.date)} - {fmtN(x.meter)} {mUnit(mc2?mc2.mt:"hourmeter")}</div>
+                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?mc2.mt:"hourmeter")}</div>
                 </div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
               </div>
@@ -955,7 +968,7 @@ function Rep(props){
                 for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
                 return (
                   <tr key={x.id}>
-                    <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDate(x.date)}</td>
+                    <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDateTime(x.date)}</td>
                     <td><div style={{display:"flex",gap:5,alignItems:"center"}}>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
                       <span className={"bdg "+(mc&&mc.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&mc.mt==="odometer"?"ODO":"HOR"}</span>
@@ -1101,7 +1114,7 @@ function Adj(props){
                       <span className="bdg by">{a.type.toUpperCase()}</span>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fmtN(a.liters)} L</span>
                     </div>
-                    <div style={{fontSize:12,color:MUT,marginTop:3}}>{a.note} - {fmtDate(a.date)}</div>
+                    <div style={{fontSize:12,color:MUT,marginTop:3}}>{a.note} - {fmtDateTime(a.date)}</div>
                   </div>
                 );
               })}
@@ -1119,7 +1132,7 @@ function Adj(props){
                   for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
                   return (
                     <tr key={x.id}>
-                      <td style={{fontSize:13}}>{fmtDate(x.date)}</td>
+                      <td style={{fontSize:13}}>{fmtDateTime(x.date)}</td>
                       <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</td>
                       <td>{op?op.name:"-"}</td>
                       <td>{fmtN(x.meter)} {mUnit(mc?mc.mt:"hourmeter")}</td>
