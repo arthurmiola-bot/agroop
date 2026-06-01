@@ -103,6 +103,9 @@ function fmtDateTime(d){
 }
 function fmtN(n){ return Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0}); }
 function fmtR(n){ return Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); }
+function getMachineDesc(m){ return m ? (m.desc || m.description || "") : ""; }
+function getMachineCode(m){ return m ? (m.code || "") : ""; }
+function getMachineMt(m){ return m ? (m.mt || m.meterType || "hourmeter") : "hourmeter"; }
 function mLbl(mt){ return mt==="odometer"?"Odometro (Km)":"Horimetro (horas)"; }
 function mUnit(mt){ return mt==="odometer"?"Km":"h"; }
 function eLbl(mt){ return mt==="odometer"?"Km/L":"L/h"; }
@@ -433,7 +436,7 @@ function Fuel(props){
 
   var mc=null;
   for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===Number(f.mc)){mc=data.machines[i];break;}}
-  var mt=mc?mc.mt:"hourmeter";
+  var mt=mc?getMachineMt(mc):"hourmeter";
   var lastM=null;
   if(f.mc){
     var mf=data.fuelings.filter(function(x){return x.machineId===Number(f.mc);}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
@@ -467,7 +470,7 @@ function Fuel(props){
             <div className="flbl">Maquina / Equipamento</div>
             <select value={f.mc} onChange={function(e){sf("mc",e.target.value);sf("meter","");}} style={{fontSize:16}}>
               <option value="">Selecione a maquina</option>
-              {data.machines.filter(function(m){return m.active;}).map(function(m){return <option key={m.id} value={m.id}>{m.code} - {m.desc}</option>;})}
+              {data.machines.filter(function(m){return m.active;}).map(function(m){return <option key={m.id} value={m.id}>{m.code} - {getMachineDesc(m)}</option>;})}
             </select>
           </div>
           {mc&&(
@@ -496,7 +499,7 @@ function Fuel(props){
         <Modal title="Confirmar Abastecimento" onClose={function(){setConf(false);}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
             <Rw label="Operador" value={function(){var o=data.operators.filter(function(o){return o.id===Number(f.op);})[0];return o?o.name:""}()}/>
-            <Rw label="Maquina" value={mc?mc.code+" - "+mc.desc:""}/>
+            <Rw label="Maquina" value={mc?mc.code+" - "+getMachineDesc(mc):""}/>
             <Rw label={mLbl(mt)} value={fmtN(f.meter)+" "+mUnit(mt)}/>
             <Rw label="Quantidade" value={f.lts+" L"}/>
             <Rw label="Estoque apos" value={fmtN(data.tankStock-Number(f.lts))+" L"}/>
@@ -521,7 +524,7 @@ function Dash(props){
     var tot=mf.reduce(function(s,x){return s+x.liters;},0);
     var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
     var df=sr.length>=2?sr[0].meter-sr[sr.length-1].meter:0;
-    return Object.assign({},m,{tot:tot,eff:eCalc(tot,df,m.mt),cnt:mf.length});
+    return Object.assign({},m,{tot:tot,eff:eCalc(tot,df,getMachineMt(m)),cnt:mf.length});
   }).filter(function(m){return m.tot>0;}).sort(function(a,b){return b.tot-a.tot;});
   var rec=data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).slice(0,5);
   var avg=data.avgCostPerLiter||0;
@@ -547,14 +550,14 @@ function Dash(props){
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
                       <div style={{display:"flex",gap:7,alignItems:"center"}}>
                         <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{m.code}</span>
-                        <span className={"bdg "+(m.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{m.mt==="odometer"?"ODO":"HOR"}</span>
+                        <span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{getMachineMt(m)==="odometer"?"ODO":"HOR"}</span>
                       </div>
                       <span style={{color:GN,fontWeight:600}}>{fmtN(m.tot)} L</span>
                     </div>
                     <div style={{background:INP,borderRadius:5,height:7,overflow:"hidden"}}>
                       <div style={{height:"100%",background:"linear-gradient(90deg,"+GN2+","+GN+")",borderRadius:5,width:(m.tot/mc[0].tot*100)+"%",transition:"width .6s"}}/>
                     </div>
-                    <div style={{fontSize:11,color:DIM,marginTop:3}}>{m.cnt} abastec.{m.eff?" - "+m.eff+" "+eLbl(m.mt)+" medio":""}</div>
+                    <div style={{fontSize:11,color:DIM,marginTop:3}}>{m.cnt} abastec.{m.eff?" - "+m.eff+" "+eLbl(getMachineMt(m))+" medio":""}</div>
                   </div>
                 );
               })}
@@ -571,7 +574,7 @@ function Dash(props){
               <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"} - {op?op.name:"-"}</div>
-                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?mc2.mt:"hourmeter")}</div>
+                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}</div>
                 </div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
               </div>
@@ -750,7 +753,7 @@ function Reg(props){
   function saveMc(){
     if(!form.code||!form.code.trim()) return;
     if(modal.item) upd("machines",data.machines.map(function(m){return m.id===modal.item.id?Object.assign({},m,form):m;}));
-    else upd("machines",data.machines.concat([{id:Date.now(),code:form.code,desc:form.desc||"",active:true,mt:form.mt||"hourmeter"}]));
+    else upd("machines",data.machines.concat([{id:Date.now(),code:form.code,desc:forgetMachineDesc(m)||"",active:true,mt:form.mt||"hourmeter"}]));
     toast(modal.item?"Maquina atualizada":"Maquina cadastrada");setModal(null);
   }
   function tog(t,id){
@@ -798,8 +801,8 @@ function Reg(props){
             return (
               <tr key={m.id}>
                 <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{m.code}</td>
-                <td>{m.desc}</td>
-                <td><span className={"bdg "+(m.mt==="odometer"?"bp":"bb")}>{m.mt==="odometer"?"Odometro":"Horimetro"}</span></td>
+                <td>{getMachineDesc(m)}</td>
+                <td><span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")}>{getMachineMt(m)==="odometer"?"Odometro":"Horimetro"}</span></td>
                 <td><span className={"bdg "+(m.active?"bg":"br")}>{m.active?"Ativa":"Inativa"}</span></td>
                 <td><div style={{display:"flex",gap:7}}>
                   <Btn onClick={function(){openE("mc",m);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
@@ -823,7 +826,7 @@ function Reg(props){
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:13}}>
               <Fld label="Codigo" value={form.code||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{code:v});});}} placeholder="Ex: CAM-02"/>
-              <Fld label="Descricao" value={form.desc||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder="Ex: Caminhao Ford F-350"/>
+              <Fld label="Descricao" value={forgetMachineDesc(m)||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder="Ex: Caminhao Ford F-350"/>
               <div className="fg">
                 <div className="flbl">Tipo de Medidor</div>
                 <div className="mtog">
@@ -866,7 +869,7 @@ function Rep(props){
     if(mf.length<2) return null;
     var tot=mf.reduce(function(s,x){return s+x.liters;},0);
     var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
-    return Object.assign({},m,{tot:tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,m.mt),cnt:mf.length});
+    return Object.assign({},m,{tot:tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,getMachineMt(m)),cnt:mf.length});
   }).filter(function(x){return x!==null;});
 
   function exportCSV(){
@@ -877,7 +880,7 @@ function Rep(props){
       for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
       var cu=avg>0?avg.toFixed(4):"";
       var ct=avg>0?(x.liters*avg).toFixed(2):"";
-      return [x.date,mc?mc.code:"",mc?mc.desc:"",op?op.name:"",x.meter,mUnit(mc?mc.mt:"hourmeter"),x.liters,cu,ct,x.registeredBy].join(";");
+      return [x.date,mc?mc.code:"",mc?getMachineDesc(mc):"",op?op.name:"",x.meter,mUnit(mc?getMachineMt(mc):"hourmeter"),x.liters,cu,ct,x.registeredBy].join(";");
     });
     var csv="\uFEFF"+header+"\n"+lines.join("\n");
     var a=document.createElement("a");
@@ -923,9 +926,9 @@ function Rep(props){
                 <div key={m.id} style={{background:"#f7faf7",borderRadius:10,padding:"13px 15px",border:"1.5px solid "+BDR}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
                     <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:GN}}>{m.code}</span>
-                    <span className={"bdg "+(m.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{m.mt==="odometer"?"ODO":"HOR"}</span>
+                    <span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{getMachineMt(m)==="odometer"?"ODO":"HOR"}</span>
                   </div>
-                  <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800}}>{m.eff||"--"}<span style={{fontSize:13,color:MUT,fontWeight:400}}> {eLbl(m.mt)}</span></div>
+                  <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800}}>{m.eff||"--"}<span style={{fontSize:13,color:MUT,fontWeight:400}}> {eLbl(getMachineMt(m))}</span></div>
                   <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+BDR,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
                     <div><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Litros</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{fmtN(m.tot)} L</div></div>
                     {avg>0&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Custo total</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:AMB}}>{fmtR(m.tot*avg)}</div></div>}
@@ -952,10 +955,10 @@ function Rep(props){
                     <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDateTime(x.date)}</td>
                     <td><div style={{display:"flex",gap:5,alignItems:"center"}}>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
-                      <span className={"bdg "+(mc&&mc.mt==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&mc.mt==="odometer"?"ODO":"HOR"}</span>
+                      <span className={"bdg "+(mc&&getMachineMt(mc)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&getMachineMt(mc)==="odometer"?"ODO":"HOR"}</span>
                     </div></td>
                     <td>{op?op.name:"-"}</td>
-                    <td>{fmtN(x.meter)} {mUnit(mc?mc.mt:"hourmeter")}</td>
+                    <td>{fmtN(x.meter)} {mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
                     <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
                     <td style={{color:MUT}}>{avg>0?fmtR(x.liters*avg):"--"}</td>
                     <td><span className={"bdg "+(x.registeredBy==="ADMINISTRADOR"?"by":x.registeredBy==="ESCRITORIO"?"bb":"bg")} style={{fontSize:11}}>{x.registeredBy}</span></td>
@@ -1116,7 +1119,7 @@ function Adj(props){
                       <td style={{fontSize:13}}>{fmtDateTime(x.date)}</td>
                       <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</td>
                       <td>{op?op.name:"-"}</td>
-                      <td>{fmtN(x.meter)} {mUnit(mc?mc.mt:"hourmeter")}</td>
+                      <td>{fmtN(x.meter)} {mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
                       <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
                       <td><Btn onClick={function(){setEm(x);setEf(Object.assign({},x));}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn></td>
                     </tr>
@@ -1131,7 +1134,7 @@ function Adj(props){
       {em&&(
         <Modal title="Editar Abastecimento" onClose={function(){setEm(null);}}>
           <div style={{display:"flex",flexDirection:"column",gap:13,marginBottom:16}}>
-            <Fld label={mLbl(emMc?emMc.mt:"hourmeter")} type="number" value={ef.meter||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{meter:v});});}}/>
+            <Fld label={mLbl(emMc?getMachineMt(emMc):"hourmeter")} type="number" value={ef.meter||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{meter:v});});}}/>
             <Fld label="Litros" type="number" value={ef.liters||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{liters:v});});}}/>
           </div>
           <div style={{display:"flex",gap:10}}>
