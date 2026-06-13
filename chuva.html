@@ -313,7 +313,17 @@ tr:hover td{background:#f5f9ff;}
     <input type="hidden" id="edit-id">
     <div style="font-size:.8rem;color:var(--text3);margin-bottom:1rem;" id="edit-info"></div>
     <label>Volume de chuva (mm)</label>
-    <input type="number" id="edit-volume" step="0.1" placeholder="Ex: 25.5" onkeydown="if(event.key==='Enter')salvarEdicao()">
+    <input type="number" id="edit-volume" step="0.1" placeholder="Ex: 25.5">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-top:.85rem;">
+      <div>
+        <label>Data</label>
+        <input type="date" id="edit-data">
+      </div>
+      <div>
+        <label>Hora</label>
+        <input type="time" id="edit-hora">
+      </div>
+    </div>
     <div class="modal-btns">
       <button class="mbtn mbtn-cancel" onclick="fecharModalEditar()">Cancelar</button>
       <button class="mbtn mbtn-ok" onclick="salvarEdicao()">Salvar</button>
@@ -725,10 +735,17 @@ function executarExcluir(id){
 function executarEditar(id){
   const reg = registros.find(r=>r.id===id);
   if(!reg) return;
+  const dt = new Date(reg.timestamp);
   document.getElementById('edit-id').value = id;
   document.getElementById('edit-info').textContent =
-    `${FAZ_ICONS[reg.fazenda]||''} ${reg.fazenda} — ${new Date(reg.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}`;
+    `${FAZ_ICONS[reg.fazenda]||''} ${reg.fazenda}`;
   document.getElementById('edit-volume').value = Number(reg.volume)||0;
+  // preenche data (AAAA-MM-DD) e hora (HH:MM) no horário local
+  const pad = n => String(n).padStart(2,'0');
+  document.getElementById('edit-data').value =
+    `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+  document.getElementById('edit-hora').value =
+    `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
   document.getElementById('modal-editar').classList.add('open');
   setTimeout(()=>document.getElementById('edit-volume').focus(),150);
 }
@@ -736,12 +753,26 @@ function executarEditar(id){
 function fecharModalEditar(){ document.getElementById('modal-editar').classList.remove('open'); }
 
 function salvarEdicao(){
-  const id  = document.getElementById('edit-id').value;
-  const vol = parseFloat(document.getElementById('edit-volume').value);
+  const id   = document.getElementById('edit-id').value;
+  const vol  = parseFloat(document.getElementById('edit-volume').value);
+  const data = document.getElementById('edit-data').value;
+  const hora = document.getElementById('edit-hora').value;
   if(!vol || vol<=0){ toast('Digite um volume válido','err'); return; }
   if(vol>999){ toast('Volume parece incorreto (máx 999)','err'); return; }
+  if(!data || !hora){ toast('Preencha data e hora','err'); return; }
+
+  // monta o novo timestamp no horário local
+  const novoDt = new Date(`${data}T${hora}:00`);
+  if(isNaN(novoDt.getTime())){ toast('Data ou hora inválida','err'); return; }
+
+  const campos = {
+    volume:    vol,
+    timestamp: novoDt.toISOString(),
+    data:      data   // campo usado nos filtros e no resumo do dia
+  };
+
   if(window._chuvaReady){
-    window._chuvaUpdate(window._chuvaDoc(id), {volume:vol})
+    window._chuvaUpdate(window._chuvaDoc(id), campos)
       .catch(e=>console.warn('Edição em fila (offline):',e.code));
   }
   fecharModalEditar();
