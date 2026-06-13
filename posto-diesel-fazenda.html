@@ -37,6 +37,14 @@ const DOC_REF = doc(db, "posto-diesel", "dados");
 window._fbSave = async (data) => {
   try { await setDoc(DOC_REF, { payload: JSON.stringify(data) }); } catch(e) { console.error(e); }
 };
+// Backup automatico: 7 documentos rotativos por dia da semana (backup-0 a backup-6)
+window._fbBackup = async (data) => {
+  try {
+    const dow = new Date().getDay(); // 0=domingo ... 6=sabado
+    const ref = doc(db, "posto-diesel", "backup-" + dow);
+    await setDoc(ref, { payload: JSON.stringify(data), savedAt: new Date().toISOString() });
+  } catch(e) { console.error("backup:", e); }
+};
 window._fbListen = (cb) => onSnapshot(DOC_REF, snap => {
   try { cb(snap.exists() ? JSON.parse(snap.data().payload) : null); } catch(e) {}
 });
@@ -246,7 +254,20 @@ function App(){
   var _tab=useState(null), tab=_tab[0], setTab=_tab[1];
   var _toast=useState(null), toast=_toast[0], setToast=_toast[1];
   var _ready=useState(!!window._fbReady), ready=_ready[0], setReady=_ready[1];
+  var _online=useState(navigator.onLine), online=_online[0], setOnline=_online[1];
   var tmr=useRef(null), sav=useRef(null);
+
+  // Monitor de conexao online/offline
+  useEffect(function(){
+    function goOn(){setOnline(true);}
+    function goOff(){setOnline(false);}
+    window.addEventListener("online",goOn);
+    window.addEventListener("offline",goOff);
+    return function(){
+      window.removeEventListener("online",goOn);
+      window.removeEventListener("offline",goOff);
+    };
+  },[]);
 
   useEffect(function(){
     if(window._fbReady){setReady(true);return;}
@@ -265,6 +286,16 @@ function App(){
     clearTimeout(sav.current);
     sav.current=setTimeout(function(){window._fbSave(data);},800);
   },[data]);
+
+  // Backup automatico diario (1x por dia, rotativo por dia da semana)
+  useEffect(function(){
+    if(!data||!window._fbBackup) return;
+    var today=tsNow().slice(0,10);
+    if(data.lastBackupDate===today) return;
+    window._fbBackup(data);
+    // marca a data sem disparar loop (atualizacao unica por dia)
+    setData(function(d){return Object.assign({},d,{lastBackupDate:today});});
+  },[data?data.lastBackupDate:null, data===null]);
 
   function showToast(msg,type){
     type=type||"success";
@@ -307,6 +338,10 @@ function App(){
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:5,background:online?"rgba(255,255,255,0.12)":"rgba(220,38,38,0.35)",borderRadius:20,padding:"4px 10px"}}>
+            <div style={{width:9,height:9,borderRadius:"50%",background:online?"#4ade80":"#f87171"}} className={online?"":"pu"}/>
+            <span style={{fontSize:11,color:"#fff",fontWeight:600}}>{online?"Online":"Offline"}</span>
+          </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:11,color:GN3}}>Logado como</div>
             <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:"#e6b800"}}>{role}</div>
@@ -445,12 +480,16 @@ function Fuel(props){
   var mOk=f.meter&&Number(f.meter)>0&&(!lastM||Number(f.meter)>=lastM);
   var ok=f.op&&f.mc&&mOk&&f.lts&&Number(f.lts)>0&&Number(f.lts)<=data.tankStock;
 
+  var submitting=useRef(false);
   function submit(){
+    if(submitting.current) return; // evita duplo clique
+    submitting.current=true;
     upd("fuelings",data.fuelings.concat([{id:Date.now(),operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:Number(f.lts),date:tsNow(),registeredBy:role}]));
-    upd("tankStock",data.tankStock-Number(f.lts));
+    upd("tankStock",Math.max(0,data.tankStock-Number(f.lts)));
     setF({op:"",mc:"",meter:"",lts:""});
     setConf(false);
     toast("Abastecimento registrado: "+f.lts+"L");
+    setTimeout(function(){submitting.current=false;},1500);
   }
 
   return (
@@ -518,7 +557,7 @@ function Fuel(props){
 function Dash(props){
   var data=props.data;
   var totS=data.supplies.reduce(function(s,x){return s+x.liters;},0);
-  var l30=data.fuelings.filter(function(x){return (Date.now()-new Date(x.date.replace(" ","T")).getTime())<30*86400000;}).reduce(function(s,x){return s+x.liters;},0);
+  var l30=data.fuelings.filter(function(x){if(!x.date)return false;return (Date.now()-new Date(String(x.date).replace(" ","T")).getTime())<30*86400000;}).reduce(function(s,x){return s+x.liters;},0);
   var mc=data.machines.map(function(m){
     var mf=data.fuelings.filter(function(x){return x.machineId===m.id;});
     var tot=mf.reduce(function(s,x){return s+x.liters;},0);
@@ -743,7 +782,14 @@ function Reg(props){
   var _form=useState({}), form=_form[0], setForm=_form[1];
 
   function openA(t){setModal({t:t,item:null});setForm(t==="mc"?{mt:"hourmeter"}:{});}
-  function openE(t,it){setModal({t:t,item:it});setForm(Object.assign({},it));}
+  function openE(t,it){
+    setModal({t:t,item:it});
+    if(t==="mc"){
+      setForm({code:it.code||"",desc:getMachineDesc(it),mt:getMachineMt(it),active:it.active});
+    } else {
+      setForm(Object.assign({},it));
+    }
+  }
   function saveOp(){
     if(!form.name||!form.name.trim()) return;
     if(modal.item) upd("operators",data.operators.map(function(o){return o.id===modal.item.id?Object.assign({},o,form):o;}));
@@ -752,8 +798,14 @@ function Reg(props){
   }
   function saveMc(){
     if(!form.code||!form.code.trim()) return;
-    if(modal.item) upd("machines",data.machines.map(function(m){return m.id===modal.item.id?Object.assign({},m,form):m;}));
-    else upd("machines",data.machines.concat([{id:Date.now(),code:form.code,desc:forgetMachineDesc(m)||"",active:true,mt:form.mt||"hourmeter"}]));
+    if(modal.item) upd("machines",data.machines.map(function(m){
+      if(m.id!==modal.item.id) return m;
+      var nm=Object.assign({},m,form);
+      // limpa campos antigos para evitar conflito
+      delete nm.description; delete nm.meterType;
+      return nm;
+    }));
+    else upd("machines",data.machines.concat([{id:Date.now(),code:form.code,desc:form.desc||"",active:true,mt:form.mt||"hourmeter"}]));
     toast(modal.item?"Maquina atualizada":"Maquina cadastrada");setModal(null);
   }
   function tog(t,id){
@@ -826,7 +878,7 @@ function Reg(props){
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:13}}>
               <Fld label="Codigo" value={form.code||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{code:v});});}} placeholder="Ex: CAM-02"/>
-              <Fld label="Descricao" value={forgetMachineDesc(m)||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder="Ex: Caminhao Ford F-350"/>
+              <Fld label="Descricao" value={form.desc||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder="Ex: Caminhao Ford F-350"/>
               <div className="fg">
                 <div className="flbl">Tipo de Medidor</div>
                 <div className="mtog">
@@ -1009,8 +1061,11 @@ function Adj(props){
     toast("Ajuste aplicado");
   }
   function saveE(){
-    upd("fuelings",data.fuelings.map(function(x){return x.id===em.id?Object.assign({},x,{liters:Number(ef.liters),meter:Number(ef.meter)}):x;}));
-    setEm(null);toast("Abastecimento atualizado");
+    var oldL=Number(em.liters), newL=Number(ef.liters);
+    var diff=oldL-newL; // se diminuiu litros, devolve ao estoque
+    upd("fuelings",data.fuelings.map(function(x){return x.id===em.id?Object.assign({},x,{liters:newL,meter:Number(ef.meter)}):x;}));
+    if(diff!==0) upd("tankStock",Math.max(0,Math.min(data.tankCapacity,data.tankStock+diff)));
+    setEm(null);toast("Abastecimento atualizado"+(diff!==0?" - estoque ajustado":""));
   }
   function delE(id){
     var x=null;
@@ -1044,6 +1099,23 @@ function Adj(props){
 
       {adjPinOk&&(
         <div style={{display:"flex",flexDirection:"column",gap:22}}>
+          <div className="card" style={{borderColor:"#93c5fd"}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:BLU,marginBottom:5}}>BACKUP DOS DADOS</div>
+            <div style={{fontSize:13,color:MUT,marginBottom:12}}>
+              O sistema salva backup automatico 1x por dia na nuvem (ultimos 7 dias).
+              {data.lastBackupDate?" Ultimo backup: "+fmtDate(data.lastBackupDate)+".":""}
+              Voce tambem pode baixar uma copia manual agora:
+            </div>
+            <Btn onClick={function(){
+              var json=JSON.stringify(data,null,2);
+              var a=document.createElement("a");
+              a.href="data:application/json;charset=utf-8,"+encodeURIComponent(json);
+              a.download="backup_posto_diesel_"+tsNow().slice(0,10)+".json";
+              a.click();
+              toast("Backup baixado");
+            }} color={BLU} style={{fontSize:14}}>BAIXAR BACKUP COMPLETO</Btn>
+          </div>
+
           <div className="card" style={{borderColor:"#fca5a5"}}>
             <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:RED,marginBottom:5}}>NIVEL CRITICO DE ESTOQUE</div>
             <div style={{fontSize:13,color:MUT,marginBottom:14}}>Abaixo deste valor, um alerta vermelho aparece para todos.</div>
