@@ -14,7 +14,7 @@
 <!-- FIREBASE -->
 <script type="module">
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, addDoc, onSnapshot,
+import { getFirestore, collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot,
          query, orderBy,
          initializeFirestore, persistentLocalCache, persistentMultipleTabManager }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -23,12 +23,12 @@ import { getFirestore, collection, addDoc, onSnapshot,
 // COLE AQUI AS MESMAS CONFIGURAÇÕES DO AGROOP
 // ══════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  apiKey:            "COLE_AQUI_apiKey",
+  authDomain:        "COLE_AQUI_authDomain",
+  projectId:         "COLE_AQUI_projectId",
+  storageBucket:     "COLE_AQUI_storageBucket",
+  messagingSenderId: "COLE_AQUI_messagingSenderId",
+  appId:             "COLE_AQUI_appId"
 };
 // ══════════════════════════════════════════════
 
@@ -42,6 +42,9 @@ const db = initializeFirestore(fbApp, {
 window._chuvaDb       = db;
 window._chuvaAddDoc   = addDoc;
 window._chuvaCol      = (n) => collection(db, n);
+window._chuvaDoc      = (id) => doc(db, 'chuva_registros', id);
+window._chuvaDelete   = deleteDoc;
+window._chuvaUpdate   = updateDoc;
 window._chuvaQuery    = query;
 window._chuvaOrder    = orderBy;
 window._chuvaSnapshot = onSnapshot;
@@ -264,6 +267,10 @@ tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f5f9ff;}
 .td-vol{font-weight:700;color:var(--blue);}
 .td-faz{font-weight:600;}
+.td-acoes{white-space:nowrap;text-align:right;}
+.row-btn{background:none;border:1px solid var(--border);border-radius:6px;width:30px;height:30px;cursor:pointer;font-size:.8rem;margin-left:.25rem;transition:all .15s;}
+.row-btn:hover{background:var(--blue-lt);border-color:var(--blue);}
+.row-btn.del:hover{background:#fdecea;border-color:var(--red);}
 .empty-adm{text-align:center;padding:2.5rem;color:var(--text3);font-size:.88rem;}
 
 /* TOAST */
@@ -288,13 +295,28 @@ tr:hover td{background:#f5f9ff;}
 <!-- MODAL SENHA -->
 <div class="modal-overlay" id="modal-senha">
   <div class="modal">
-    <div class="modal-title">🔐 Administrador</div>
-    <label>Senha</label>
+    <div class="modal-title">🔐 Confirme a senha</div>
+    <label>Senha para editar/excluir</label>
     <input type="password" id="inp-senha" placeholder="••••••" onkeydown="if(event.key==='Enter')confirmarSenha()">
     <div class="modal-erro" id="modal-erro">Senha incorreta.</div>
     <div class="modal-btns">
       <button class="mbtn mbtn-cancel" onclick="fecharModalSenha()">Cancelar</button>
-      <button class="mbtn mbtn-ok" onclick="confirmarSenha()">Entrar</button>
+      <button class="mbtn mbtn-ok" onclick="confirmarSenha()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR REGISTRO -->
+<div class="modal-overlay" id="modal-editar">
+  <div class="modal">
+    <div class="modal-title">✏️ Editar Registro</div>
+    <input type="hidden" id="edit-id">
+    <div style="font-size:.8rem;color:var(--text3);margin-bottom:1rem;" id="edit-info"></div>
+    <label>Volume de chuva (mm)</label>
+    <input type="number" id="edit-volume" step="0.1" placeholder="Ex: 25.5" onkeydown="if(event.key==='Enter')salvarEdicao()">
+    <div class="modal-btns">
+      <button class="mbtn mbtn-cancel" onclick="fecharModalEditar()">Cancelar</button>
+      <button class="mbtn mbtn-ok" onclick="salvarEdicao()">Salvar</button>
     </div>
   </div>
 </div>
@@ -347,8 +369,8 @@ tr:hover td{background:#f5f9ff;}
     </div>
   </div>
 
-  <button class="admin-btn" onclick="abrirModalSenha()">
-    <span>🔐</span> Administrador
+  <button class="admin-btn" onclick="entrarAdmin()">
+    <span>📊</span> Administrador
   </button>
 
   <div class="status-bar">
@@ -473,7 +495,7 @@ tr:hover td{background:#f5f9ff;}
       </div>
       <div class="tabela-wrap">
         <table>
-          <thead><tr><th>Data / Hora</th><th>Fazenda</th><th>Volume (mm)</th></tr></thead>
+          <thead><tr><th>Data / Hora</th><th>Fazenda</th><th>Volume (mm)</th><th></th></tr></thead>
           <tbody id="tabela-body"></tbody>
         </table>
       </div>
@@ -485,11 +507,8 @@ tr:hover td{background:#f5f9ff;}
 // ═══════════════════════════
 // CONFIG
 // ═══════════════════════════
-const SENHA_KEY    = 'chuvaop_senha';
-const SENHA_PADRAO = '1234';
 const FAZENDAS     = ['Rodeio','Palmeiras','Silo','ACF'];
 const FAZ_ICONS    = {Rodeio:'🌾',Palmeiras:'🌴',Silo:'🏚️',ACF:'🌿'};
-function getSenha(){ return localStorage.getItem(SENHA_KEY)||SENHA_PADRAO; }
 
 let registros    = [];
 let fazendaAtual = '';
@@ -513,10 +532,12 @@ function iniciarSync(){
       // Atualiza views abertas
       if(document.getElementById('tela-admin').style.display!=='none') aplicarFiltro();
       if(fazendaAtual) renderRegistrosDia();
-      // Indicador de sync
-      const fromCache = snap.metadata.fromCache;
-      const hasPending = snap.metadata.hasPendingWrites;
-      setSyncPill(fromCache || hasPending);
+      // Aviso só quando há escritas realmente pendentes de envio,
+      // ou quando está offline lendo do cache. Ler do cache estando
+      // online é normal (acontece em toda abertura do app).
+      const pendente = snap.metadata.hasPendingWrites ||
+                       (snap.metadata.fromCache && !navigator.onLine);
+      setSyncPill(pendente);
     },
     (err) => { console.error('Firestore:', err); setSyncPill(true); }
   );
@@ -533,14 +554,12 @@ function setSyncPill(offline){
   }
 }
 
-async function salvarNoFirebase(reg){
+// Salva SEM aguardar o servidor: offline, a promise do addDoc só resolveria
+// quando a internet voltasse, travando o botão. O Firebase enfileira sozinho.
+function salvarNoFirebase(reg){
   if(!window._chuvaReady) return;
-  try {
-    await window._chuvaAddDoc(window._chuvaCol('chuva_registros'), reg);
-  } catch(e) {
-    // Offline: Firebase enfileira automaticamente — não é erro
-    console.log('Offline — registro em fila:', e.code);
-  }
+  window._chuvaAddDoc(window._chuvaCol('chuva_registros'), reg)
+    .catch(e => console.warn('Registro em fila (offline):', e.code));
 }
 
 // ═══════════════════════════
@@ -605,14 +624,10 @@ function atualizarDisplay(){
   el.textContent = volStr;
 }
 
-async function salvarRegistro(){
+function salvarRegistro(){
   const vol = parseFloat(volStr);
   if(!vol || vol <= 0){ toast('Digite um volume maior que zero','err'); return; }
   if(vol > 999){ toast('Volume parece incorreto (máx 999 mm)','err'); return; }
-
-  const btn = document.getElementById('btn-salvar');
-  btn.disabled = true;
-  btn.textContent = '⏳ Salvando...';
 
   const agora = new Date();
   const registro = {
@@ -622,17 +637,15 @@ async function salvarRegistro(){
     data:      agora.toISOString().slice(0,10),
   };
 
-  await salvarNoFirebase(registro);
+  salvarNoFirebase(registro); // não aguarda: funciona offline
 
-  // Feedback
+  // Feedback imediato
   document.getElementById('confirm-txt').textContent = `${vol} mm registrado! ✔`;
   document.getElementById('confirm-box').classList.add('show');
   setTimeout(()=>document.getElementById('confirm-box').classList.remove('show'), 3000);
 
   volStr='0'; atualizarDisplay();
   renderRegistrosDia();
-  btn.disabled=false;
-  btn.textContent='💧  Salvar Registro';
   toast(`${vol} mm salvo!`,'ok');
 }
 
@@ -647,29 +660,92 @@ function renderRegistrosDia(){
   lista.innerHTML = doDia.map(r=>`
     <div class="reg-item">
       <span class="reg-item-hora">${new Date(r.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
-      <span class="reg-item-vol">${r.volume.toFixed(1)} mm</span>
+      <span class="reg-item-vol">${(Number(r.volume)||0).toFixed(1)} mm</span>
     </div>`).join('');
-  total.textContent = doDia.reduce((a,r)=>a+r.volume,0).toFixed(1)+' mm';
+  total.textContent = doDia.reduce((a,r)=>a+(Number(r.volume)||0),0).toFixed(1)+' mm';
 }
 
 // ═══════════════════════════
-// MODAL SENHA
+// MODAL SENHA (só para editar/excluir)
 // ═══════════════════════════
+const SENHA_ACAO = '284284';
+let acaoPendente = null; // {tipo:'editar'|'excluir', id}
+
+// Entra no admin direto, sem senha
+function entrarAdmin(){
+  mostrarTela('tela-admin');
+  aplicarFiltro();
+}
+
 function abrirModalSenha(){
   document.getElementById('inp-senha').value='';
   document.getElementById('modal-erro').classList.remove('show');
   document.getElementById('modal-senha').classList.add('open');
   setTimeout(()=>document.getElementById('inp-senha').focus(),150);
 }
-function fecharModalSenha(){ document.getElementById('modal-senha').classList.remove('open'); }
+function fecharModalSenha(){
+  document.getElementById('modal-senha').classList.remove('open');
+  acaoPendente=null;
+}
 function confirmarSenha(){
-  if(document.getElementById('inp-senha').value !== getSenha()){
+  if(document.getElementById('inp-senha').value !== SENHA_ACAO){
     document.getElementById('modal-erro').classList.add('show');
     document.getElementById('inp-senha').select(); return;
   }
-  fecharModalSenha();
-  mostrarTela('tela-admin');
-  aplicarFiltro();
+  document.getElementById('modal-senha').classList.remove('open');
+  // executa a ação que estava pendente
+  if(acaoPendente){
+    if(acaoPendente.tipo==='excluir')  executarExcluir(acaoPendente.id);
+    if(acaoPendente.tipo==='editar')   executarEditar(acaoPendente.id);
+    acaoPendente=null;
+  }
+}
+
+// ═══════════════════════════
+// EDITAR / EXCLUIR (pedem senha)
+// ═══════════════════════════
+function pedirExcluir(id){
+  acaoPendente={tipo:'excluir',id};
+  abrirModalSenha();
+}
+function pedirEditar(id){
+  acaoPendente={tipo:'editar',id};
+  abrirModalSenha();
+}
+
+function executarExcluir(id){
+  if(!confirm('Excluir definitivamente este registro de chuva?')) return;
+  if(window._chuvaReady){
+    window._chuvaDelete(window._chuvaDoc(id))
+      .catch(e=>console.warn('Exclusão em fila (offline):',e.code));
+  }
+  toast('Registro excluído.','ok');
+}
+
+function executarEditar(id){
+  const reg = registros.find(r=>r.id===id);
+  if(!reg) return;
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-info').textContent =
+    `${FAZ_ICONS[reg.fazenda]||''} ${reg.fazenda} — ${new Date(reg.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}`;
+  document.getElementById('edit-volume').value = Number(reg.volume)||0;
+  document.getElementById('modal-editar').classList.add('open');
+  setTimeout(()=>document.getElementById('edit-volume').focus(),150);
+}
+
+function fecharModalEditar(){ document.getElementById('modal-editar').classList.remove('open'); }
+
+function salvarEdicao(){
+  const id  = document.getElementById('edit-id').value;
+  const vol = parseFloat(document.getElementById('edit-volume').value);
+  if(!vol || vol<=0){ toast('Digite um volume válido','err'); return; }
+  if(vol>999){ toast('Volume parece incorreto (máx 999)','err'); return; }
+  if(window._chuvaReady){
+    window._chuvaUpdate(window._chuvaDoc(id), {volume:vol})
+      .catch(e=>console.warn('Edição em fila (offline):',e.code));
+  }
+  fecharModalEditar();
+  toast('Registro atualizado!','ok');
 }
 
 // ═══════════════════════════
@@ -728,7 +804,7 @@ function aplicarFiltro(){
 function renderCards(regs){
   document.getElementById('fazendas-grid').innerHTML=FAZENDAS.map(f=>{
     const items=regs.filter(r=>r.fazenda===f);
-    const soma=items.reduce((a,r)=>a+r.volume,0);
+    const soma=items.reduce((a,r)=>a+(Number(r.volume)||0),0);
     return `<div class="faz-card">
       <div class="faz-card-icon">${FAZ_ICONS[f]}</div>
       <div class="faz-card-nome">${f}</div>
@@ -742,14 +818,18 @@ function renderCards(regs){
 function renderTabela(regs){
   const tbody=document.getElementById('tabela-body');
   if(!regs.length){
-    tbody.innerHTML=`<tr><td colspan="3"><div class="empty-adm">Nenhum registro no período selecionado</div></td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="4"><div class="empty-adm">Nenhum registro no período selecionado</div></td></tr>`;
     return;
   }
   tbody.innerHTML=regs.map(r=>`
     <tr>
       <td>${new Date(r.timestamp).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
       <td class="td-faz">${FAZ_ICONS[r.fazenda]||''} ${r.fazenda}</td>
-      <td class="td-vol">${r.volume.toFixed(1)} mm</td>
+      <td class="td-vol">${(Number(r.volume)||0).toFixed(1)} mm</td>
+      <td class="td-acoes">
+        <button class="row-btn" onclick="pedirEditar('${r.id}')" title="Editar">✏️</button>
+        <button class="row-btn del" onclick="pedirExcluir('${r.id}')" title="Excluir">🗑</button>
+      </td>
     </tr>`).join('');
 }
 
@@ -763,7 +843,7 @@ function exportarCSV(){
   const linhas=[cols.join(';'),...regs.map(r=>[
     `"${new Date(r.timestamp).toLocaleString('pt-BR')}"`,
     `"${r.fazenda}"`,
-    r.volume.toFixed(1)
+    (Number(r.volume)||0).toFixed(1)
   ].join(';'))];
   const blob=new Blob(['\uFEFF'+linhas.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -804,6 +884,8 @@ function iniciar(){
   mostrarTela('tela-home');
   atualizarStatusPills();
   iniciarSync();
+  // Service Worker: permite abrir o app offline (cacheia HTML, fontes e scripts)
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
 
 if(window._chuvaReady){
