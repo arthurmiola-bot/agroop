@@ -10,49 +10,63 @@
   <meta name="mobile-web-app-capable" content="yes"/>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { doc, setDoc, onSnapshot, initializeFirestore,
-         persistentLocalCache, persistentMultipleTabManager }
-  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
-};
-const fbApp = initializeApp(firebaseConfig, "postodiesel");
-const db = initializeFirestore(fbApp, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-});
-const DOC_REF = doc(db, "posto-diesel", "dados");
-window._fbSave = async (data) => {
-  try { await setDoc(DOC_REF, { payload: JSON.stringify(data) }); } catch(e) { console.error(e); }
-};
-// Backup automatico: 7 documentos rotativos por dia da semana (backup-0 a backup-6)
-window._fbBackup = async (data) => {
+<script>
+(function(){
+  var firebaseConfig = {
+    apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
+    authDomain: "agroop-d73d4.firebaseapp.com",
+    projectId: "agroop-d73d4",
+    storageBucket: "agroop-d73d4.firebasestorage.app",
+    messagingSenderId: "591049190246",
+    appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  };
   try {
-    const dow = new Date().getDay(); // 0=domingo ... 6=sabado
-    const ref = doc(db, "posto-diesel", "backup-" + dow);
-    await setDoc(ref, { payload: JSON.stringify(data), savedAt: new Date().toISOString() });
-  } catch(e) { console.error("backup:", e); }
-};
-window._fbListen = (cb) => onSnapshot(DOC_REF, snap => {
-  try { cb(snap.exists() ? JSON.parse(snap.data().payload) : null); } catch(e) {}
-});
-window._fbReady = true;
-window.dispatchEvent(new Event("fb-ready"));
+    var existing = firebase.apps.filter(function(a){return a.name==="postodiesel";});
+    var fbApp = existing.length ? existing[0] : firebase.initializeApp(firebaseConfig, "postodiesel");
+    var db = fbApp.firestore();
+    try {
+      db.enablePersistence({ synchronizeTabs: true }).catch(function(){});
+    } catch(e){}
+    var DOC = db.collection("posto-diesel").doc("dados");
+
+    window._fbSave = function(data){
+      DOC.set({ payload: JSON.stringify(data) }).catch(function(e){ console.error(e); });
+    };
+    window._fbBackup = function(data){
+      var dow = new Date().getDay();
+      db.collection("posto-diesel").doc("backup-"+dow)
+        .set({ payload: JSON.stringify(data), savedAt: new Date().toISOString() })
+        .catch(function(e){ console.error("backup:", e); });
+    };
+    window._fbListen = function(cb){
+      return DOC.onSnapshot(function(snap){
+        try { cb(snap.exists ? JSON.parse(snap.data().payload) : null); } catch(e){}
+      });
+    };
+    window._fbReady = true;
+    window.dispatchEvent(new Event("fb-ready"));
+  } catch(e) {
+    console.error("Firebase init error:", e);
+    // Mesmo se firebase falhar, libera o app em modo local
+    window._fbSave=function(){}; window._fbBackup=function(){};
+    window._fbListen=function(cb){ cb(null); return function(){}; };
+    window._fbReady=true;
+    window.dispatchEvent(new Event("fb-ready"));
+  }
+})();
 </script>
 
-<script type="text/babel">
+<script>
+Babel.registerPreset("react-classic", { presets: [[Babel.availablePresets["react"], { runtime: "classic" }]] });
+</script>
+<script type="text/babel" data-presets="react-classic">
 const { useState, useEffect, useRef } = React;
 
 // ── DADOS INICIAIS ──────────────────────────────────────────────────────────
