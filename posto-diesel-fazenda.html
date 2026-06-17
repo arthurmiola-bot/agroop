@@ -293,9 +293,8 @@ function App(){
     var today=tsNow().slice(0,10);
     if(data.lastBackupDate===today) return;
     window._fbBackup(data);
-    // marca a data sem disparar loop (atualizacao unica por dia)
     setData(function(d){return Object.assign({},d,{lastBackupDate:today});});
-  },[data?data.lastBackupDate:null, data===null]);
+  },[data]);
 
   function showToast(msg,type){
     type=type||"success";
