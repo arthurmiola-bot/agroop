@@ -23,12 +23,12 @@ import { getFirestore, collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot
 // COLE AQUI AS MESMAS CONFIGURAÇÕES DO AGROOP
 // ══════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  apiKey:            "COLE_AQUI_apiKey",
+  authDomain:        "COLE_AQUI_authDomain",
+  projectId:         "COLE_AQUI_projectId",
+  storageBucket:     "COLE_AQUI_storageBucket",
+  messagingSenderId: "COLE_AQUI_messagingSenderId",
+  appId:             "COLE_AQUI_appId"
 };
 // ══════════════════════════════════════════════
 
@@ -535,19 +535,20 @@ let dtTimer      = null;
 // ═══════════════════════════
 function iniciarSync(){
   if(!window._chuvaReady) return;
-  const q = window._chuvaQuery(
-    window._chuvaCol('chuva_registros'),
-    window._chuvaOrder('timestamp','asc')
-  );
-  window._chuvaSnapshot(q,
+  // Lê a coleção SEM orderBy: assim nenhum documento é excluído por não ter
+  // o campo de ordenação. A ordenação é feita no próprio app, abaixo.
+  window._chuvaSnapshot(window._chuvaCol('chuva_registros'),
     (snap) => {
       registros = snap.docs.map(d=>({id:d.id,...d.data()}));
+      // ordena por timestamp (ou data) de forma segura, registros sem data vão para o fim
+      registros.sort((a,b)=>{
+        const ta = a.timestamp || a.data || '';
+        const tb = b.timestamp || b.data || '';
+        return ta.localeCompare(tb);
+      });
       // Atualiza views abertas
       if(document.getElementById('tela-admin').style.display!=='none') aplicarFiltro();
       if(fazendaAtual) renderRegistrosDia();
-      // Aviso só quando há escritas realmente pendentes de envio,
-      // ou quando está offline lendo do cache. Ler do cache estando
-      // online é normal (acontece em toda abertura do app).
       const pendente = snap.metadata.hasPendingWrites ||
                        (snap.metadata.fromCache && !navigator.onLine);
       setSyncPill(pendente);
@@ -875,7 +876,11 @@ function calcRange(){
 function filtrarRegistros(){
   const range=calcRange(); if(!range) return [];
   let r=registros.filter(reg=>{
-    const t=new Date(reg.timestamp);
+    // usa timestamp; se não houver, usa o campo data (meio-dia para evitar fuso)
+    let t = reg.timestamp ? new Date(reg.timestamp)
+          : reg.data      ? new Date(reg.data + 'T12:00:00')
+          : null;
+    if(!t || isNaN(t.getTime())) return false;
     return t>=range.ini && t<=range.fim;
   });
   if(fazFiltro!=='todas') r=r.filter(reg=>reg.fazenda===fazFiltro);
