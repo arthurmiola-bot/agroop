@@ -23,12 +23,12 @@ import { getFirestore, collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot
 // COLE AQUI AS MESMAS CONFIGURAÇÕES DO AGROOP
 // ══════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  apiKey:            "COLE_AQUI_apiKey",
+  authDomain:        "COLE_AQUI_authDomain",
+  projectId:         "COLE_AQUI_projectId",
+  storageBucket:     "COLE_AQUI_storageBucket",
+  messagingSenderId: "COLE_AQUI_messagingSenderId",
+  appId:             "COLE_AQUI_appId"
 };
 // ══════════════════════════════════════════════
 
@@ -143,7 +143,7 @@ body{
 
 .reg-body{padding:1.5rem;max-width:400px;margin:0 auto;}
 
-.reg-data-box{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r-sm);padding:.8rem 1.1rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:.75rem;}
+.reg-data-box{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r-sm);padding:.8rem 1.1rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:.75rem;position:relative;transition:border-color .15s,background .15s;}
 .reg-data-icon{font-size:1.25rem;}
 .reg-data-label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);}
 .reg-data-val{font-size:.92rem;font-weight:800;color:var(--text);}
@@ -401,12 +401,14 @@ tr:hover td{background:#f5f9ff;}
     </div>
   </div>
   <div class="reg-body">
-    <div class="reg-data-box">
+    <div class="reg-data-box" id="reg-data-box" onclick="abrirSeletorData()" style="cursor:pointer;">
       <div class="reg-data-icon">📅</div>
-      <div>
-        <div class="reg-data-label">Data e hora atual</div>
+      <div style="flex:1">
+        <div class="reg-data-label" id="reg-data-label">Data e hora atual</div>
         <div class="reg-data-val" id="reg-datetime">—</div>
       </div>
+      <div style="color:var(--text3);font-size:.75rem;font-weight:600;">alterar ✏️</div>
+      <input type="date" id="reg-data-input" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;" onchange="aoMudarData(this.value)">
     </div>
 
     <div class="volume-display">
@@ -523,6 +525,7 @@ const FAZ_ICONS    = {Rodeio:'🌾',Palmeiras:'🌴',Silo:'🏚️',ACF:'🌿'};
 let registros    = [];
 let fazendaAtual = '';
 let volStr       = '0';
+let dataEscolhida = null;  // null = data/hora atual; senão data retroativa AAAA-MM-DD
 let periodoAtual = 'hoje';
 let fazFiltro    = 'todas';
 let dtTimer      = null;
@@ -594,6 +597,7 @@ function voltarHome(){
 function abrirRegistro(fazenda){
   fazendaAtual = fazenda;
   volStr = '0';
+  dataEscolhida = null; // começa sempre com a data de hoje
   const icons = {Rodeio:'🌾',Palmeiras:'🌴',Silo:'🏚️',ACF:'🌿'};
   document.getElementById('reg-fazenda-title').textContent = (icons[fazenda]||'') + ' ' + fazenda;
   atualizarDisplay();
@@ -605,11 +609,44 @@ function abrirRegistro(fazenda){
   mostrarTela('tela-registro');
 }
 
+// Abre o seletor de data nativo do navegador
+function abrirSeletorData(){
+  const inp = document.getElementById('reg-data-input');
+  // valor inicial = data escolhida ou hoje
+  inp.value = dataEscolhida || new Date().toISOString().slice(0,10);
+  inp.max = new Date().toISOString().slice(0,10); // não permite data futura
+  // showPicker abre o calendário direto (Chrome/Edge/Safari novos)
+  if(inp.showPicker){ try{ inp.showPicker(); return; }catch(e){} }
+  inp.focus(); inp.click();
+}
+
+// Quando o usuário escolhe uma data no calendário
+function aoMudarData(valor){
+  const hoje = new Date().toISOString().slice(0,10);
+  if(valor === hoje){ dataEscolhida = null; }  // voltou para hoje
+  else { dataEscolhida = valor; }
+  atualizarDatetime();
+}
+
 function atualizarDatetime(){
-  const el=document.getElementById('reg-datetime'); if(!el) return;
-  el.textContent = new Date().toLocaleString('pt-BR',{
-    weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'
-  });
+  const el = document.getElementById('reg-datetime');
+  const lbl = document.getElementById('reg-data-label');
+  const box = document.getElementById('reg-data-box');
+  if(!el) return;
+
+  if(dataEscolhida){
+    // data retroativa escolhida
+    const [y,m,d] = dataEscolhida.split('-');
+    const dt = new Date(dataEscolhida + 'T12:00:00');
+    el.textContent = dt.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+    lbl.textContent = 'Data retroativa selecionada';
+    if(box){ box.style.borderColor = 'var(--amber)'; box.style.background = 'var(--amber-lt)'; }
+  } else {
+    // data e hora atual
+    el.textContent = new Date().toLocaleString('pt-BR',{weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'});
+    lbl.textContent = 'Data e hora atual';
+    if(box){ box.style.borderColor = ''; box.style.background = ''; }
+  }
 }
 
 function tecla(v){
@@ -639,22 +676,41 @@ function salvarRegistro(){
   if(!vol || vol <= 0){ toast('Digite um volume maior que zero','err'); return; }
   if(vol > 999){ toast('Volume parece incorreto (máx 999 mm)','err'); return; }
 
-  const agora = new Date();
+  let timestamp, dataStr;
+  if(dataEscolhida){
+    // data retroativa: usa a data escolhida com a hora atual
+    const agora = new Date();
+    const dt = new Date(dataEscolhida + 'T' +
+      String(agora.getHours()).padStart(2,'0') + ':' +
+      String(agora.getMinutes()).padStart(2,'0') + ':00');
+    timestamp = dt.toISOString();
+    dataStr   = dataEscolhida;
+  } else {
+    const agora = new Date();
+    timestamp = agora.toISOString();
+    dataStr   = agora.toISOString().slice(0,10);
+  }
+
   const registro = {
     fazenda:   fazendaAtual,
     volume:    vol,
-    timestamp: agora.toISOString(),
-    data:      agora.toISOString().slice(0,10),
+    timestamp: timestamp,
+    data:      dataStr,
   };
 
   salvarNoFirebase(registro); // não aguarda: funciona offline
 
   // Feedback imediato
-  document.getElementById('confirm-txt').textContent = `${vol} mm registrado! ✔`;
+  const dataFb = dataEscolhida
+    ? ' em ' + dataEscolhida.split('-').reverse().join('/')
+    : '';
+  document.getElementById('confirm-txt').textContent = `${vol} mm registrado${dataFb}! ✔`;
   document.getElementById('confirm-box').classList.add('show');
   setTimeout(()=>document.getElementById('confirm-box').classList.remove('show'), 3000);
 
   volStr='0'; atualizarDisplay();
+  dataEscolhida = null;        // volta para data atual após salvar
+  atualizarDatetime();
   renderRegistrosDia();
   toast(`${vol} mm salvo!`,'ok');
 }
