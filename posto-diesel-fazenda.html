@@ -34,34 +34,92 @@
     try {
       db.enablePersistence({ synchronizeTabs: true }).catch(function(){});
     } catch(e){}
-    var DOC = db.collection("posto-diesel").doc("dados");
 
-    window._fbSave = function(data){
-      DOC.set({ payload: JSON.stringify(data) }).catch(function(e){ console.error(e); });
+    var ROOT = db.collection("posto-diesel");
+    var CONFIG = ROOT.doc("config");          // configuracoes (tanque, custo, operadores, maquinas)
+    var FUEL = ROOT.doc("dados").collection("abastecimentos"); // cada abastecimento = 1 doc
+    var SUP  = ROOT.doc("dados").collection("entradas");       // cada entrada = 1 doc
+    var ADJ  = ROOT.doc("dados").collection("ajustes");        // cada ajuste = 1 doc
+
+    // Salva apenas as CONFIGURACOES (nunca os registros).
+    // Le o documento atual e faz merge manual das propriedades antes de salvar,
+    // pois o payload fica dentro de um unico campo string (merge do Firestore nao entra no JSON).
+    window._fbSaveConfig = function(cfg){
+      CONFIG.get().then(function(snap){
+        var current = {};
+        if(snap.exists && snap.data() && snap.data().payload){
+          try { current = JSON.parse(snap.data().payload); } catch(e){}
+        }
+        var merged = Object.assign({}, current, cfg);
+        return CONFIG.set({ payload: JSON.stringify(merged) });
+      }).catch(function(e){ console.error("cfg:", e); });
     };
+    // Adiciona um registro individual (abastecimento/entrada/ajuste) - nunca sobrescreve
+    window._fbAddFuel = function(item){ FUEL.doc(String(item.id)).set(item).catch(function(e){ console.error("fuel:", e); }); };
+    window._fbDelFuel = function(id){ FUEL.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
+    window._fbAddSup  = function(item){ SUP.doc(String(item.id)).set(item).catch(function(e){ console.error("sup:", e); }); };
+    window._fbAddAdj  = function(item){ ADJ.doc(String(item.id)).set(item).catch(function(e){ console.error("adj:", e); }); };
+
+    // Escuta tudo: config + as 3 subcolecoes, e monta o estado combinado
+    window._fbListenAll = function(cb){
+      var state = { config:null, fuel:[], sup:[], adj:[] };
+      var ready = { config:false, fuel:false, sup:false, adj:false };
+      function emit(){
+        if(!ready.config) return; // espera ao menos a config
+        cb(state);
+      }
+      var u1 = CONFIG.onSnapshot(function(snap){
+        try { state.config = snap.exists ? JSON.parse(snap.data().payload) : null; } catch(e){ state.config=null; }
+        ready.config = true; emit();
+      });
+      var u2 = FUEL.onSnapshot(function(qs){
+        state.fuel = qs.docs.map(function(d){ return d.data(); });
+        ready.fuel = true; emit();
+      });
+      var u3 = SUP.onSnapshot(function(qs){
+        state.sup = qs.docs.map(function(d){ return d.data(); });
+        ready.sup = true; emit();
+      });
+      var u4 = ADJ.onSnapshot(function(qs){
+        state.adj = qs.docs.map(function(d){ return d.data(); });
+        ready.adj = true; emit();
+      });
+      return function(){ u1(); u2(); u3(); u4(); };
+    };
+
+    // Migracao: se existir o documento antigo "dados" com payload, importa uma vez
+    window._fbMigrate = function(done){
+      ROOT.doc("dados").get().then(function(snap){
+        if(snap.exists && snap.data() && snap.data().payload){
+          try {
+            var old = JSON.parse(snap.data().payload);
+            done(old);
+          } catch(e){ done(null); }
+        } else { done(null); }
+      }).catch(function(){ done(null); });
+    };
+
     window._fbBackup = function(data){
       var dow = new Date().getDay();
-      db.collection("posto-diesel").doc("backup-"+dow)
+      ROOT.doc("backup-"+dow)
         .set({ payload: JSON.stringify(data), savedAt: new Date().toISOString() })
         .catch(function(e){ console.error("backup:", e); });
     };
-    window._fbListen = function(cb){
-      return DOC.onSnapshot(function(snap){
-        try { cb(snap.exists ? JSON.parse(snap.data().payload) : null); } catch(e){}
-      });
-    };
+
     window._fbReady = true;
     window.dispatchEvent(new Event("fb-ready"));
   } catch(e) {
     console.error("Firebase init error:", e);
-    // Mesmo se firebase falhar, libera o app em modo local
-    window._fbSave=function(){}; window._fbBackup=function(){};
-    window._fbListen=function(cb){ cb(null); return function(){}; };
+    window._fbSaveConfig=function(){}; window._fbAddFuel=function(){}; window._fbDelFuel=function(){};
+    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbBackup=function(){};
+    window._fbListenAll=function(cb){ cb({config:null,fuel:[],sup:[],adj:[]}); return function(){}; };
+    window._fbMigrate=function(done){ done(null); };
     window._fbReady=true;
     window.dispatchEvent(new Event("fb-ready"));
   }
 })();
 </script>
+
 
 <script>
 Babel.registerPreset("react-classic", { presets: [[Babel.availablePresets["react"], { runtime: "classic" }]] });
@@ -83,8 +141,12 @@ var INIT = {
     { id:4, code:"ESC-01", desc:"Escavadeira Caterpillar 320", active:true, mt:"hourmeter" },
     { id:5, code:"CAM-01", desc:"Caminhao Iveco 4x4",          active:true, mt:"odometer"  },
   ],
+  // Fazendas: cada uma com seu proprio tanque (capacidade, estoque, limite critico)
+  farms: [
+    { id:1, name:"Corrego das Flores", tankCapacity:10000, tankStock:0, lowStockThreshold:1000, active:true },
+  ],
   fuelings:[], supplies:[],
-  tankCapacity:10000, tankStock:0, avgCostPerLiter:0, lowStockThreshold:1000,
+  avgCostPerLiter:0,
   stockAdjustments:[],
   users:[
     { id:1, role:"OPERADOR",      pin:"1111" },
@@ -95,6 +157,25 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
+
+// ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
+function getFarm(data,id){
+  if(!data.farms) return null;
+  for(var i=0;i<data.farms.length;i++){ if(data.farms[i].id===Number(id)) return data.farms[i]; }
+  return null;
+}
+function farmTotalStock(data){
+  if(!data.farms) return 0;
+  return data.farms.reduce(function(s,f){return s+(f.tankStock||0);},0);
+}
+function farmLow(farm){
+  return farm && farm.tankStock<=(farm.lowStockThreshold||1000);
+}
+function anyFarmLow(data){
+  if(!data.farms) return false;
+  for(var i=0;i<data.farms.length;i++){ if(farmLow(data.farms[i])) return true; }
+  return false;
+}
 
 // ── UTILS ───────────────────────────────────────────────────────────────────
 function pad(x){ return String(x).padStart(2,"0"); }
@@ -290,16 +371,75 @@ function App(){
     return function(){window.removeEventListener("fb-ready",h);};
   },[]);
 
+  // Carrega config + abastecimentos + entradas + ajustes de colecoes separadas
   useEffect(function(){
-    if(!ready||!window._fbListen) return;
-    return window._fbListen(function(d){setData(d||INIT);});
+    if(!ready||!window._fbListenAll) return;
+    var migrated=false;
+    var unsub=window._fbListenAll(function(s){
+      // Se nao existe config ainda, tenta migrar do documento antigo "dados"
+      if(s.config===null && !migrated && window._fbMigrate){
+        migrated=true;
+        window._fbMigrate(function(old){
+          if(old){
+            // migra configuracoes - tanque antigo (unico) vira a fazenda "Corrego das Flores"
+            var farms;
+            if(old.farms && old.farms.length){
+              farms=old.farms;
+            } else {
+              farms=[{
+                id:1, name:"Corrego das Flores",
+                tankCapacity: old.tankCapacity||10000,
+                tankStock: old.tankStock||0,
+                lowStockThreshold: old.lowStockThreshold||1000,
+                active:true
+              }];
+            }
+            var cfg={
+              operators:old.operators||INIT.operators,
+              machines:old.machines||INIT.machines,
+              farms:farms,
+              avgCostPerLiter:old.avgCostPerLiter||0,
+              users:old.users||INIT.users,
+              lastBackupDate:old.lastBackupDate||""
+            };
+            window._fbSaveConfig(cfg);
+            // migra registros antigos para documentos individuais, marcando a fazenda 1 (Corrego das Flores)
+            (old.fuelings||[]).forEach(function(x){
+              window._fbAddFuel(Object.assign({farmId:1},x));
+            });
+            (old.supplies||[]).forEach(function(x){
+              // entrada antiga vira entrada com alocacao total na fazenda 1
+              window._fbAddSup(Object.assign({},x,{allocations:[{farmId:1,liters:x.liters}]}));
+            });
+            (old.stockAdjustments||[]).forEach(function(x){
+              window._fbAddAdj(Object.assign({farmId:1},x));
+            });
+          } else {
+            // primeira vez de tudo: cria config inicial
+            window._fbSaveConfig({
+              operators:INIT.operators, machines:INIT.machines, farms:INIT.farms,
+              avgCostPerLiter:INIT.avgCostPerLiter, users:INIT.users, lastBackupDate:""
+            });
+          }
+        });
+        return; // espera proximo snapshot ja com a config
+      }
+      var cfg=s.config||{};
+      var combined={
+        operators: cfg.operators||INIT.operators,
+        machines: cfg.machines||INIT.machines,
+        farms: (cfg.farms&&cfg.farms.length)?cfg.farms:INIT.farms,
+        avgCostPerLiter: cfg.avgCostPerLiter||0,
+        users: cfg.users||INIT.users,
+        lastBackupDate: cfg.lastBackupDate||"",
+        fuelings: s.fuel||[],
+        supplies: s.sup||[],
+        stockAdjustments: s.adj||[]
+      };
+      setData(combined);
+    });
+    return unsub;
   },[ready]);
-
-  useEffect(function(){
-    if(!data||!window._fbSave) return;
-    clearTimeout(sav.current);
-    sav.current=setTimeout(function(){window._fbSave(data);},800);
-  },[data]);
 
   // Backup automatico diario (1x por dia, rotativo por dia da semana)
   useEffect(function(){
@@ -307,7 +447,7 @@ function App(){
     var today=tsNow().slice(0,10);
     if(data.lastBackupDate===today) return;
     window._fbBackup(data);
-    setData(function(d){return Object.assign({},d,{lastBackupDate:today});});
+    saveConfig({lastBackupDate:today});
   },[data]);
 
   function showToast(msg,type){
@@ -316,12 +456,52 @@ function App(){
     clearTimeout(tmr.current);
     tmr.current=setTimeout(function(){setToast(null);},3200);
   }
-  function upd(k,v){setData(function(d){return Object.assign({},d,{[k]:v});});}
+
+  // Salva CONFIGURACOES (fazendas/tanques, custo, operadores, maquinas, etc) com merge - nunca apaga registros
+  function saveConfig(partial){
+    setData(function(d){
+      var nd=Object.assign({},d,partial);
+      if(window._fbSaveConfig){
+        window._fbSaveConfig({
+          operators:nd.operators, machines:nd.machines, farms:nd.farms,
+          avgCostPerLiter:nd.avgCostPerLiter,
+          users:nd.users, lastBackupDate:nd.lastBackupDate
+        });
+      }
+      return nd;
+    });
+  }
+  // Atualiza uma fazenda especifica (ex: tankStock) preservando as demais
+  function updFarm(farmId,partial){
+    setData(function(d){
+      var farms=d.farms.map(function(fa){ return fa.id===Number(farmId) ? Object.assign({},fa,partial) : fa; });
+      var nd=Object.assign({},d,{farms:farms});
+      if(window._fbSaveConfig){
+        window._fbSaveConfig({
+          operators:nd.operators, machines:nd.machines, farms:nd.farms,
+          avgCostPerLiter:nd.avgCostPerLiter,
+          users:nd.users, lastBackupDate:nd.lastBackupDate
+        });
+      }
+      return nd;
+    });
+  }
+  // Adiciona/remove registros individuais - cada um e um documento separado (sem sobrescrita)
+  function addFuel(item){ if(window._fbAddFuel) window._fbAddFuel(item); }
+  function delFuel(id){ if(window._fbDelFuel) window._fbDelFuel(id); }
+  function addSup(item){ if(window._fbAddSup) window._fbAddSup(item); }
+  function addAdj(item){ if(window._fbAddAdj) window._fbAddAdj(item); }
+
+  // Compatibilidade: upd ainda existe para configuracoes
+  function upd(k,v){
+    var partial={}; partial[k]=v;
+    saveConfig(partial);
+  }
 
   if(!data) return <Loading/>;
 
-  var pct=Math.max(0,Math.min(100,(data.tankStock/data.tankCapacity)*100));
-  var low=data.tankStock<=thr(data);
+  var totalStock=farmTotalStock(data);
+  var lowAny=anyFarmLow(data);
 
   if(!role) return (
     <Login
@@ -364,15 +544,29 @@ function App(){
       </header>
 
       <div style={{background:"#e8f5e8",padding:"9px 18px",borderBottom:"2px solid "+BDR}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
           <span style={{fontFamily:"'Barlow Condensed'",fontSize:12,color:GN,textTransform:"uppercase",fontWeight:700,letterSpacing:1}}>
-            Estoque no Tanque {low&&<span className="pu" style={{color:RED}}>ESTOQUE BAIXO</span>}
+            Estoque por Fazenda {lowAny&&<span className="pu" style={{color:RED}}>ESTOQUE BAIXO</span>}
           </span>
-          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,color:low?RED:GN}}>
-            {fmtN(data.tankStock)} L / {fmtN(data.tankCapacity)} L
+          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:13,color:GN}}>
+            Total: {fmtN(totalStock)} L
           </span>
         </div>
-        <div className="tbar"><div className={"tfill"+(low?" low":"")} style={{width:pct+"%"}}/></div>
+        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+          {(data.farms||[]).filter(function(fa){return fa.active!==false;}).map(function(fa){
+            var pctF=Math.max(0,Math.min(100,(fa.tankStock/fa.tankCapacity)*100));
+            var lowF=farmLow(fa);
+            return (
+              <div key={fa.id} style={{flex:"1 1 160px",minWidth:140}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
+                  <span style={{color:MUT,fontWeight:600}}>{fa.name}</span>
+                  <span style={{color:lowF?RED:GN,fontWeight:700}}>{fmtN(fa.tankStock)}/{fmtN(fa.tankCapacity)} L</span>
+                </div>
+                <div className="tbar" style={{height:16}}><div className={"tfill"+(lowF?" low":"")} style={{width:pctF+"%"}}/></div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <nav style={{background:"#fff",padding:"0 18px",borderBottom:"2px solid "+BDR,display:"flex",overflowX:"auto",boxShadow:"0 2px 4px rgba(0,0,0,0.05)"}}>
@@ -402,12 +596,12 @@ function App(){
           </div>
         )}
         <div className="fi" key={tab}>
-          {tab==="fuel"&&<Fuel data={data} upd={upd} role={role} toast={showToast}/>}
+          {tab==="fuel"&&<Fuel data={data} saveConfig={saveConfig} updFarm={updFarm} addFuel={addFuel} role={role} toast={showToast}/>}
           {tab==="dash"&&<Dash data={data}/>}
-          {tab==="sup"&&<Sup data={data} upd={upd} toast={showToast}/>}
-          {tab==="reg"&&<Reg data={data} upd={upd} toast={showToast}/>}
+          {tab==="sup"&&<Sup data={data} saveConfig={saveConfig} updFarm={updFarm} addSup={addSup} toast={showToast}/>}
+          {tab==="reg"&&<Reg data={data} upd={upd} saveConfig={saveConfig} toast={showToast}/>}
           {tab==="rep"&&<Rep data={data}/>}
-          {tab==="adj"&&<Adj data={data} upd={upd} toast={showToast}/>}
+          {tab==="adj"&&<Adj data={data} saveConfig={saveConfig} updFarm={updFarm} addAdj={addAdj} addFuel={addFuel} delFuel={delFuel} toast={showToast}/>}
         </div>
       </main>
     </div>
@@ -476,12 +670,14 @@ function Login(props){
 
 // ── ABASTECER ────────────────────────────────────────────────────────────────
 function Fuel(props){
-  var data=props.data, upd=props.upd, role=props.role, toast=props.toast;
-  var _f=useState({op:"",mc:"",meter:"",lts:""}), f=_f[0], setF=_f[1];
+  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addFuel=props.addFuel, role=props.role, toast=props.toast;
+  var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
+  var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""}), f=_f[0], setF=_f[1];
   var _conf=useState(false), conf=_conf[0], setConf=_conf[1];
 
   function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
 
+  var farm=getFarm(data,f.farm);
   var mc=null;
   for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===Number(f.mc)){mc=data.machines[i];break;}}
   var mt=mc?getMachineMt(mc):"hourmeter";
@@ -491,26 +687,41 @@ function Fuel(props){
     if(mf.length>0) lastM=mf[0].meter;
   }
   var mOk=f.meter&&Number(f.meter)>0&&(!lastM||Number(f.meter)>=lastM);
-  var ok=f.op&&f.mc&&mOk&&f.lts&&Number(f.lts)>0&&Number(f.lts)<=data.tankStock;
+  var ok=f.farm&&farm&&f.op&&f.mc&&mOk&&f.lts&&Number(f.lts)>0&&Number(f.lts)<=(farm?farm.tankStock:0);
 
   var submitting=useRef(false);
   function submit(){
-    if(submitting.current) return; // evita duplo clique
+    if(submitting.current||!farm) return; // evita duplo clique
     submitting.current=true;
-    upd("fuelings",data.fuelings.concat([{id:Date.now(),operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:Number(f.lts),date:tsNow(),registeredBy:role}]));
-    upd("tankStock",Math.max(0,data.tankStock-Number(f.lts)));
-    setF({op:"",mc:"",meter:"",lts:""});
+    // adiciona o abastecimento como documento individual (sem sobrescrever nada)
+    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:Number(f.lts),date:tsNow(),registeredBy:role});
+    // atualiza apenas o estoque da fazenda especifica
+    updFarm(farm.id,{tankStock:Math.max(0,farm.tankStock-Number(f.lts))});
+    setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""});
     setConf(false);
-    toast("Abastecimento registrado: "+f.lts+"L");
+    toast("Abastecimento registrado: "+f.lts+"L em "+farm.name);
     setTimeout(function(){submitting.current=false;},1500);
   }
 
   return (
     <div>
-      {data.tankStock<=thr(data)&&<div className="alrt" style={{marginBottom:16}}>ESTOQUE CRITICO: {fmtN(data.tankStock)} L. Solicite reabastecimento!</div>}
+      {farm&&farmLow(farm)&&<div className="alrt" style={{marginBottom:16}}>ESTOQUE CRITICO em {farm.name}: {fmtN(farm.tankStock)} L. Solicite reabastecimento!</div>}
       <div className="sec" style={{display:"flex",alignItems:"center",gap:8}}><Logo size={28} white={false}/> Registrar Abastecimento</div>
       <div className="card" style={{maxWidth:500}}>
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div className="fg">
+            <div className="flbl">Fazenda</div>
+            <select value={f.farm} onChange={function(e){sf("farm",e.target.value);}} style={{fontSize:16}}>
+              <option value="">Selecione a fazenda</option>
+              {activeFarms.map(function(fa){return <option key={fa.id} value={fa.id}>{fa.name}</option>;})}
+            </select>
+          </div>
+          {farm&&(
+            <div className="pill" style={{display:"flex",justifyContent:"space-between",padding:"6px 12px"}}>
+              <span>Estoque em {farm.name}:</span>
+              <strong style={{color:farmLow(farm)?RED:GN}}>{fmtN(farm.tankStock)} L</strong>
+            </div>
+          )}
           <div className="fg">
             <div className="flbl">Operador</div>
             <select value={f.op} onChange={function(e){sf("op",e.target.value);}} style={{fontSize:16}}>
@@ -542,19 +753,20 @@ function Fuel(props){
           <div className="fg">
             <div className="flbl">Quantidade (Litros)</div>
             <input type="number" placeholder="Ex: 45" value={f.lts} onChange={function(e){sf("lts",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
-            {f.lts&&Number(f.lts)>data.tankStock&&<div style={{color:RED,fontSize:12,marginTop:4}}>Quantidade maior que o estoque ({fmtN(data.tankStock)} L)</div>}
+            {farm&&f.lts&&Number(f.lts)>farm.tankStock&&<div style={{color:RED,fontSize:12,marginTop:4}}>Quantidade maior que o estoque de {farm.name} ({fmtN(farm.tankStock)} L)</div>}
           </div>
           <Btn full={true} onClick={function(){setConf(true);}} disabled={!ok} style={{padding:"15px",fontSize:17,marginTop:4}}>REGISTRAR ABASTECIMENTO</Btn>
         </div>
       </div>
-      {conf&&(
+      {conf&&farm&&(
         <Modal title="Confirmar Abastecimento" onClose={function(){setConf(false);}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+            <Rw label="Fazenda" value={farm.name}/>
             <Rw label="Operador" value={function(){var o=data.operators.filter(function(o){return o.id===Number(f.op);})[0];return o?o.name:""}()}/>
             <Rw label="Maquina" value={mc?mc.code+" - "+getMachineDesc(mc):""}/>
             <Rw label={mLbl(mt)} value={fmtN(f.meter)+" "+mUnit(mt)}/>
             <Rw label="Quantidade" value={f.lts+" L"}/>
-            <Rw label="Estoque apos" value={fmtN(data.tankStock-Number(f.lts))+" L"}/>
+            <Rw label="Estoque apos" value={fmtN(farm.tankStock-Number(f.lts))+" L"}/>
           </div>
           <div style={{display:"flex",gap:10}}>
             <Btn full={true} onClick={function(){setConf(false);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
@@ -580,16 +792,40 @@ function Dash(props){
   }).filter(function(m){return m.tot>0;}).sort(function(a,b){return b.tot-a.tot;});
   var rec=data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).slice(0,5);
   var avg=data.avgCostPerLiter||0;
+  var totalStock=farmTotalStock(data);
+  var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
   return (
     <div style={{display:"flex",flexDirection:"column",gap:22}}>
       <div className="sec">Painel Geral</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
-        <div className="sbox"><div className="slbl">Estoque Atual</div><div className="sval" style={{color:data.tankStock<=thr(data)?RED:GN}}>{fmtN(data.tankStock)}<span className="sunit"> L</span></div></div>
+        <div className="sbox"><div className="slbl">Estoque Total</div><div className="sval" style={{color:anyFarmLow(data)?RED:GN}}>{fmtN(totalStock)}<span className="sunit"> L</span></div></div>
         <div className="sbox"><div className="slbl">Consumo 30 dias</div><div className="sval">{fmtN(l30)}<span className="sunit"> L</span></div></div>
         {avg>0&&<div className="sbox"><div className="slbl">Custo Medio/L</div><div className="sval" style={{fontSize:20,color:AMB}}>{fmtR(avg)}</div></div>}
-        {avg>0&&<div className="sbox"><div className="slbl">Valor em Estoque</div><div className="sval" style={{fontSize:18,color:AMB}}>{fmtR(data.tankStock*avg)}</div></div>}
+        {avg>0&&<div className="sbox"><div className="slbl">Valor em Estoque</div><div className="sval" style={{fontSize:18,color:AMB}}>{fmtR(totalStock*avg)}</div></div>}
         <div className="sbox"><div className="slbl">Abastecimentos</div><div className="sval">{data.fuelings.length}</div></div>
         <div className="sbox"><div className="slbl">Total Recebido</div><div className="sval">{fmtN(totS)}<span className="sunit"> L</span></div></div>
+      </div>
+      <div className="card">
+        <div className="sec" style={{fontSize:16}}>Estoque por Fazenda</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
+          {activeFarms.map(function(fa){
+            var pctF=Math.max(0,Math.min(100,(fa.tankStock/fa.tankCapacity)*100));
+            var lowF=farmLow(fa);
+            var farmFuel=data.fuelings.filter(function(x){return x.farmId===fa.id;});
+            var farmConsumed=farmFuel.reduce(function(s,x){return s+x.liters;},0);
+            return (
+              <div key={fa.id} style={{background:"#f7faf7",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+BDR}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:16,color:GN}}>{fa.name}</span>
+                  {lowF&&<span className="bdg br" style={{fontSize:10}}>BAIXO</span>}
+                </div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800,color:lowF?RED:TXT}}>{fmtN(fa.tankStock)}<span style={{fontSize:13,color:MUT,fontWeight:400}}> / {fmtN(fa.tankCapacity)} L</span></div>
+                <div className="tbar" style={{height:10,marginTop:6}}><div className={"tfill"+(lowF?" low":"")} style={{width:pctF+"%"}}/></div>
+                <div style={{fontSize:11,color:DIM,marginTop:6}}>{farmFuel.length} abastecimentos - {fmtN(farmConsumed)} L consumidos</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
         <div className="card">
@@ -619,14 +855,14 @@ function Dash(props){
         <div className="card">
           <div className="sec" style={{fontSize:16}}>Ultimos Abastecimentos</div>
           {rec.length===0?<div style={{color:MUT}}>Nenhum registro ainda.</div>:rec.map(function(x){
-            var op=null,mc2=null;
+            var op=null,mc2=null,fa2=getFarm(data,x.farmId);
             for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
             for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc2=data.machines[i];break;}}
             return (
               <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"} - {op?op.name:"-"}</div>
-                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}</div>
+                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
                 </div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
               </div>
@@ -640,26 +876,54 @@ function Dash(props){
 
 // ── ENTRADA DIESEL ───────────────────────────────────────────────────────────
 function Sup(props){
-  var data=props.data, upd=props.upd, toast=props.toast;
-  var _f=useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""}), f=_f[0], setF=_f[1];
+  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addSup=props.addSup, toast=props.toast;
+  var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
+  var initAlloc={};
+  activeFarms.forEach(function(fa){ initAlloc[fa.id]=""; });
+  var _f=useState({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",nf:""}), f=_f[0], setF=_f[1];
+  var _alloc=useState(initAlloc), alloc=_alloc[0], setAlloc=_alloc[1];
   function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
-  var ok=f.supplier&&f.date&&f.liters&&Number(f.liters)>0&&f.pricePerLiter;
-  var tot=(Number(f.liters)*Number(f.pricePerLiter))||0;
+  function sa(farmId,v){setAlloc(function(p){var n=Object.assign({},p); n[farmId]=v; return n;});}
 
+  var totalLiters=activeFarms.reduce(function(s,fa){return s+(Number(alloc[fa.id])||0);},0);
+  var ok=f.supplier&&f.date&&f.pricePerLiter&&totalLiters>0;
+  var tot=(totalLiters*Number(f.pricePerLiter))||0;
+
+  var submitting=useRef(false);
   function submit(){
-    var nL=Number(f.liters), nP=Number(f.pricePerLiter);
-    var cur=data.tankStock, ca=data.avgCostPerLiter||0;
-    var nA=cur+nL>0?((cur*ca)+(nL*nP))/(cur+nL):nP;
-    upd("supplies",data.supplies.concat([Object.assign({id:Date.now()},f,{liters:nL,pricePerLiter:nP})]));
-    upd("tankStock",Math.min(data.tankCapacity,cur+nL));
-    upd("avgCostPerLiter",Math.round(nA*10000)/10000);
-    setF({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",liters:"",nf:""});
-    toast("Entrada: "+f.liters+"L - Custo medio: "+fmtR(nA)+"/L");
+    if(submitting.current) return;
+    submitting.current=true;
+    var nP=Number(f.pricePerLiter);
+    var ca=data.avgCostPerLiter||0;
+    var curTotal=farmTotalStock(data);
+    // custo medio ponderado GERAL (soma de todas as fazendas)
+    var nA=curTotal+totalLiters>0?((curTotal*ca)+(totalLiters*nP))/(curTotal+totalLiters):nP;
+
+    var allocations=activeFarms.filter(function(fa){return Number(alloc[fa.id])>0;}).map(function(fa){
+      return {farmId:fa.id, liters:Number(alloc[fa.id])};
+    });
+
+    // adiciona a entrada como documento individual, com a divisao por fazenda
+    addSup(Object.assign({id:Date.now(),liters:totalLiters,pricePerLiter:nP,allocations:allocations},f));
+
+    // atualiza o estoque de cada fazenda que recebeu volume
+    allocations.forEach(function(a){
+      var fa=getFarm(data,a.farmId);
+      if(fa) updFarm(fa.id,{tankStock:Math.min(fa.tankCapacity,fa.tankStock+a.liters)});
+    });
+    // custo medio e geral, salva na config
+    saveConfig({avgCostPerLiter:Math.round(nA*10000)/10000});
+
+    setF({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",nf:""});
+    setAlloc(initAlloc);
+    toast("Entrada: "+totalLiters+"L - Custo medio: "+fmtR(nA)+"/L");
+    setTimeout(function(){submitting.current=false;},1500);
   }
 
+  var curTotal2=farmTotalStock(data);
   var previewAvg=0;
-  if(f.liters&&f.pricePerLiter&&data.tankStock+Number(f.liters)>0){
-    previewAvg=((data.tankStock*(data.avgCostPerLiter||0))+(Number(f.liters)*Number(f.pricePerLiter)))/(data.tankStock+Number(f.liters));
+  if(totalLiters>0&&f.pricePerLiter&&curTotal2+totalLiters>0){
+    previewAvg=((curTotal2*(data.avgCostPerLiter||0))+(totalLiters*Number(f.pricePerLiter)))/(curTotal2+totalLiters);
   }
 
   // Price chart data
@@ -676,12 +940,25 @@ function Sup(props){
             <Fld label="NF / Documento" value={f.nf} onChange={function(v){sf("nf",v);}} placeholder="Numero da nota fiscal"/>
             <Fld label="Data de Recebimento" type="date" value={f.date} onChange={function(v){sf("date",v);}}/>
             <Fld label="Condicao de Pagamento" value={f.paymentTerm} onChange={function(v){sf("paymentTerm",v);}} placeholder="Ex: 30 dias"/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <Fld label="Preco/Litro (R$)" type="number" value={f.pricePerLiter} onChange={function(v){sf("pricePerLiter",v);}} placeholder="0,00"/>
-              <Fld label="Volume (L)" type="number" value={f.liters} onChange={function(v){sf("liters",v);}} placeholder="0"/>
+            <Fld label="Preco/Litro (R$)" type="number" value={f.pricePerLiter} onChange={function(v){sf("pricePerLiter",v);}} placeholder="0,00"/>
+
+            <div className="fg">
+              <div className="flbl">Volume por Fazenda (L)</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {activeFarms.map(function(fa){
+                  return (
+                    <div key={fa.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:13,color:MUT,flex:1}}>{fa.name}</span>
+                      <input type="number" value={alloc[fa.id]||""} onChange={function(e){sa(fa.id,e.target.value);}} placeholder="0" style={{width:110,fontSize:15,textAlign:"center"}}/>
+                    </div>
+                  );
+                })}
+              </div>
+              {totalLiters>0&&<div className="pill" style={{marginTop:8,display:"flex",justifyContent:"space-between"}}><span>Volume total:</span><strong style={{color:GN}}>{fmtN(totalLiters)} L</strong></div>}
             </div>
+
             {tot>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Total da nota:</span><strong style={{color:GN}}>{fmtR(tot)}</strong></div>}
-            {previewAvg>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between",background:"#fef9c3",borderColor:"#fde047"}}><span>Novo custo medio estimado:</span><strong style={{color:AMB}}>{fmtR(previewAvg)}/L</strong></div>}
+            {previewAvg>0&&<div className="pill" style={{display:"flex",justifyContent:"space-between",background:"#fef9c3",borderColor:"#fde047"}}><span>Novo custo medio geral estimado:</span><strong style={{color:AMB}}>{fmtR(previewAvg)}/L</strong></div>}
             <Btn full={true} onClick={submit} disabled={!ok} style={{marginTop:4}}>REGISTRAR ENTRADA</Btn>
           </div>
         </div>
@@ -690,23 +967,28 @@ function Sup(props){
           {data.avgCostPerLiter>0&&(
             <div style={{background:"#fef9c3",border:"2px solid #fde047",borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
-                <div style={{fontSize:11,color:AMB,textTransform:"uppercase",letterSpacing:.5,fontWeight:700}}>Custo Medio Ponderado Atual</div>
+                <div style={{fontSize:11,color:AMB,textTransform:"uppercase",letterSpacing:.5,fontWeight:700}}>Custo Medio Ponderado Geral</div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontSize:26,fontWeight:800,color:AMB}}>{fmtR(data.avgCostPerLiter)}/L</div>
               </div>
               <div style={{textAlign:"right",fontSize:12,color:AMB}}>
-                <div>Estoque: {fmtN(data.tankStock)} L</div>
-                <div style={{fontWeight:600}}>Valor: {fmtR(data.tankStock*data.avgCostPerLiter)}</div>
+                <div>Estoque total: {fmtN(farmTotalStock(data))} L</div>
+                <div style={{fontWeight:600}}>Valor: {fmtR(farmTotalStock(data)*data.avgCostPerLiter)}</div>
               </div>
             </div>
           )}
           <div style={{overflowX:"auto"}}>
             <table>
-              <thead><tr><th>Data</th><th>Fornecedor</th><th>Volume</th><th>Preco/L</th><th>Total</th></tr></thead>
+              <thead><tr><th>Data</th><th>Fornecedor</th><th>Fazendas</th><th>Volume</th><th>Preco/L</th><th>Total</th></tr></thead>
               <tbody>{data.supplies.slice().reverse().map(function(s){
+                var allocTxt=(s.allocations||[]).map(function(a){
+                  var fa=getFarm(data,a.farmId);
+                  return (fa?fa.name:"?")+": "+fmtN(a.liters)+"L";
+                }).join(" / ");
                 return (
                   <tr key={s.id}>
                     <td style={{whiteSpace:"nowrap",fontSize:13}}>{fmtDate(s.date)}</td>
                     <td>{s.supplier}</td>
+                    <td style={{fontSize:12,color:MUT}}>{allocTxt||"-"}</td>
                     <td><span style={{color:GN,fontWeight:600}}>{fmtN(s.liters)} L</span></td>
                     <td style={{color:GN,fontWeight:600}}>{fmtR(s.pricePerLiter)}</td>
                     <td style={{color:AMB}}>{fmtR(s.liters*s.pricePerLiter)}</td>
@@ -915,10 +1197,11 @@ function Reg(props){
 // ── RELATÓRIOS ───────────────────────────────────────────────────────────────
 function Rep(props){
   var data=props.data;
-  var _fil=useState({mc:"",op:"",from:"",to:""}), fil=_fil[0], setFil=_fil[1];
+  var _fil=useState({farm:"",mc:"",op:"",from:"",to:""}), fil=_fil[0], setFil=_fil[1];
   function sf(k,v){setFil(function(p){return Object.assign({},p,{[k]:v});});}
 
   var rows=data.fuelings.filter(function(x){
+    if(fil.farm&&x.farmId!==Number(fil.farm)) return false;
     if(fil.mc&&x.machineId!==Number(fil.mc)) return false;
     if(fil.op&&x.operatorId!==Number(fil.op)) return false;
     if(fil.from&&x.date<fil.from) return false;
@@ -938,14 +1221,14 @@ function Rep(props){
   }).filter(function(x){return x!==null;});
 
   function exportCSV(){
-    var header="Data;Maquina;Descricao;Operador;Medidor;Unidade;Litros;CustoUnit;CustoTotal;RegistradoPor";
+    var header="Data;Fazenda;Maquina;Descricao;Operador;Medidor;Unidade;Litros;CustoUnit;CustoTotal;RegistradoPor";
     var lines=rows.map(function(x){
-      var op=null, mc=null;
+      var op=null, mc=null, fa=getFarm(data,x.farmId);
       for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
       for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
       var cu=avg>0?avg.toFixed(4):"";
       var ct=avg>0?(x.liters*avg).toFixed(2):"";
-      return [x.date,mc?mc.code:"",mc?getMachineDesc(mc):"",op?op.name:"",x.meter,mUnit(mc?getMachineMt(mc):"hourmeter"),x.liters,cu,ct,x.registeredBy].join(";");
+      return [x.date,fa?fa.name:"",mc?mc.code:"",mc?getMachineDesc(mc):"",op?op.name:"",x.meter,mUnit(mc?getMachineMt(mc):"hourmeter"),x.liters,cu,ct,x.registeredBy].join(";");
     });
     var csv="\uFEFF"+header+"\n"+lines.join("\n");
     var a=document.createElement("a");
@@ -962,6 +1245,11 @@ function Rep(props){
       </div>
       <div className="card" style={{marginBottom:18}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
+          <div className="fg"><div className="flbl">Fazenda</div>
+            <select value={fil.farm} onChange={function(e){sf("farm",e.target.value);}}>
+              <option value="">Todas</option>{(data.farms||[]).map(function(fa){return <option key={fa.id} value={fa.id}>{fa.name}</option>;})}
+            </select>
+          </div>
           <div className="fg"><div className="flbl">Maquina</div>
             <select value={fil.mc} onChange={function(e){sf("mc",e.target.value);}}>
               <option value="">Todas</option>{data.machines.map(function(m){return <option key={m.id} value={m.id}>{m.code}</option>;})}
@@ -1008,16 +1296,17 @@ function Rep(props){
       <div className="card">
         <div style={{overflowX:"auto"}}>
           <table>
-            <thead><tr><th>Data</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>Custo</th><th>Origem</th></tr></thead>
+            <thead><tr><th>Data</th><th>Fazenda</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>Custo</th><th>Origem</th></tr></thead>
             <tbody>
-              {rows.length===0?<tr><td colSpan={7} style={{textAlign:"center",color:MUT,padding:28}}>Nenhum registro encontrado</td></tr>
+              {rows.length===0?<tr><td colSpan={8} style={{textAlign:"center",color:MUT,padding:28}}>Nenhum registro encontrado</td></tr>
               :rows.map(function(x){
-                var op=null, mc=null;
+                var op=null, mc=null, fa=getFarm(data,x.farmId);
                 for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
                 for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
                 return (
                   <tr key={x.id}>
                     <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDateTime(x.date)}</td>
+                    <td style={{fontSize:12,color:MUT}}>{fa?fa.name:"-"}</td>
                     <td><div style={{display:"flex",gap:5,alignItems:"center"}}>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
                       <span className={"bdg "+(mc&&getMachineMt(mc)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&getMachineMt(mc)==="odometer"?"ODO":"HOR"}</span>
@@ -1040,52 +1329,96 @@ function Rep(props){
 
 // ── AJUSTES ──────────────────────────────────────────────────────────────────
 function Adj(props){
-  var data=props.data, upd=props.upd, toast=props.toast;
-  var _f=useState({type:"correcao",liters:"",note:"",cost:""}), f=_f[0], setF=_f[1];
+  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addAdj=props.addAdj, addFuel=props.addFuel, delFuel=props.delFuel, toast=props.toast;
+  var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
+  var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",type:"correcao",liters:"",note:"",cost:""}), f=_f[0], setF=_f[1];
   function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
-  var _thr=useState(String(data.lowStockThreshold||1000)), thr2=_thr[0], setThr2=_thr[1];
+  var farm=getFarm(data,f.farm);
+
+  var _thrMap=useState({}), thrMap=_thrMap[0], setThrMap=_thrMap[1];
+  function getThr(farmId){
+    if(thrMap[farmId]!==undefined) return thrMap[farmId];
+    var fa=getFarm(data,farmId);
+    return String(fa?fa.lowStockThreshold||1000:1000);
+  }
+  function setThr(farmId,v){ setThrMap(function(p){var n=Object.assign({},p); n[farmId]=v; return n;}); }
+
   var _pin=useState(""), adjPin=_pin[0], setAdjPin=_pin[1];
   var _pinErr=useState(false), adjPinErr=_pinErr[0], setAdjPinErr=_pinErr[1];
   var _pinOk=useState(false), adjPinOk=_pinOk[0], setAdjPinOk=_pinOk[1];
   var _em=useState(null), em=_em[0], setEm=_em[1];
   var _ef=useState({}), ef=_ef[0], setEf=_ef[1];
 
+  // Cadastro de fazendas
+  var _fmodal=useState(null), fmodal=_fmodal[0], setFmodal=_fmodal[1];
+  var _fform=useState({}), fform=_fform[0], setFform=_fform[1];
+
   function checkPin(){
     if(adjPin===ADJ_PIN){setAdjPinOk(true);setAdjPinErr(false);}
     else{setAdjPinErr(true);setAdjPin("");}
   }
-  function saveThr(){
-    var v=Number(thr2);
+  function saveThr(farmId){
+    var v=Number(getThr(farmId));
     if(!v||v<0) return;
-    upd("lowStockThreshold",v);
-    toast("Nivel critico: "+fmtN(v)+" L");
+    updFarm(farmId,{lowStockThreshold:v});
+    toast("Nivel critico atualizado: "+fmtN(v)+" L");
   }
   function applyAdj(){
+    if(!farm) return;
     var L=Number(f.liters), C=Number(f.cost)||0;
-    var ns=data.tankStock, na=data.avgCostPerLiter||0;
+    var ns=farm.tankStock, na=data.avgCostPerLiter||0;
     if(f.type==="inicial"){ns=L;if(C>0)na=C;}
-    else if(f.type==="adicao"){if(C>0&&(ns+L>0))na=((ns*na)+(L*C))/(ns+L);ns=Math.min(data.tankCapacity,ns+L);}
+    else if(f.type==="adicao"){
+      var totalStockNow=farmTotalStock(data);
+      if(C>0&&(totalStockNow+L>0)) na=((totalStockNow*na)+(L*C))/(totalStockNow+L);
+      ns=Math.min(farm.tankCapacity,ns+L);
+    }
     else if(f.type==="correcao"){ns=L;if(C>0)na=C;}
     else if(f.type==="remocao"){ns=Math.max(0,ns-L);}
-    upd("stockAdjustments",data.stockAdjustments.concat([{id:Date.now(),date:tsNow(),type:f.type,liters:L,note:f.note,by:"ADMINISTRADOR",cost:C}]));
-    upd("tankStock",ns);
-    if(na!==data.avgCostPerLiter) upd("avgCostPerLiter",Math.round(na*10000)/10000);
-    setF({type:"correcao",liters:"",note:"",cost:""});
-    toast("Ajuste aplicado");
+    addAdj({id:Date.now(),farmId:farm.id,date:tsNow(),type:f.type,liters:L,note:f.note,by:"ADMINISTRADOR",cost:C});
+    updFarm(farm.id,{tankStock:ns});
+    if(na!==data.avgCostPerLiter) saveConfig({avgCostPerLiter:Math.round(na*10000)/10000});
+    setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",type:"correcao",liters:"",note:"",cost:""});
+    toast("Ajuste aplicado em "+farm.name);
   }
   function saveE(){
     var oldL=Number(em.liters), newL=Number(ef.liters);
     var diff=oldL-newL; // se diminuiu litros, devolve ao estoque
-    upd("fuelings",data.fuelings.map(function(x){return x.id===em.id?Object.assign({},x,{liters:newL,meter:Number(ef.meter)}):x;}));
-    if(diff!==0) upd("tankStock",Math.max(0,Math.min(data.tankCapacity,data.tankStock+diff)));
+    var emFarm=getFarm(data,em.farmId);
+    // atualiza o documento individual do abastecimento
+    addFuel(Object.assign({},em,{liters:newL,meter:Number(ef.meter)}));
+    if(diff!==0&&emFarm) updFarm(emFarm.id,{tankStock:Math.max(0,Math.min(emFarm.tankCapacity,emFarm.tankStock+diff))});
     setEm(null);toast("Abastecimento atualizado"+(diff!==0?" - estoque ajustado":""));
   }
   function delE(id){
     var x=null;
     for(var i=0;i<data.fuelings.length;i++){if(data.fuelings[i].id===id){x=data.fuelings[i];break;}}
-    upd("fuelings",data.fuelings.filter(function(f){return f.id!==id;}));
-    upd("tankStock",data.tankStock+x.liters);
+    delFuel(id);
+    if(x){
+      var xFarm=getFarm(data,x.farmId);
+      if(xFarm) updFarm(xFarm.id,{tankStock:xFarm.tankStock+x.liters});
+    }
     toast("Removido e estoque restaurado");setEm(null);
+  }
+
+  // Cadastro/edicao de fazendas
+  function openFarmAdd(){ setFmodal({item:null}); setFform({tankCapacity:"",tankStock:"",lowStockThreshold:"1000"}); }
+  function openFarmEdit(fa){ setFmodal({item:fa}); setFform({name:fa.name,tankCapacity:String(fa.tankCapacity),tankStock:String(fa.tankStock),lowStockThreshold:String(fa.lowStockThreshold||1000)}); }
+  function saveFarm(){
+    if(!fform.name||!fform.name.trim()) return;
+    var cap=Number(fform.tankCapacity)||0, stk=Number(fform.tankStock)||0, thrv=Number(fform.lowStockThreshold)||1000;
+    if(fmodal.item){
+      saveConfig({farms:data.farms.map(function(fa){return fa.id===fmodal.item.id?Object.assign({},fa,{name:fform.name,tankCapacity:cap,tankStock:stk,lowStockThreshold:thrv}):fa;})});
+      toast("Fazenda atualizada");
+    } else {
+      var newId=Date.now();
+      saveConfig({farms:data.farms.concat([{id:newId,name:fform.name,tankCapacity:cap,tankStock:stk,lowStockThreshold:thrv,active:true}])});
+      toast("Fazenda cadastrada: "+fform.name);
+    }
+    setFmodal(null);
+  }
+  function toggleFarm(faId){
+    saveConfig({farms:data.farms.map(function(fa){return fa.id===faId?Object.assign({},fa,{active:fa.active===false?true:false}):fa;})});
   }
 
   var emMc=null;
@@ -1130,25 +1463,64 @@ function Adj(props){
           </div>
 
           <div className="card" style={{borderColor:"#fca5a5"}}>
-            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:RED,marginBottom:5}}>NIVEL CRITICO DE ESTOQUE</div>
-            <div style={{fontSize:13,color:MUT,marginBottom:14}}>Abaixo deste valor, um alerta vermelho aparece para todos.</div>
-            <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
-              <div className="fg" style={{flex:1,minWidth:160}}>
-                <div className="flbl">Limite de Alerta (Litros)</div>
-                <input type="number" value={thr2} onChange={function(e){setThr2(e.target.value);}} style={{fontSize:20,fontWeight:700,textAlign:"center",borderColor:"#fca5a5"}}/>
-              </div>
-              <Btn onClick={saveThr} color={RED} disabled={!thr2||Number(thr2)<0} style={{whiteSpace:"nowrap"}}>SALVAR LIMITE</Btn>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:RED,marginBottom:5}}>NIVEL CRITICO POR FAZENDA</div>
+            <div style={{fontSize:13,color:MUT,marginBottom:14}}>Abaixo deste valor, um alerta vermelho aparece para a fazenda correspondente.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              {activeFarms.map(function(fa){
+                return (
+                  <div key={fa.id} style={{borderTop:"1px solid "+BDR+"66",paddingTop:12}}>
+                    <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:14,marginBottom:8,color:GN}}>{fa.name}</div>
+                    <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+                      <div className="fg" style={{flex:1,minWidth:160}}>
+                        <div className="flbl">Limite de Alerta (Litros)</div>
+                        <input type="number" value={getThr(fa.id)} onChange={function(e){setThr(fa.id,e.target.value);}} style={{fontSize:18,fontWeight:700,textAlign:"center",borderColor:"#fca5a5"}}/>
+                      </div>
+                      <Btn onClick={function(){saveThr(fa.id);}} color={RED} disabled={!getThr(fa.id)||Number(getThr(fa.id))<0} style={{whiteSpace:"nowrap"}}>SALVAR</Btn>
+                    </div>
+                    <div style={{display:"flex",gap:14,marginTop:10,flexWrap:"wrap"}}>
+                      <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Limite atual:</span><strong style={{color:RED}}>{fmtN(fa.lowStockThreshold||1000)} L</strong></div>
+                      <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque:</span><strong style={{color:farmLow(fa)?RED:GN}}>{fmtN(fa.tankStock)} L</strong></div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div style={{display:"flex",gap:14,marginTop:12,flexWrap:"wrap"}}>
-              <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Limite atual:</span><strong style={{color:RED}}>{fmtN(data.lowStockThreshold||1000)} L</strong></div>
-              <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque:</span><strong style={{color:data.tankStock<=(data.lowStockThreshold||1000)?RED:GN}}>{fmtN(data.tankStock)} L</strong></div>
+          </div>
+
+          <div className="card" style={{borderColor:"#97C459"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:GN}}>FAZENDAS / TANQUES</div>
+              <Btn onClick={openFarmAdd} style={{padding:"7px 14px",fontSize:13}}>+ Nova Fazenda</Btn>
             </div>
+            <div style={{fontSize:13,color:MUT,marginBottom:12}}>Cada fazenda tem seu proprio tanque, estoque e limite de alerta.</div>
+            <table><thead><tr><th>Fazenda</th><th>Capacidade</th><th>Estoque</th><th>Status</th><th>Acoes</th></tr></thead>
+            <tbody>{(data.farms||[]).map(function(fa){
+              return (
+                <tr key={fa.id}>
+                  <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fa.name}</td>
+                  <td>{fmtN(fa.tankCapacity)} L</td>
+                  <td>{fmtN(fa.tankStock)} L</td>
+                  <td><span className={"bdg "+(fa.active!==false?"bg":"br")}>{fa.active!==false?"Ativa":"Inativa"}</span></td>
+                  <td><div style={{display:"flex",gap:7}}>
+                    <Btn onClick={function(){openFarmEdit(fa);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
+                    <Btn onClick={function(){toggleFarm(fa.id);}} color={INP} style={{color:fa.active!==false?RED:"#16a34a",padding:"4px 11px",fontSize:13}}>{fa.active!==false?"Desativar":"Ativar"}</Btn>
+                  </div></td>
+                </tr>
+              );
+            })}</tbody></table>
           </div>
 
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
             <div className="card">
               <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>AJUSTE DE ESTOQUE</div>
               <div style={{display:"flex",flexDirection:"column",gap:13}}>
+                <div className="fg">
+                  <div className="flbl">Fazenda</div>
+                  <select value={f.farm} onChange={function(e){sf("farm",e.target.value);}}>
+                    <option value="">Selecione a fazenda</option>
+                    {activeFarms.map(function(fa){return <option key={fa.id} value={fa.id}>{fa.name}</option>;})}
+                  </select>
+                </div>
                 <div className="fg">
                   <div className="flbl">Tipo de Ajuste</div>
                   <select value={f.type} onChange={function(e){sf("type",e.target.value);}}>
@@ -1169,21 +1541,22 @@ function Adj(props){
                   </div>
                 )}
                 <Fld label="Motivo / Observacao" value={f.note} onChange={function(v){sf("note",v);}} placeholder="Descreva o motivo"/>
-                <div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Estoque atual:</span><strong style={{color:GN}}>{fmtN(data.tankStock)} L</strong></div>
-                <Btn full={true} onClick={applyAdj} disabled={!f.liters||Number(f.liters)<0}>APLICAR AJUSTE</Btn>
+                {farm&&<div className="pill" style={{display:"flex",justifyContent:"space-between"}}><span>Estoque atual em {farm.name}:</span><strong style={{color:GN}}>{fmtN(farm.tankStock)} L</strong></div>}
+                <Btn full={true} onClick={applyAdj} disabled={!f.farm||!f.liters||Number(f.liters)<0}>APLICAR AJUSTE</Btn>
               </div>
             </div>
             <div className="card">
               <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>HISTORICO DE AJUSTES</div>
               {data.stockAdjustments.length===0?<div style={{color:MUT}}>Nenhum ajuste realizado.</div>
               :data.stockAdjustments.slice().reverse().map(function(a){
+                var aFarm=getFarm(data,a.farmId);
                 return (
                   <div key={a.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44"}}>
                     <div style={{display:"flex",justifyContent:"space-between"}}>
                       <span className="bdg by">{a.type.toUpperCase()}</span>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fmtN(a.liters)} L</span>
                     </div>
-                    <div style={{fontSize:12,color:MUT,marginTop:3}}>{a.note} - {fmtDateTime(a.date)}</div>
+                    <div style={{fontSize:12,color:MUT,marginTop:3}}>{aFarm?aFarm.name+" - ":""}{a.note} - {fmtDateTime(a.date)}</div>
                   </div>
                 );
               })}
@@ -1194,14 +1567,15 @@ function Adj(props){
             <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>EDITAR ABASTECIMENTOS</div>
             <div style={{overflowX:"auto"}}>
               <table>
-                <thead><tr><th>Data</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th></th></tr></thead>
+                <thead><tr><th>Data</th><th>Fazenda</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th></th></tr></thead>
                 <tbody>{data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).map(function(x){
-                  var op=null, mc=null;
+                  var op=null, mc=null, xFarm=getFarm(data,x.farmId);
                   for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
                   for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
                   return (
                     <tr key={x.id}>
                       <td style={{fontSize:13}}>{fmtDateTime(x.date)}</td>
+                      <td style={{fontSize:12,color:MUT}}>{xFarm?xFarm.name:"-"}</td>
                       <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</td>
                       <td>{op?op.name:"-"}</td>
                       <td>{fmtN(x.meter)} {mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
@@ -1227,6 +1601,21 @@ function Adj(props){
             <div style={{flex:1}}/>
             <Btn onClick={function(){setEm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
             <Btn onClick={saveE}>Salvar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {fmodal&&(
+        <Modal title={(fmodal.item?"Editar":"Nova")+" Fazenda"} onClose={function(){setFmodal(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:13}}>
+            <Fld label="Nome da Fazenda" value={fform.name||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{name:v});});}} placeholder="Ex: Rodeio"/>
+            <Fld label="Capacidade do Tanque (L)" type="number" value={fform.tankCapacity||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{tankCapacity:v});});}} placeholder="Ex: 5000"/>
+            <Fld label={fmodal.item?"Estoque Atual (L)":"Estoque Inicial (L)"} type="number" value={fform.tankStock||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{tankStock:v});});}} placeholder="Ex: 0"/>
+            <Fld label="Nivel Critico de Alerta (L)" type="number" value={fform.lowStockThreshold||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{lowStockThreshold:v});});}} placeholder="Ex: 500"/>
+            <div style={{display:"flex",gap:10,marginTop:5}}>
+              <Btn full={true} onClick={function(){setFmodal(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+              <Btn full={true} onClick={saveFarm} disabled={!fform.name||!fform.name.trim()}>Salvar</Btn>
+            </div>
           </div>
         </Modal>
       )}
