@@ -425,6 +425,7 @@ function App(){
         return; // espera proximo snapshot ja com a config
       }
       var cfg=s.config||{};
+      var firstFarmId = (cfg.farms&&cfg.farms.length) ? cfg.farms[0].id : 1;
       var combined={
         operators: cfg.operators||INIT.operators,
         machines: cfg.machines||INIT.machines,
@@ -432,9 +433,10 @@ function App(){
         avgCostPerLiter: cfg.avgCostPerLiter||0,
         users: cfg.users||INIT.users,
         lastBackupDate: cfg.lastBackupDate||"",
-        fuelings: s.fuel||[],
-        supplies: s.sup||[],
-        stockAdjustments: s.adj||[]
+        // registros sem farmId (migrados do sistema antigo) recebem a primeira fazenda
+        fuelings: (s.fuel||[]).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); }),
+        supplies: (s.sup||[]).map(function(x){ return x.allocations ? x : Object.assign({},x,{allocations:[{farmId:firstFarmId,liters:x.liters}]}); }),
+        stockAdjustments: (s.adj||[]).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); })
       };
       setData(combined);
     });
