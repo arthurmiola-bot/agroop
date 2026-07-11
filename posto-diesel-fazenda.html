@@ -376,45 +376,50 @@ function App(){
     if(!ready||!window._fbListenAll) return;
     var migrated=false;
     var unsub=window._fbListenAll(function(s){
-      // Se nao existe config ainda, tenta migrar do documento antigo "dados"
-      if(s.config===null && !migrated && window._fbMigrate){
+      // Migra se: (1) config nao existe OU (2) config existe mas subcolicoes estao vazias E dados antigos existem
+      var needsMigration = !migrated && window._fbMigrate && (
+        s.config===null ||
+        (s.fuel.length===0 && s.sup.length===0)
+      );
+      if(needsMigration){
         migrated=true;
         window._fbMigrate(function(old){
-          if(old){
-            // migra configuracoes - tanque antigo (unico) vira a fazenda "Corrego das Flores"
-            var farms;
-            if(old.farms && old.farms.length){
-              farms=old.farms;
-            } else {
-              farms=[{
-                id:1, name:"Corrego das Flores",
-                tankCapacity: old.tankCapacity||10000,
-                tankStock: old.tankStock||0,
-                lowStockThreshold: old.lowStockThreshold||1000,
-                active:true
-              }];
+          if(old && ((old.fuelings&&old.fuelings.length)||(old.supplies&&old.supplies.length)||(old.stockAdjustments&&old.stockAdjustments.length))){
+            // migra configuracoes apenas se config nao existe ainda
+            if(s.config===null){
+              var farms;
+              if(old.farms && old.farms.length){
+                farms=old.farms;
+              } else {
+                farms=[{
+                  id:1, name:"Corrego das Flores",
+                  tankCapacity: old.tankCapacity||10000,
+                  tankStock: old.tankStock||0,
+                  lowStockThreshold: old.lowStockThreshold||1000,
+                  active:true
+                }];
+              }
+              window._fbSaveConfig({
+                operators:old.operators||INIT.operators,
+                machines:old.machines||INIT.machines,
+                farms:farms,
+                avgCostPerLiter:old.avgCostPerLiter||0,
+                users:old.users||INIT.users,
+                lastBackupDate:old.lastBackupDate||""
+              });
             }
-            var cfg={
-              operators:old.operators||INIT.operators,
-              machines:old.machines||INIT.machines,
-              farms:farms,
-              avgCostPerLiter:old.avgCostPerLiter||0,
-              users:old.users||INIT.users,
-              lastBackupDate:old.lastBackupDate||""
-            };
-            window._fbSaveConfig(cfg);
-            // migra registros antigos para documentos individuais, marcando a fazenda 1 (Corrego das Flores)
+            // migra SEMPRE os registros antigos (fuelings/supplies/adjustments) para subcolicoes
+            var firstFarmId = (s.config && s.config.farms && s.config.farms.length) ? s.config.farms[0].id : 1;
             (old.fuelings||[]).forEach(function(x){
-              window._fbAddFuel(Object.assign({farmId:1},x));
+              window._fbAddFuel(Object.assign({farmId:firstFarmId},x));
             });
             (old.supplies||[]).forEach(function(x){
-              // entrada antiga vira entrada com alocacao total na fazenda 1
-              window._fbAddSup(Object.assign({},x,{allocations:[{farmId:1,liters:x.liters}]}));
+              window._fbAddSup(Object.assign({},x,{allocations:[{farmId:firstFarmId,liters:x.liters}]}));
             });
             (old.stockAdjustments||[]).forEach(function(x){
-              window._fbAddAdj(Object.assign({farmId:1},x));
+              window._fbAddAdj(Object.assign({farmId:firstFarmId},x));
             });
-          } else {
+          } else if(s.config===null){
             // primeira vez de tudo: cria config inicial
             window._fbSaveConfig({
               operators:INIT.operators, machines:INIT.machines, farms:INIT.farms,
@@ -422,7 +427,7 @@ function App(){
             });
           }
         });
-        return; // espera proximo snapshot ja com a config
+        return; // espera proximo snapshot
       }
       var cfg=s.config||{};
       var firstFarmId = (cfg.farms&&cfg.farms.length) ? cfg.farms[0].id : 1;
