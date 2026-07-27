@@ -209,14 +209,13 @@
 <body>
 
 <div id="login-screen">
-  <div class="login-card">
+  <div class="login-card" style="text-align:center">
     <div class="login-logo">🌱 ACF Insumos</div>
-    <div class="login-sub">Gestão de Insumos Agrícolas — v2</div>
-    <label>E-mail</label>
-    <input type="email" id="login-email" placeholder="seu@email.com">
-    <label>Senha</label>
-    <input type="password" id="login-senha" placeholder="••••••••">
-    <button class="btn-login" onclick="fazerLogin()">Entrar</button>
+    <div class="login-sub">Gestão de Insumos Agrícolas</div>
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:14px">
+      <button class="btn-login" onclick="entrarComoPerfil('gestor')">👨‍🌾 Sou Gestor</button>
+      <button class="btn-login" style="background:var(--branco);color:var(--verde);border:2px solid var(--verde)" onclick="entrarComoPerfil('operador')">🚜 Sou Funcionário</button>
+    </div>
     <div class="login-erro" id="login-erro"></div>
   </div>
 </div>
@@ -254,11 +253,11 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
-  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+  getAuth, signInAnonymously, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   getFirestore, collection, doc, addDoc, getDocs, updateDoc, deleteDoc,
-  query, orderBy, Timestamp, getDoc, writeBatch, setDoc
+  query, orderBy, Timestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 
@@ -319,44 +318,47 @@ function toast(msg, tipo='ok') {
 }
 function normalizar(s) { return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 
-// ── AUTH ──
-window.fazerLogin = async function() {
-  const email = document.getElementById('login-email').value.trim();
-  const senha = document.getElementById('login-senha').value;
+// ── AUTH (sem senha — perfil escolhido na tela) ──
+let perfilEscolhido = null;
+
+window.entrarComoPerfil = async function(perfil) {
+  perfilEscolhido = perfil;
   const erroEl = document.getElementById('login-erro');
   erroEl.textContent = '';
-  try { await signInWithEmailAndPassword(auth, email, senha); }
-  catch(e) { erroEl.textContent = 'E-mail ou senha incorretos.'; }
+  try {
+    if (!auth.currentUser) await signInAnonymously(auth);
+    else iniciarSessao();
+  } catch(e) {
+    erroEl.textContent = 'Não foi possível entrar. Verifique a internet e tente novamente.';
+  }
 };
-window.sair = async function() { await signOut(auth); };
+
+window.sair = async function() {
+  perfilEscolhido = null;
+  await signOut(auth);
+};
+
+function iniciarSessao() {
+  usuarioAtual = auth.currentUser;
+  perfilAtual = perfilEscolhido;
+  document.getElementById('header-nome').textContent = perfilAtual === 'gestor' ? 'Gestor' : 'Funcionário';
+  document.getElementById('header-perfil').textContent = perfilAtual;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').classList.add('ativo');
+  if (perfilAtual === 'gestor') {
+    document.getElementById('nav-gestor').style.display = 'flex';
+    carregarDados().then(() => mostrarAba('dashboard'));
+  } else {
+    document.getElementById('nav-gestor').style.display = 'none';
+    renderOperador();
+  }
+}
 
 onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    usuarioAtual = user;
-    const perfilDoc = await getDoc(doc(db, 'insumos_usuarios', user.uid));
-    if (perfilDoc.exists()) {
-      perfilAtual = perfilDoc.data().perfil;
-    } else {
-      perfilAtual = 'gestor';
-      await setDoc(doc(db, 'insumos_usuarios', user.uid), {
-        email: user.email, nome: user.displayName || user.email.split('@')[0], perfil: 'gestor'
-      });
-    }
-    const nomeDoc = perfilDoc.exists() ? perfilDoc.data().nome : user.email.split('@')[0];
-    document.getElementById('header-nome').textContent = nomeDoc;
-    document.getElementById('header-perfil').textContent = perfilAtual;
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app').classList.add('ativo');
-    if (perfilAtual === 'gestor') {
-      document.getElementById('nav-gestor').style.display = 'flex';
-      await carregarDados();
-      mostrarAba('dashboard');
-    } else {
-      document.getElementById('nav-gestor').style.display = 'none';
-      renderOperador();
-    }
-  } else {
-    usuarioAtual = null; perfilAtual = null;
+  if (user && perfilEscolhido) {
+    iniciarSessao();
+  } else if (!user) {
+    usuarioAtual = null; perfilAtual = null; perfilEscolhido = null;
     document.getElementById('login-screen').style.display = 'flex';
     document.getElementById('app').classList.remove('ativo');
   }
@@ -1179,7 +1181,7 @@ window.confirmarRetirada = async function(simples) {
     safra: document.getElementById('ret-safra')?.value||'',
     obs: document.getElementById('ret-obs')?.value||'',
     custo_unitario: est.custo_medio||0, custo_total,
-    data: Timestamp.now(), operador_uid: usuarioAtual.uid, operador_email: usuarioAtual.email
+    data: Timestamp.now(), operador_uid: usuarioAtual.uid
   };
   try {
     const ref = await addDoc(collection(db,'insumos_retiradas'), retirada);
