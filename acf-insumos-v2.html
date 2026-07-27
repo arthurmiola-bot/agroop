@@ -235,6 +235,7 @@
   <div class="nav" id="nav-gestor" style="display:none">
     <button class="nav-btn ativo" onclick="mostrarAba('dashboard')" data-aba="dashboard">📊 Dashboard</button>
     <button class="nav-btn" onclick="mostrarAba('cobertura')" data-aba="cobertura">🔮 Previsão</button>
+    <button class="nav-btn" onclick="mostrarAba('caderno')" data-aba="caderno">📓 Caderno de Campo</button>
     <button class="nav-btn" onclick="mostrarAba('pedidos')" data-aba="pedidos">📋 Pedidos</button>
     <button class="nav-btn" onclick="mostrarAba('estoque')" data-aba="estoque">📦 Estoque</button>
     <button class="nav-btn" onclick="mostrarAba('retiradas')" data-aba="retiradas">🚜 Retiradas</button>
@@ -278,11 +279,12 @@ const db = getFirestore(app);
 // ── ESTADO ──
 let usuarioAtual = null;
 let perfilAtual = null;
-let pedidos = [], estoque = [], retiradas = [], contas = [], talhoes = [], safras = [];
+let pedidos = [], estoque = [], retiradas = [], contas = [], talhoes = [], safras = [], fazendas = [], culturas = [];
+let plantios = [], adubacoes = [], colheitas = [];
 let compendio = null;     // cache de estoque_ins_produtos (carrega sob demanda)
 let aplicacoesAgroOp = null; // cache das aplicações do AgroOp
-const FAZENDAS = ['Rodeio', 'Córrego das Flores', 'Palmeiras'];
 const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton'];
+function nomesFazendas() { return fazendas.map(f=>f.nome); }
 
 // ── UTILS ──
 function fmt(n) { return Number(n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -366,13 +368,18 @@ onAuthStateChanged(auth, async (user) => {
 
 // ── DADOS ──
 async function carregarDados() {
-  const [pSnap, eSnap, rSnap, cSnap, tSnap, sSnap] = await Promise.all([
+  const [pSnap, eSnap, rSnap, cSnap, tSnap, sSnap, fSnap, cuSnap, plSnap, adSnap, colSnap] = await Promise.all([
     getDocs(query(collection(db, 'insumos_pedidos'), orderBy('criado_em', 'desc'))),
     getDocs(query(collection(db, 'insumos_estoque'), orderBy('produto'))),
     getDocs(query(collection(db, 'insumos_retiradas'), orderBy('data', 'desc'))),
     getDocs(query(collection(db, 'insumos_contas'), orderBy('vencimento'))),
     getDocs(query(collection(db, 'insumos_talhoes'), orderBy('nome'))),
-    getDocs(query(collection(db, 'insumos_safras'), orderBy('nome')))
+    getDocs(query(collection(db, 'insumos_safras'), orderBy('nome'))),
+    getDocs(query(collection(db, 'insumos_fazendas'), orderBy('nome'))),
+    getDocs(query(collection(db, 'insumos_culturas'), orderBy('nome'))),
+    getDocs(query(collection(db, 'insumos_campo_plantio'), orderBy('data', 'desc'))),
+    getDocs(query(collection(db, 'insumos_campo_adubacao'), orderBy('data', 'desc'))),
+    getDocs(query(collection(db, 'insumos_campo_colheita'), orderBy('data', 'desc')))
   ]);
   pedidos = pSnap.docs.map(d => ({id: d.id, ...d.data()}));
   estoque = eSnap.docs.map(d => ({id: d.id, ...d.data()}));
@@ -380,6 +387,15 @@ async function carregarDados() {
   contas = cSnap.docs.map(d => ({id: d.id, ...d.data()}));
   talhoes = tSnap.docs.map(d => ({id: d.id, ...d.data()}));
   safras = sSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  fazendas = fSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  culturas = cuSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  plantios = plSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  adubacoes = adSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  colheitas = colSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  // Fallback: se ainda não cadastrou fazendas, usa as 3 conhecidas como sugestão inicial
+  if (fazendas.length === 0) {
+    fazendas = [{id:'_tmp1',nome:'Rodeio'},{id:'_tmp2',nome:'Córrego das Flores'},{id:'_tmp3',nome:'Palmeiras'}];
+  }
 }
 
 // Carrega o compêndio (estoque_ins_produtos) só quando necessário, com cache
@@ -413,6 +429,7 @@ window.mostrarAba = function(aba) {
   switch(aba) {
     case 'dashboard': renderDashboard(); break;
     case 'cobertura': renderCobertura(); break;
+    case 'caderno': renderCaderno(); break;
     case 'pedidos': renderPedidos(); break;
     case 'estoque': renderEstoque(); break;
     case 'retiradas': renderRetiradas(); break;
@@ -721,7 +738,7 @@ window.abrirModalPedido = async function() {
           <div class="form-group"><label>Fornecedor *</label>
             <input type="text" id="ped-fornecedor" placeholder="Nome do fornecedor"></div>
           <div class="form-group"><label>Fazenda</label>
-            <select id="ped-fazenda"><option value="">Todas</option>${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}</select></div>
+            <select id="ped-fazenda"><option value="">Todas</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Data do Pedido</label><input type="date" id="ped-data" value="${hoje()}"></div>
@@ -1055,7 +1072,7 @@ function renderRetiradas() {
       <input type="date" id="filt-ret-de" oninput="filtrarRetiradas()">
       <input type="date" id="filt-ret-ate" oninput="filtrarRetiradas()">
       <select id="filt-ret-fazenda" onchange="filtrarRetiradas()">
-        <option value="">Todas as fazendas</option>${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}
+        <option value="">Todas as fazendas</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}
       </select>
       <input type="text" id="filt-ret-produto" oninput="filtrarRetiradas()" placeholder="Produto...">
     </div>
@@ -1120,7 +1137,7 @@ window.abrirModalRetirada = function(simples) {
         <div class="form-row">
           <div class="form-group"><label>Fazenda *</label>
             <select id="ret-fazenda" onchange="atualizarTalhoes()">
-              <option value="">Selecione...</option>${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}
+              <option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}
             </select></div>
           <div class="form-group"><label>Talhão</label>
             <select id="ret-talhao"><option value="">Selecione a fazenda...</option></select></div>
@@ -1129,7 +1146,7 @@ window.abrirModalRetirada = function(simples) {
         <div class="form-row">
           <div class="form-group"><label>Cultura</label>
             <input type="text" id="ret-cultura" placeholder="Ex: Soja, Milho" list="culturas-dl">
-            <datalist id="culturas-dl"><option value="Soja"><option value="Milho"><option value="Sorgo"><option value="Algodão"><option value="Pastagem"></datalist></div>
+            <datalist id="culturas-dl">${culturas.map(c=>`<option value="${c.nome}">`).join('')}</datalist></div>
           <div class="form-group"><label>Safra</label>
             <select id="ret-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
         </div>` : `
@@ -1320,6 +1337,37 @@ function renderCadastros() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px" id="cadastros-grid">
       <div>
         <div class="sec-header">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🏡 Fazendas</div>
+          <button class="btn btn-primary btn-sm" onclick="abrirModalFazenda()">+ Nova</button>
+        </div>
+        <div class="tabela-wrap"><table>
+          <thead><tr><th>Fazenda</th><th></th></tr></thead>
+          <tbody>
+            ${fazendas.filter(f=>!f.id.startsWith('_tmp')).length === 0 ?
+              '<tr><td colspan="2" class="tabela-vazia">Nenhuma fazenda cadastrada ainda</td></tr>' :
+            fazendas.filter(f=>!f.id.startsWith('_tmp')).map(f => `<tr><td><strong>${f.nome}</strong></td>
+            <td style="text-align:right"><button class="btn btn-sm btn-secondary" onclick="excluirFazenda('${f.id}')">✕</button></td></tr>`).join('')}
+          </tbody>
+        </table></div>
+        ${fazendas.some(f=>f.id.startsWith('_tmp')) ? `<p style="font-size:12px;color:var(--laranja);margin-top:8px">⚠️ Usando fazendas padrão (Rodeio, Córrego das Flores, Palmeiras) até você cadastrar as suas.</p>` : ''}
+      </div>
+      <div>
+        <div class="sec-header">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🌱 Culturas</div>
+          <button class="btn btn-primary btn-sm" onclick="abrirModalCultura()">+ Nova</button>
+        </div>
+        <div class="tabela-wrap"><table>
+          <thead><tr><th>Cultura</th><th></th></tr></thead>
+          <tbody>
+            ${culturas.length === 0 ? '<tr><td colspan="2" class="tabela-vazia">Nenhuma cultura cadastrada</td></tr>' :
+            culturas.map(c => `<tr><td><strong>${c.nome}</strong></td>
+            <td style="text-align:right"><button class="btn btn-sm btn-secondary" onclick="excluirCultura('${c.id}')">✕</button></td></tr>`).join('')}
+          </tbody>
+        </table></div>
+        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 Ex: Soja, Milho, Sorgo, Algodão.</p>
+      </div>
+      <div>
+        <div class="sec-header">
           <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🌾 Talhões</div>
           <button class="btn btn-primary btn-sm" onclick="abrirModalTalhao()">+ Novo</button>
         </div>
@@ -1355,6 +1403,82 @@ function renderCadastros() {
     <style>@media (max-width:700px){ #cadastros-grid { grid-template-columns:1fr !important; } }</style>`;
 }
 
+window.abrirModalFazenda = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-fazenda">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-titulo">🏡 Nova Fazenda</div>
+        <div class="form-group"><label>Nome *</label><input type="text" id="faz-nome" placeholder="Ex: Fazenda Rodeio"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-fazenda')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarFazenda()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarFazenda = async function() {
+  const nome = document.getElementById('faz-nome').value.trim();
+  if (!nome) { toast('Informe o nome.','erro'); return; }
+  if (fazendas.find(f => normalizar(f.nome) === normalizar(nome))) { toast('Fazenda já cadastrada.','erro'); return; }
+  try {
+    const ref = await addDoc(collection(db,'insumos_fazendas'), { nome });
+    fazendas = fazendas.filter(f=>!f.id.startsWith('_tmp'));
+    fazendas.push({id: ref.id, nome});
+    fazendas.sort((a,b)=>a.nome.localeCompare(b.nome));
+    fecharModal('modal-fazenda');
+    toast('Fazenda cadastrada!');
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirFazenda = async function(id) {
+  if (!confirm('Excluir esta fazenda?')) return;
+  try {
+    await deleteDoc(doc(db,'insumos_fazendas',id));
+    fazendas.splice(fazendas.findIndex(x=>x.id===id),1);
+    if (fazendas.length === 0) fazendas = [{id:'_tmp1',nome:'Rodeio'},{id:'_tmp2',nome:'Córrego das Flores'},{id:'_tmp3',nome:'Palmeiras'}];
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.abrirModalCultura = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-cultura">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-titulo">🌱 Nova Cultura</div>
+        <div class="form-group"><label>Nome *</label><input type="text" id="cul-nome" placeholder="Ex: Soja"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-cultura')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarCultura()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarCultura = async function() {
+  const nome = document.getElementById('cul-nome').value.trim();
+  if (!nome) { toast('Informe o nome.','erro'); return; }
+  if (culturas.find(c => normalizar(c.nome) === normalizar(nome))) { toast('Cultura já cadastrada.','erro'); return; }
+  try {
+    const ref = await addDoc(collection(db,'insumos_culturas'), { nome });
+    culturas.push({id: ref.id, nome});
+    culturas.sort((a,b)=>a.nome.localeCompare(b.nome));
+    fecharModal('modal-cultura');
+    toast('Cultura cadastrada!');
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirCultura = async function(id) {
+  if (!confirm('Excluir esta cultura?')) return;
+  try {
+    await deleteDoc(doc(db,'insumos_culturas',id));
+    culturas.splice(culturas.findIndex(x=>x.id===id),1);
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
 window.abrirModalTalhao = function() {
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-talhao">
@@ -1362,7 +1486,7 @@ window.abrirModalTalhao = function() {
         <div class="modal-titulo">🌾 Novo Talhão</div>
         <div class="form-group"><label>Nome *</label><input type="text" id="tal-nome" placeholder="Ex: Talhão 3"></div>
         <div class="form-group"><label>Fazenda *</label>
-          <select id="tal-fazenda">${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}</select></div>
+          <select id="tal-fazenda">${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
         <div class="form-group"><label>Área (hectares)</label><input type="number" id="tal-area" min="0" step="0.01" placeholder="Ex: 85.5"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-talhao')">Cancelar</button>
@@ -1433,6 +1557,298 @@ window.excluirSafra = async function(id) {
     await deleteDoc(doc(db,'insumos_safras',id));
     safras.splice(safras.findIndex(x=>x.id===id),1);
     renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ CADERNO DE CAMPO ══════════════
+let cadernoSubaba = 'plantio';
+
+function renderCaderno() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-titulo" style="margin-bottom:16px">📓 Caderno de Campo</div>
+    <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
+      <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
+      <button class="nav-btn ${cadernoSubaba==='adubacao'?'ativo':''}" onclick="mudarSubabaCaderno('adubacao')">🧪 Adubação</button>
+      <button class="nav-btn ${cadernoSubaba==='aplicacoes'?'ativo':''}" onclick="mudarSubabaCaderno('aplicacoes')">🚁 Aplicações (AgroOp)</button>
+      <button class="nav-btn ${cadernoSubaba==='colheita'?'ativo':''}" onclick="mudarSubabaCaderno('colheita')">🌾 Colheita</button>
+    </div>
+    <div id="caderno-conteudo"></div>`;
+  renderSubabaCaderno();
+}
+
+window.mudarSubabaCaderno = function(sub) { cadernoSubaba = sub; renderCaderno(); };
+
+function renderSubabaCaderno() {
+  switch(cadernoSubaba) {
+    case 'plantio': renderPlantio(); break;
+    case 'adubacao': renderAdubacao(); break;
+    case 'aplicacoes': renderAplicacoesCampo(); break;
+    case 'colheita': renderColheita(); break;
+  }
+}
+
+// ── PLANTIO ──
+function renderPlantio() {
+  const el = document.getElementById('caderno-conteudo');
+  el.innerHTML = `
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${plantios.length} registro(s)</div>
+      <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button></div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>População</th><th>Espaçamento</th><th></th></tr></thead>
+      <tbody>
+        ${plantios.length===0?'<tr><td colspan="9" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
+        plantios.map(p=>`<tr><td>${p.data||'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+        <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.populacao?fmt(p.populacao):'—'}</td><td>${p.espacamento?p.espacamento+' cm':'—'}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button></td></tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+window.abrirModalPlantio = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-plantio">
+      <div class="modal">
+        <div class="modal-titulo">🌱 Novo Registro de Plantio</div>
+        <div class="form-row">
+          <div class="form-group"><label>Data *</label><input type="date" id="pl-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Fazenda *</label><select id="pl-fazenda" onchange="atualizarTalhoesCampo('pl')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Talhão *</label><select id="pl-talhao"><option value="">Selecione a fazenda...</option></select></div>
+          <div class="form-group"><label>Cultura *</label><select id="pl-cultura"><option value="">Selecione...</option>${culturas.map(c=>`<option>${c.nome}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Safra</label><select id="pl-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Cultivar/Variedade</label><input type="text" id="pl-cultivar" placeholder="Ex: TMG 7062"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>População (plantas ou sementes/ha)</label><input type="number" id="pl-populacao" min="0" step="1"></div>
+          <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" min="0" step="0.1"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="pl-obs" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-plantio')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarPlantio()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarPlantio = async function() {
+  const fazenda = document.getElementById('pl-fazenda').value;
+  const talhao = document.getElementById('pl-talhao').value;
+  const cultura = document.getElementById('pl-cultura').value;
+  if (!fazenda || !talhao || !cultura) { toast('Preencha fazenda, talhão e cultura.','erro'); return; }
+  const reg = {
+    data: document.getElementById('pl-data').value, fazenda, talhao, cultura,
+    safra: document.getElementById('pl-safra').value,
+    cultivar: document.getElementById('pl-cultivar').value,
+    populacao: parseFloat(document.getElementById('pl-populacao').value)||0,
+    espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
+    obs: document.getElementById('pl-obs').value,
+    criado_em: Timestamp.now()
+  };
+  try {
+    const ref = await addDoc(collection(db,'insumos_campo_plantio'), reg);
+    plantios.unshift({id: ref.id, ...reg});
+    fecharModal('modal-plantio');
+    toast('Plantio registrado!');
+    renderPlantio();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ── ADUBAÇÃO ──
+function renderAdubacao() {
+  const el = document.getElementById('caderno-conteudo');
+  el.innerHTML = `
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${adubacoes.length} registro(s)</div>
+      <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Nova Adubação</button></div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Safra</th><th>Tipo</th><th>Produto</th><th>Dose</th><th></th></tr></thead>
+      <tbody>
+        ${adubacoes.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhuma adubação registrada</td></tr>':
+        adubacoes.map(a=>`<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.safra||'—'}</td>
+        <td>${a.tipo||'—'}</td><td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button></td></tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+window.abrirModalAdubacao = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-adubacao">
+      <div class="modal">
+        <div class="modal-titulo">🧪 Nova Adubação</div>
+        <div class="form-row">
+          <div class="form-group"><label>Data *</label><input type="date" id="ad-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Fazenda *</label><select id="ad-fazenda" onchange="atualizarTalhoesCampo('ad')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Talhão *</label><select id="ad-talhao"><option value="">Selecione a fazenda...</option></select></div>
+          <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Tipo</label><select id="ad-tipo"><option>Base</option><option>Cobertura</option><option>Foliar</option></select></div>
+          <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" placeholder="Ex: MAP, Ureia" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Dose</label><input type="number" id="ad-dose" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="ad-unidade">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-adubacao')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarAdubacao()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+  carregarCompendio().then(lista => {
+    const dl = document.getElementById('compendio-datalist-3');
+    if (dl) dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+  });
+};
+
+window.salvarAdubacao = async function() {
+  const fazenda = document.getElementById('ad-fazenda').value;
+  const talhao = document.getElementById('ad-talhao').value;
+  const produto = document.getElementById('ad-produto').value.trim();
+  if (!fazenda || !talhao || !produto) { toast('Preencha fazenda, talhão e produto.','erro'); return; }
+  const reg = {
+    data: document.getElementById('ad-data').value, fazenda, talhao,
+    safra: document.getElementById('ad-safra').value, tipo: document.getElementById('ad-tipo').value,
+    produto, dose: parseFloat(document.getElementById('ad-dose').value)||0,
+    unidade: document.getElementById('ad-unidade').value, obs: document.getElementById('ad-obs').value,
+    criado_em: Timestamp.now()
+  };
+  try {
+    const ref = await addDoc(collection(db,'insumos_campo_adubacao'), reg);
+    adubacoes.unshift({id: ref.id, ...reg});
+    fecharModal('modal-adubacao');
+    toast('Adubação registrada!');
+    renderAdubacao();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ── APLICAÇÕES (lidas do AgroOp, somente leitura) ──
+window.renderAplicacoesCampo = renderAplicacoesCampo;
+async function renderAplicacoesCampo() {
+  const el = document.getElementById('caderno-conteudo');
+  el.innerHTML = `<div class="loading"><div class="spinner"></div> Buscando aplicações do AgroOp...</div>`;
+  aplicacoesAgroOp = null;
+  await carregarAplicacoes();
+  const lista = [...aplicacoesAgroOp].sort((a,b) => (b.data||'').localeCompare(a.data||''));
+  el.innerHTML = `
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} aplicação(ões) — puxadas automaticamente do AgroOp</div>
+      <button class="btn btn-secondary btn-sm" onclick="renderAplicacoesCampo()">↻ Atualizar</button></div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Produtos e Doses</th><th>Operador</th><th>Status</th></tr></thead>
+      <tbody>
+        ${lista.length===0?'<tr><td colspan="6" class="tabela-vazia">Nenhuma aplicação encontrada no AgroOp</td></tr>':
+        lista.map(a => {
+          const status = a.finalizadoEm ? '<span class="badge badge-verde">Finalizado</span>' : '<span class="badge badge-azul">Pendente/Em Execução</span>';
+          const prods = (a.produtos||[]).map(p => `${p.produto||p.nome||'?'} (${p.dose||'?'})`).join(', ') || '—';
+          return `<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prods}</td><td>${a.operador||'—'}</td><td>${status}</td></tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+    <p style="font-size:12px;color:var(--cinza);margin-top:12px">💡 As aplicações são cadastradas direto no AgroOp — aqui você só acompanha. Cada produto usado já é considerado na 🔮 Previsão de Cobertura.</p>`;
+}
+
+// ── COLHEITA ──
+function renderColheita() {
+  const el = document.getElementById('caderno-conteudo');
+  el.innerHTML = `
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${colheitas.length} registro(s)</div>
+      <button class="btn btn-primary" onclick="abrirModalColheita()">+ Nova Colheita</button></div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Produtiv. Média</th><th>Umidade</th><th>PMS</th><th></th></tr></thead>
+      <tbody>
+        ${colheitas.length===0?'<tr><td colspan="9" class="tabela-vazia">Nenhuma colheita registrada</td></tr>':
+        colheitas.map(c=>`<tr><td>${c.data||'—'}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        <td>${c.produtividade?fmt(c.produtividade)+' '+(c.unidade_produtividade||'sc/ha'):'—'}</td>
+        <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_colheita','${c.id}','colheita')">✕</button></td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${colheitas.length>0?`<div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarColheita()">📥 Exportar Excel</button></div>`:''}`;
+}
+
+window.exportarColheita = function() {
+  exportarExcel('Colheita', ['Data','Fazenda','Talhão','Cultura','Safra','Produtividade','Unidade','Umidade (%)','PMS (g)'],
+    colheitas.map(c => [c.data||'', c.fazenda||'', c.talhao||'', c.cultura||'', c.safra||'', c.produtividade||0, c.unidade_produtividade||'sc/ha', c.umidade||0, c.pms||0]));
+};
+
+window.abrirModalColheita = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-colheita">
+      <div class="modal">
+        <div class="modal-titulo">🌾 Nova Colheita</div>
+        <div class="form-row">
+          <div class="form-group"><label>Data *</label><input type="date" id="col-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Fazenda *</label><select id="col-fazenda" onchange="atualizarTalhoesCampo('col')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Talhão *</label><select id="col-talhao"><option value="">Selecione a fazenda...</option></select></div>
+          <div class="form-group"><label>Cultura</label><select id="col-cultura"><option value="">—</option>${culturas.map(c=>`<option>${c.nome}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Safra</label><select id="col-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
+        <div class="form-row">
+          <div class="form-group"><label>Produtividade Média</label><input type="number" id="col-produtividade" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="col-unidade"><option>sc/ha</option><option>kg/ha</option><option>ton/ha</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Umidade (%)</label><input type="number" id="col-umidade" min="0" max="100" step="0.1"></div>
+          <div class="form-group"><label>PMS — Peso Mil Sementes (g)</label><input type="number" id="col-pms" min="0" step="0.01"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="col-obs" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-colheita')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarColheita()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarColheita = async function() {
+  const fazenda = document.getElementById('col-fazenda').value;
+  const talhao = document.getElementById('col-talhao').value;
+  if (!fazenda || !talhao) { toast('Preencha fazenda e talhão.','erro'); return; }
+  const reg = {
+    data: document.getElementById('col-data').value, fazenda, talhao,
+    cultura: document.getElementById('col-cultura').value, safra: document.getElementById('col-safra').value,
+    produtividade: parseFloat(document.getElementById('col-produtividade').value)||0,
+    unidade_produtividade: document.getElementById('col-unidade').value,
+    umidade: parseFloat(document.getElementById('col-umidade').value)||0,
+    pms: parseFloat(document.getElementById('col-pms').value)||0,
+    obs: document.getElementById('col-obs').value,
+    criado_em: Timestamp.now()
+  };
+  try {
+    const ref = await addDoc(collection(db,'insumos_campo_colheita'), reg);
+    colheitas.unshift({id: ref.id, ...reg});
+    fecharModal('modal-colheita');
+    toast('Colheita registrada!');
+    renderColheita();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// Helper compartilhado: atualizar talhões conforme fazenda escolhida (prefixo dos ids: pl-, ad-, col-)
+window.atualizarTalhoesCampo = function(prefixo) {
+  const faz = document.getElementById(`${prefixo}-fazenda`).value;
+  const sel = document.getElementById(`${prefixo}-talhao`);
+  const lista = talhoes.filter(t => normalizar(t.fazenda||'') === normalizar(faz));
+  sel.innerHTML = `<option value="">Selecione...</option>` + lista.map(t=>`<option value="${t.nome}">${t.nome}${t.area_ha?` (${fmt(t.area_ha)} ha)`:''}</option>`).join('');
+};
+
+window.excluirRegistroCampo = async function(colecao, id, tipo) {
+  if (!confirm('Excluir este registro?')) return;
+  try {
+    await deleteDoc(doc(db, colecao, id));
+    if (tipo==='plantio') plantios.splice(plantios.findIndex(x=>x.id===id),1);
+    if (tipo==='adubacao') adubacoes.splice(adubacoes.findIndex(x=>x.id===id),1);
+    if (tipo==='colheita') colheitas.splice(colheitas.findIndex(x=>x.id===id),1);
+    toast('Registro excluído.');
+    renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
