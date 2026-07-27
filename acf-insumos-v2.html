@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACF Insumos</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --verde: #2d6a4f;
+    --verde-claro: #40916c;
+    --verde-menta: #74c69d;
+    --creme: #f8f4ee;
+    --creme-escuro: #ede8e0;
+    --terra: #7c5c3e;
+    --laranja: #e07c3a;
+    --vermelho: #c0392b;
+    --azul: #2563eb;
+    --cinza: #6b7280;
+    --branco: #ffffff;
+    --texto: #1a1a1a;
+    --sombra: 0 2px 12px rgba(0,0,0,0.08);
+    --sombra-forte: 0 8px 32px rgba(0,0,0,0.14);
+    --radius: 12px;
+    --radius-lg: 20px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--creme); color: var(--texto); min-height: 100vh; }
+
+  /* LOGIN */
+  #login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(145deg, #1a3a2a 0%, #2d6a4f 60%, #40916c 100%); padding: 24px; }
+  .login-card { background: var(--branco); border-radius: var(--radius-lg); padding: 48px 40px; width: 100%; max-width: 400px; box-shadow: var(--sombra-forte); }
+  .login-logo { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; color: var(--verde); margin-bottom: 4px; }
+  .login-sub { font-size: 13px; color: var(--cinza); margin-bottom: 36px; letter-spacing: 0.5px; }
+  .login-card label { display: block; font-size: 12px; font-weight: 500; color: var(--cinza); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .login-card input { width: 100%; padding: 12px 16px; border: 2px solid var(--creme-escuro); border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 15px; margin-bottom: 18px; transition: border-color 0.2s; outline: none; }
+  .login-card input:focus { border-color: var(--verde-claro); }
+  .btn-login { width: 100%; padding: 14px; background: var(--verde); color: white; border: none; border-radius: var(--radius);
+    font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; cursor: pointer; transition: background 0.2s, transform 0.1s; }
+  .btn-login:hover { background: var(--verde-claro); }
+  .btn-login:active { transform: scale(0.98); }
+  .login-erro { color: var(--vermelho); font-size: 13px; margin-top: 10px; text-align: center; }
+
+  /* LAYOUT */
+  #app { display: none; min-height: 100vh; flex-direction: column; }
+  #app.ativo { display: flex; }
+  .header { background: var(--verde); color: white; padding: 0 24px; height: 60px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .header-logo { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+  .header-logo span { color: var(--verde-menta); }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .header-user { font-size: 13px; opacity: 0.85; display: flex; align-items: center; gap: 8px; }
+  .badge-perfil { background: rgba(255,255,255,0.2); border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .btn-sair { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 6px 14px;
+    border-radius: 8px; font-size: 13px; cursor: pointer; transition: background 0.2s; }
+  .btn-sair:hover { background: rgba(255,255,255,0.25); }
+
+  .nav { background: var(--branco); border-bottom: 2px solid var(--creme-escuro); padding: 0 24px; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-btn { padding: 14px 16px; background: none; border: none; border-bottom: 3px solid transparent; font-family: 'DM Sans', sans-serif;
+    font-size: 14px; font-weight: 500; color: var(--cinza); cursor: pointer; white-space: nowrap; transition: all 0.2s; display: flex; align-items: center; gap: 7px; }
+  .nav-btn:hover { color: var(--verde); }
+  .nav-btn.ativo { color: var(--verde); border-bottom-color: var(--verde); font-weight: 600; }
+
+  .main { flex: 1; padding: 28px 24px; max-width: 1100px; margin: 0 auto; width: 100%; }
+
+  /* OPERADOR */
+  .operador-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: calc(100vh - 120px); gap: 20px; padding: 24px; }
+  .operador-titulo { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; color: var(--verde); text-align: center; }
+  .operador-sub { color: var(--cinza); font-size: 14px; text-align: center; }
+  .btn-operador { width: 100%; max-width: 320px; padding: 22px; border-radius: var(--radius-lg); border: none;
+    font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; cursor: pointer; display: flex; align-items: center;
+    gap: 16px; transition: transform 0.15s; box-shadow: var(--sombra); text-align: left; }
+  .btn-operador:active { transform: scale(0.97); }
+  .btn-operador .op-icon { font-size: 32px; }
+  .btn-op-retirar { background: var(--verde); color: white; }
+  .btn-op-historico { background: var(--branco); color: var(--verde); border: 2px solid var(--verde); }
+
+  /* CARDS */
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .card-resumo { background: var(--branco); border-radius: var(--radius); padding: 20px; box-shadow: var(--sombra); border-left: 4px solid var(--verde); }
+  .card-resumo.alerta { border-left-color: var(--laranja); }
+  .card-resumo.perigo { border-left-color: var(--vermelho); }
+  .card-resumo.info { border-left-color: var(--azul); }
+  .card-resumo-valor { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800; color: var(--verde); line-height: 1; }
+  .card-resumo.alerta .card-resumo-valor { color: var(--laranja); }
+  .card-resumo.perigo .card-resumo-valor { color: var(--vermelho); }
+  .card-resumo.info .card-resumo-valor { color: var(--azul); }
+  .card-resumo-label { font-size: 12px; color: var(--cinza); margin-top: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .sec-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .sec-titulo { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: var(--texto); }
+
+  .btn { padding: 10px 20px; border-radius: var(--radius); border: none; font-family: 'DM Sans', sans-serif; font-size: 14px;
+    font-weight: 500; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 7px; }
+  .btn-primary { background: var(--verde); color: white; }
+  .btn-primary:hover { background: var(--verde-claro); }
+  .btn-secondary { background: var(--creme-escuro); color: var(--texto); }
+  .btn-secondary:hover { background: #ddd8cf; }
+  .btn-danger { background: var(--vermelho); color: white; }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .btn-laranja { background: var(--laranja); color: white; }
+  .btn-azul { background: var(--azul); color: white; }
+
+  .tabela-wrap { background: var(--branco); border-radius: var(--radius); box-shadow: var(--sombra); overflow: auto; }
+  .tabela-wrap table { width: 100%; border-collapse: collapse; }
+  .tabela-wrap th { background: var(--verde); color: white; padding: 12px 16px; text-align: left; font-family: 'Syne', sans-serif;
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+  .tabela-wrap td { padding: 12px 16px; border-bottom: 1px solid var(--creme-escuro); font-size: 14px; vertical-align: middle; }
+  .tabela-wrap tr:last-child td { border-bottom: none; }
+  .tabela-wrap tbody tr:hover td { background: var(--creme); }
+  .tabela-vazia { text-align: center; padding: 40px; color: var(--cinza); font-style: italic; }
+
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 500;
+    align-items: center; justify-content: center; padding: 16px; }
+  .modal-overlay.ativo { display: flex; }
+  .modal { background: var(--branco); border-radius: var(--radius-lg); padding: 32px; width: 100%; max-width: 580px;
+    max-height: 90vh; overflow-y: auto; box-shadow: var(--sombra-forte); }
+  .modal-titulo { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; margin-bottom: 24px; color: var(--verde); }
+  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+  .form-group { margin-bottom: 18px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--cinza); text-transform: uppercase;
+    letter-spacing: 0.6px; margin-bottom: 6px; }
+  .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 11px 14px; border: 2px solid var(--creme-escuro);
+    border-radius: var(--radius); font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s; background: var(--branco); }
+  .form-group input:focus, .form-group select:focus { border-color: var(--verde-claro); }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; }
+  .badge-verde { background: #d1fae5; color: #065f46; }
+  .badge-laranja { background: #fed7aa; color: #9a3412; }
+  .badge-vermelho { background: #fee2e2; color: #991b1b; }
+  .badge-azul { background: #dbeafe; color: #1e40af; }
+  .badge-cinza { background: #f3f4f6; color: #374151; }
+  .badge-amarelo { background: #fef9c3; color: #854d0e; }
+
+  .filtros { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .filtros input, .filtros select { padding: 8px 12px; border: 2px solid var(--creme-escuro); border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 13px; outline: none; background: var(--branco); }
+  .filtros input:focus, .filtros select:focus { border-color: var(--verde-claro); }
+
+  .itens-pedido { border: 2px solid var(--creme-escuro); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
+  .item-pedido-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: center;
+    padding: 10px 12px; border-bottom: 1px solid var(--creme-escuro); font-size: 13px; }
+  .item-pedido-row:last-child { border-bottom: none; }
+  .item-pedido-row.header-row { background: var(--creme); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    color: var(--cinza); letter-spacing: 0.5px; }
+  .item-pedido-row input, .item-pedido-row select { padding: 6px 8px; border: 1px solid var(--creme-escuro);
+    border-radius: 8px; font-size: 13px; width: 100%; outline: none; }
+
+  .baixa-item-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 8px; align-items: center;
+    padding: 10px 12px; border-bottom: 1px solid var(--creme-escuro); font-size: 13px; }
+  .baixa-item-row.header-row { background: var(--creme); font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--cinza); }
+  .baixa-item-row input { padding: 6px 8px; border: 1px solid var(--creme-escuro); border-radius: 8px; font-size: 13px; width: 100%; outline: none; }
+
+  .relatorio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .relatorio-card { background: var(--branco); border-radius: var(--radius); padding: 22px; box-shadow: var(--sombra);
+    cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; border-top: 4px solid var(--verde); display: flex; flex-direction: column; gap: 8px; }
+  .relatorio-card:hover { transform: translateY(-2px); box-shadow: var(--sombra-forte); }
+  .relatorio-card.alerta { border-top-color: var(--laranja); }
+  .relatorio-card.info { border-top-color: var(--azul); }
+  .relatorio-card.terra { border-top-color: var(--terra); }
+  .relatorio-card-icon { font-size: 28px; }
+  .relatorio-card-titulo { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; }
+  .relatorio-card-desc { font-size: 13px; color: var(--cinza); }
+  .relatorio-resultado { background: var(--branco); border-radius: var(--radius); padding: 24px; box-shadow: var(--sombra); margin-top: 20px; }
+  .relatorio-resultado-titulo { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; margin-bottom: 16px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--verde); color: white; padding: 14px 20px;
+    border-radius: var(--radius); font-size: 14px; font-weight: 500; z-index: 9999; box-shadow: var(--sombra-forte);
+    transform: translateY(80px); opacity: 0; transition: all 0.3s; max-width: 320px; }
+  .toast.ativo { transform: translateY(0); opacity: 1; }
+  .toast.erro { background: var(--vermelho); }
+
+  .loading { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--cinza); gap: 12px; }
+  .spinner { width: 20px; height: 20px; border: 3px solid var(--creme-escuro); border-top-color: var(--verde);
+    border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .venc-hoje { color: var(--vermelho); font-weight: 600; }
+  .venc-proximo { color: var(--laranja); font-weight: 600; }
+  .venc-ok { color: var(--cinza); }
+
+  /* COBERTURA */
+  .cob-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 8px; padding: 12px 16px;
+    border-bottom: 1px solid var(--creme-escuro); font-size: 14px; align-items: center; }
+  .cob-row.header { background: var(--verde); color: white; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    font-family: 'Syne', sans-serif; letter-spacing: 0.5px; }
+
+
+  @media (max-width: 600px) {
+    .main { padding: 16px; }
+    .form-row { grid-template-columns: 1fr; }
+    .header-user { display: none; }
+    .modal { padding: 20px; }
+    .cob-row { grid-template-columns: 1.5fr 1fr 1fr; }
+    .cob-row span:nth-child(3), .cob-row span:nth-child(4) { display: none; }
+    .cob-row.header span:nth-child(3), .cob-row.header span:nth-child(4) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">🌱 ACF Insumos</div>
+    <div class="login-sub">Gestão de Insumos Agrícolas — v2</div>
+    <label>E-mail</label>
+    <input type="email" id="login-email" placeholder="seu@email.com">
+    <label>Senha</label>
+    <input type="password" id="login-senha" placeholder="••••••••">
+    <button class="btn-login" onclick="fazerLogin()">Entrar</button>
+    <div class="login-erro" id="login-erro"></div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="header">
+    <div class="header-logo">ACF <span>Insumos</span></div>
+    <div class="header-right">
+      <div class="header-user">
+        <span id="header-nome"></span>
+        <span class="badge-perfil" id="header-perfil"></span>
+      </div>
+      <button class="btn-sair" onclick="sair()">Sair</button>
+    </div>
+  </div>
+
+  <div class="nav" id="nav-gestor" style="display:none">
+    <button class="nav-btn ativo" onclick="mostrarAba('dashboard')" data-aba="dashboard">📊 Dashboard</button>
+    <button class="nav-btn" onclick="mostrarAba('cobertura')" data-aba="cobertura">🔮 Previsão</button>
+    <button class="nav-btn" onclick="mostrarAba('pedidos')" data-aba="pedidos">📋 Pedidos</button>
+    <button class="nav-btn" onclick="mostrarAba('estoque')" data-aba="estoque">📦 Estoque</button>
+    <button class="nav-btn" onclick="mostrarAba('retiradas')" data-aba="retiradas">🚜 Retiradas</button>
+    <button class="nav-btn" onclick="mostrarAba('contas')" data-aba="contas">💰 Contas</button>
+    <button class="nav-btn" onclick="mostrarAba('relatorios')" data-aba="relatorios">📈 Relatórios</button>
+    <button class="nav-btn" onclick="mostrarAba('cadastros')" data-aba="cadastros">⚙️ Cadastros</button>
+  </div>
+
+  <div class="main" id="main-content">
+    <div class="loading"><div class="spinner"></div> Carregando...</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  getFirestore, collection, doc, addDoc, getDocs, updateDoc, deleteDoc,
+  query, orderBy, Timestamp, getDoc, writeBatch, setDoc
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+
+// ── CONFIG FIREBASE — usar a mesma config dos seus outros apps ──
+const firebaseConfig = {
+  apiKey: "AIzaSyDvMzChTFFMvC5G1yKq-40KhVGU6kL4CbA",
+  authDomain: "agroop-d73d4.firebaseapp.com",
+  projectId: "agroop-d73d4",
+  storageBucket: "agroop-d73d4.appspot.com",
+  messagingSenderId: "985146825630",
+  appId: "1:985146825630:web:YOUR_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ── ESTADO ──
+let usuarioAtual = null;
+let perfilAtual = null;
+let pedidos = [], estoque = [], retiradas = [], contas = [], talhoes = [], safras = [];
+let compendio = null;     // cache de estoque_ins_produtos (carrega sob demanda)
+let aplicacoesAgroOp = null; // cache das aplicações do AgroOp
+const FAZENDAS = ['Rodeio', 'Córrego das Flores', 'Palmeiras'];
+const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton'];
+
+// ── UTILS ──
+function fmt(n) { return Number(n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtData(ts) {
+  if (!ts) return '—';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('pt-BR');
+}
+function hoje() { return new Date().toISOString().split('T')[0]; }
+function diasAte(ts) {
+  if (!ts) return 9999;
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return Math.ceil((d - new Date()) / 86400000);
+}
+function classeVenc(ts) {
+  const d = diasAte(ts);
+  if (d < 0) return 'venc-hoje';
+  if (d <= 7) return 'venc-proximo';
+  return 'venc-ok';
+}
+function labelVenc(ts) {
+  const d = diasAte(ts);
+  if (d < 0) return `Vencido há ${Math.abs(d)}d`;
+  if (d === 0) return 'Vence hoje!';
+  if (d <= 7) return `Vence em ${d}d`;
+  return fmtData(ts);
+}
+function toast(msg, tipo='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ativo' + (tipo==='erro' ? ' erro' : '');
+  setTimeout(() => el.className = 'toast', 3500);
+}
+function normalizar(s) { return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+
+// ── AUTH ──
+window.fazerLogin = async function() {
+  const email = document.getElementById('login-email').value.trim();
+  const senha = document.getElementById('login-senha').value;
+  const erroEl = document.getElementById('login-erro');
+  erroEl.textContent = '';
+  try { await signInWithEmailAndPassword(auth, email, senha); }
+  catch(e) { erroEl.textContent = 'E-mail ou senha incorretos.'; }
+};
+window.sair = async function() { await signOut(auth); };
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    usuarioAtual = user;
+    const perfilDoc = await getDoc(doc(db, 'insumos_usuarios', user.uid));
+    if (perfilDoc.exists()) {
+      perfilAtual = perfilDoc.data().perfil;
+    } else {
+      perfilAtual = 'gestor';
+      await setDoc(doc(db, 'insumos_usuarios', user.uid), {
+        email: user.email, nome: user.displayName || user.email.split('@')[0], perfil: 'gestor'
+      });
+    }
+    const nomeDoc = perfilDoc.exists() ? perfilDoc.data().nome : user.email.split('@')[0];
+    document.getElementById('header-nome').textContent = nomeDoc;
+    document.getElementById('header-perfil').textContent = perfilAtual;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').classList.add('ativo');
+    if (perfilAtual === 'gestor') {
+      document.getElementById('nav-gestor').style.display = 'flex';
+      await carregarDados();
+      mostrarAba('dashboard');
+    } else {
+      document.getElementById('nav-gestor').style.display = 'none';
+      renderOperador();
+    }
+  } else {
+    usuarioAtual = null; perfilAtual = null;
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app').classList.remove('ativo');
+  }
+});
+
+// ── DADOS ──
+async function carregarDados() {
+  const [pSnap, eSnap, rSnap, cSnap, tSnap, sSnap] = await Promise.all([
+    getDocs(query(collection(db, 'insumos_pedidos'), orderBy('criado_em', 'desc'))),
+    getDocs(query(collection(db, 'insumos_estoque'), orderBy('produto'))),
+    getDocs(query(collection(db, 'insumos_retiradas'), orderBy('data', 'desc'))),
+    getDocs(query(collection(db, 'insumos_contas'), orderBy('vencimento'))),
+    getDocs(query(collection(db, 'insumos_talhoes'), orderBy('nome'))),
+    getDocs(query(collection(db, 'insumos_safras'), orderBy('nome')))
+  ]);
+  pedidos = pSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  estoque = eSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  retiradas = rSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  contas = cSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  talhoes = tSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  safras = sSnap.docs.map(d => ({id: d.id, ...d.data()}));
+}
+
+// Carrega o compêndio (estoque_ins_produtos) só quando necessário, com cache
+async function carregarCompendio() {
+  if (compendio) return compendio;
+  try {
+    const snap = await getDocs(collection(db, 'estoque_ins_produtos'));
+    compendio = snap.docs.map(d => {
+      const dt = d.data();
+      return dt.nome || dt.produto || dt.marca_comercial || dt.marcaComercial || Object.values(dt).find(v=>typeof v==='string') || '';
+    }).filter(Boolean).sort();
+  } catch(e) {
+    compendio = [];
+  }
+  return compendio;
+}
+
+// Carrega aplicações do AgroOp para previsão de cobertura
+async function carregarAplicacoes() {
+  if (aplicacoesAgroOp) return aplicacoesAgroOp;
+  try {
+    const snap = await getDocs(collection(db, 'aplicacoes'));
+    aplicacoesAgroOp = snap.docs.map(d => ({id: d.id, ...d.data()}));
+  } catch(e) { aplicacoesAgroOp = []; }
+  return aplicacoesAgroOp;
+}
+
+// ── NAV ──
+window.mostrarAba = function(aba) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('ativo', b.dataset.aba === aba));
+  switch(aba) {
+    case 'dashboard': renderDashboard(); break;
+    case 'cobertura': renderCobertura(); break;
+    case 'pedidos': renderPedidos(); break;
+    case 'estoque': renderEstoque(); break;
+    case 'retiradas': renderRetiradas(); break;
+    case 'contas': renderContas(); break;
+    case 'relatorios': renderRelatorios(); break;
+    case 'cadastros': renderCadastros(); break;
+  }
+};
+
+// ══════════════ OPERADOR ══════════════
+window.renderOperador = renderOperador;
+function renderOperador() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="operador-wrap">
+      <div class="operador-titulo">🌿 O que você precisa?</div>
+      <div class="operador-sub">Selecione uma opção abaixo</div>
+      <button class="btn-operador btn-op-retirar" onclick="abrirModalRetiradaOp()">
+        <span class="op-icon">📦</span>
+        <div><div>Retirar Produto</div>
+        <div style="font-size:13px;font-weight:400;opacity:0.85">Registrar saída do estoque</div></div>
+      </button>
+      <button class="btn-operador btn-op-historico" onclick="abrirHistoricoOp()">
+        <span class="op-icon">📋</span>
+        <div><div>Meu Histórico</div>
+        <div style="font-size:13px;font-weight:400;opacity:0.7">Retiradas de hoje</div></div>
+      </button>
+    </div>`;
+}
+
+window.abrirModalRetiradaOp = async function() {
+  await carregarDados();
+  if (estoque.filter(e=>e.quantidade>0).length === 0) { toast('Nenhum produto em estoque no momento.', 'erro'); return; }
+  abrirModalRetirada(true);
+};
+
+window.abrirHistoricoOp = async function() {
+  await carregarDados();
+  const hoje_str = hoje();
+  const minhas = retiradas.filter(r => {
+    const d = r.data?.toDate ? r.data.toDate() : new Date(r.data);
+    return d.toISOString().startsWith(hoje_str) && r.operador_uid === usuarioAtual.uid;
+  });
+  const main = document.getElementById('main-content');
+  if (minhas.length === 0) {
+    main.innerHTML = `<div class="operador-wrap">
+      <div class="operador-titulo">📋 Histórico de Hoje</div>
+      <div class="operador-sub">Nenhuma retirada registrada hoje.</div>
+      <button class="btn btn-secondary" onclick="renderOperador()">← Voltar</button></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div style="max-width:500px;margin:24px auto">
+      <div class="sec-header">
+        <div class="sec-titulo">📋 Retiradas de Hoje</div>
+        <button class="btn btn-secondary btn-sm" onclick="renderOperador()">← Voltar</button>
+      </div>
+      <div class="tabela-wrap"><table>
+        <thead><tr><th>Produto</th><th>Qtd</th><th>Talhão</th></tr></thead>
+        <tbody>${minhas.map(r => `<tr><td>${r.produto}</td><td>${fmt(r.quantidade)} ${r.unidade}</td><td>${r.talhao||r.fazenda}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+};
+
+// ══════════════ DASHBOARD ══════════════
+function renderDashboard() {
+  const totalEstoqueValor = estoque.reduce((s,e) => s + (e.quantidade||0)*(e.custo_medio||0), 0);
+  const pedidosAbertos = pedidos.filter(p => p.status !== 'entregue_total' && p.status !== 'cancelado').length;
+  const contasVencer7 = contas.filter(c => !c.pago && diasAte(c.vencimento) <= 7 && diasAte(c.vencimento) >= 0).length;
+  const contasVencidas = contas.filter(c => !c.pago && diasAte(c.vencimento) < 0).length;
+  const totalContasPendentes = contas.filter(c => !c.pago).reduce((s,c) => s + (c.valor_total||0), 0);
+  const d30 = new Date(); d30.setDate(d30.getDate()-30);
+  const custoRetiradas30 = retiradas.filter(r => {
+    const d = r.data?.toDate ? r.data.toDate() : new Date(r.data);
+    return d >= d30;
+  }).reduce((s,r) => s + (r.custo_total||0), 0);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="cards-grid">
+      <div class="card-resumo">
+        <div class="card-resumo-valor">R$ ${fmt(totalEstoqueValor)}</div>
+        <div class="card-resumo-label">📦 Valor em Estoque</div>
+      </div>
+      <div class="card-resumo alerta">
+        <div class="card-resumo-valor">${pedidosAbertos}</div>
+        <div class="card-resumo-label">📋 Pedidos em Aberto</div>
+      </div>
+      <div class="card-resumo ${contasVencidas > 0 ? 'perigo' : contasVencer7 > 0 ? 'alerta' : ''}">
+        <div class="card-resumo-valor">R$ ${fmt(totalContasPendentes)}</div>
+        <div class="card-resumo-label">💰 Contas a Pagar${contasVencidas>0?` (${contasVencidas} vencida${contasVencidas>1?'s':''})`:contasVencer7>0?` (${contasVencer7} em 7d)`:''}</div>
+      </div>
+      <div class="card-resumo info">
+        <div class="card-resumo-valor">R$ ${fmt(custoRetiradas30)}</div>
+        <div class="card-resumo-label">🚜 Custo Retiradas (30d)</div>
+      </div>
+    </div>
+
+    ${contasVencidas > 0 || contasVencer7 > 0 ? `
+    <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius);padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">⚠️</span>
+      <div>${contasVencidas>0?`<strong>${contasVencidas} conta(s) vencida(s)!</strong> `:''}${contasVencer7>0?`${contasVencer7} conta(s) vencem nos próximos 7 dias.`:''}
+      <a href="#" onclick="mostrarAba('contas');return false" style="color:var(--verde);font-weight:600;margin-left:8px">Ver contas →</a></div>
+    </div>` : ''}
+
+    <div style="background:linear-gradient(135deg,#1a3a2a,#2d6a4f);border-radius:var(--radius);padding:20px 24px;margin-bottom:24px;color:white;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🔮 Previsão de Cobertura de Estoque</div>
+        <div style="font-size:13px;opacity:0.85;margin-top:4px">Cruze os planejamentos do AgroOp com seu estoque e pedidos</div>
+      </div>
+      <button class="btn" style="background:white;color:var(--verde);font-weight:600" onclick="mostrarAba('cobertura')">Ver Previsão →</button>
+    </div>
+
+    <div class="tabela-wrap">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">🚜 Últimas Retiradas</div>
+      <table>
+        <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Fazenda / Talhão</th><th>Safra</th><th>Custo</th></tr></thead>
+        <tbody>
+          ${retiradas.slice(0,6).map(r => `
+            <tr><td>${fmtData(r.data)}</td><td>${r.produto}</td><td>${fmt(r.quantidade)} ${r.unidade}</td>
+            <td>${r.fazenda}${r.talhao?' / '+r.talhao:''}</td><td>${r.safra||'—'}</td><td>R$ ${fmt(r.custo_total)}</td></tr>
+          `).join('') || '<tr><td colspan="6" class="tabela-vazia">Nenhuma retirada registrada</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ══════════════ PREVISÃO DE COBERTURA ══════════════
+async function renderCobertura() {
+  document.getElementById('main-content').innerHTML = `<div class="loading"><div class="spinner"></div> Cruzando dados do AgroOp...</div>`;
+  aplicacoesAgroOp = null; // força recarga para pegar planejamentos novos
+  await carregarAplicacoes();
+
+  // Aplicações planejadas = não finalizadas OU com data futura
+  const hojeStr = hoje();
+  const planejadas = aplicacoesAgroOp.filter(a => !a.finalizadoEm || (a.data && a.data >= hojeStr));
+
+  // Necessidade por produto: dose × área
+  const necessidade = {}; // chave normalizada -> {produto, total, semArea: n}
+  planejadas.forEach(a => {
+    // tenta achar área: campo direto ou via talhão cadastrado
+    let areaHa = parseFloat(a.area || a.areaHa || a.area_ha || a.hectares) || 0;
+    if (!areaHa && a.talhao) {
+      const t = talhoes.find(t => normalizar(t.nome) === normalizar(a.talhao) && (!a.fazenda || normalizar(t.fazenda||'') === normalizar((a.fazenda||'').replace('Fazenda ',''))));
+      if (t) areaHa = parseFloat(t.area_ha) || 0;
+    }
+    (a.produtos||[]).forEach(p => {
+      const nome = p.produto || p.nome || '';
+      if (!nome) return;
+      const k = normalizar(nome);
+      if (!necessidade[k]) necessidade[k] = { produto: nome, total: 0, aplicacoesSemArea: 0, dosesSemArea: [] };
+      const dose = parseFloat(String(p.dose).replace(',','.')) || 0;
+      if (areaHa > 0) {
+        necessidade[k].total += dose * areaHa;
+      } else {
+        necessidade[k].aplicacoesSemArea++;
+        necessidade[k].dosesSemArea.push(dose);
+      }
+    });
+  });
+
+  // Pendente nos pedidos
+  const pendentePedidos = {};
+  pedidos.filter(p => p.status !== 'entregue_total' && p.status !== 'cancelado').forEach(p => {
+    (p.itens||[]).forEach(it => {
+      const k = normalizar(it.produto);
+      const pend = (it.quantidade||0) - (it.quantidade_recebida||0);
+      if (pend > 0) pendentePedidos[k] = (pendentePedidos[k]||0) + pend;
+    });
+  });
+
+  // Montar linhas
+  const chaves = Object.keys(necessidade);
+  let rows = chaves.map(k => {
+    const n = necessidade[k];
+    const est = estoque.find(e => normalizar(e.produto) === k);
+    const emEstoque = est ? (est.quantidade||0) : 0;
+    const unidade = est ? est.unidade : '';
+    const aChegar = pendentePedidos[k] || 0;
+    const saldo = emEstoque + aChegar - n.total;
+    return { ...n, emEstoque, aChegar, saldo, unidade, k };
+  }).sort((a,b) => a.saldo - b.saldo);
+
+  const faltando = rows.filter(r => r.saldo < 0).length;
+  const semArea = rows.filter(r => r.aplicacoesSemArea > 0).length;
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-header">
+      <div class="sec-titulo">🔮 Previsão de Cobertura de Estoque</div>
+      <button class="btn btn-secondary btn-sm" onclick="mostrarAba('cobertura')">↻ Atualizar</button>
+    </div>
+    <p style="font-size:13px;color:var(--cinza);margin-bottom:16px">
+      Baseado em <strong>${planejadas.length}</strong> aplicações planejadas no AgroOp (não finalizadas ou futuras),
+      comparando necessidade (dose × área) com estoque atual + pedidos a receber.
+    </p>
+    ${faltando > 0 ? `
+    <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px">
+      🔴 <strong>${faltando} produto(s) sem cobertura suficiente</strong> — considere fazer pedido de compra.
+    </div>` : chaves.length > 0 ? `
+    <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px">
+      ✅ <strong>Todos os produtos planejados têm cobertura!</strong>
+    </div>` : ''}
+    ${semArea > 0 ? `
+    <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px">
+      ⚠️ ${semArea} produto(s) têm aplicações sem área definida (nem no AgroOp, nem no cadastro de talhões) — a necessidade pode estar subestimada.
+      Cadastre os talhões com área em <strong>⚙️ Cadastros</strong>.
+    </div>` : ''}
+
+    ${chaves.length === 0 ? `
+    <div class="tabela-wrap"><div class="tabela-vazia">Nenhuma aplicação planejada encontrada no AgroOp.<br>
+    Crie um planejamento no AgroOp e ele aparecerá aqui automaticamente.</div></div>` : `
+    <div class="tabela-wrap" style="border-radius:var(--radius);overflow:hidden">
+      <div class="cob-row header">
+        <span>Produto</span><span>Necessário</span><span>Em Estoque</span><span>A Receber</span><span>Saldo</span>
+      </div>
+      ${rows.map(r => `
+        <div class="cob-row" style="${r.saldo<0?'background:#fef2f2':''}">
+          <span><strong>${r.produto}</strong>${r.aplicacoesSemArea>0?` <span class="badge badge-amarelo" title="aplicações sem área">⚠ s/área</span>`:''}</span>
+          <span>${fmt(r.total)} ${r.unidade}</span>
+          <span>${fmt(r.emEstoque)}</span>
+          <span style="color:var(--azul)">${r.aChegar>0?'+'+fmt(r.aChegar):'—'}</span>
+          <span style="font-weight:700;color:${r.saldo<0?'var(--vermelho)':'var(--verde)'}">
+            ${r.saldo<0?'🔴 Faltam '+fmt(Math.abs(r.saldo)):'✅ +'+fmt(r.saldo)}
+          </span>
+        </div>
+      `).join('')}
+    </div>
+    <div style="margin-top:16px">
+      <button class="btn btn-primary" onclick="exportarCobertura()">📥 Exportar Excel</button>
+    </div>`}
+  `;
+  window._coberturaRows = rows;
+}
+
+window.exportarCobertura = function() {
+  const rows = window._coberturaRows || [];
+  exportarExcel('Previsao_Cobertura',
+    ['Produto','Necessário','Unidade','Em Estoque','A Receber (pedidos)','Saldo'],
+    rows.map(r => [r.produto, r.total, r.unidade, r.emEstoque, r.aChegar, r.saldo])
+  );
+};
+
+// ══════════════ PEDIDOS ══════════════
+function renderPedidos() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-header">
+      <div class="sec-titulo">📋 Pedidos de Compra</div>
+      <button class="btn btn-primary" onclick="abrirModalPedido()">+ Novo Pedido</button>
+    </div>
+    <div class="filtros">
+      <select id="filtro-status-pedido" onchange="filtrarPedidos()">
+        <option value="">Todos os status</option>
+        <option value="pendente">Pendente</option>
+        <option value="parcial">Parcial</option>
+        <option value="entregue_total">Entregue</option>
+      </select>
+      <input type="text" id="filtro-fornecedor" oninput="filtrarPedidos()" placeholder="Buscar fornecedor...">
+    </div>
+    <div id="lista-pedidos"></div>`;
+  filtrarPedidos();
+}
+
+window.filtrarPedidos = function() {
+  const statusF = document.getElementById('filtro-status-pedido')?.value || '';
+  const fornF = (document.getElementById('filtro-fornecedor')?.value || '').toLowerCase();
+  const lista = pedidos.filter(p => (!statusF || p.status === statusF) && (!fornF || p.fornecedor.toLowerCase().includes(fornF)));
+  const el = document.getElementById('lista-pedidos');
+  if (!el) return;
+  if (lista.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum pedido encontrado</div></div>`; return; }
+  el.innerHTML = `
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Data</th><th>Fornecedor</th><th>Itens</th><th>Total</th><th>Status</th><th>Ações</th></tr></thead>
+      <tbody>
+        ${lista.map(p => `
+          <tr>
+            <td>${p.data_pedido||fmtData(p.criado_em)}</td>
+            <td><strong>${p.fornecedor}</strong></td>
+            <td style="text-align:center">${(p.itens||[]).length}</td>
+            <td>R$ ${fmt(p.valor_total)}</td>
+            <td>${badgeStatus(p.status)}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm btn-secondary" onclick="verPedido('${p.id}')">Ver</button>
+              ${p.status !== 'entregue_total' && p.status !== 'cancelado' ?
+                `<button class="btn btn-sm btn-laranja" style="margin-left:6px" onclick="abrirBaixa('${p.id}')">Receber</button>` : ''}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+};
+
+function badgeStatus(s) {
+  const map = { 'pendente':['badge-azul','Pendente'], 'parcial':['badge-amarelo','Parcial'],
+    'entregue_total':['badge-verde','Entregue'], 'cancelado':['badge-cinza','Cancelado'] };
+  const [cls, label] = map[s] || ['badge-cinza', s];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+let itensPedidoTemp = [];
+
+window.abrirModalPedido = async function() {
+  itensPedidoTemp.length = 0;
+  itensPedidoTemp.push({ produto:'', quantidade:'', unidade:'L', preco_unit:'' });
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-pedido">
+      <div class="modal">
+        <div class="modal-titulo">📋 Novo Pedido de Compra</div>
+        <div class="form-row">
+          <div class="form-group"><label>Fornecedor *</label>
+            <input type="text" id="ped-fornecedor" placeholder="Nome do fornecedor"></div>
+          <div class="form-group"><label>Fazenda</label>
+            <select id="ped-fazenda"><option value="">Todas</option>${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Data do Pedido</label><input type="date" id="ped-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Previsão de Entrega</label><input type="date" id="ped-entrega"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="ped-obs" placeholder="Opcional"></div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:10px">Itens do Pedido
+          <span id="compendio-status" style="font-weight:400;font-size:11px;color:var(--cinza)"> (carregando sugestões...)</span></div>
+        <datalist id="compendio-datalist"></datalist>
+        <div class="itens-pedido">
+          <div class="item-pedido-row header-row"><span>Produto</span><span>Qtd</span><span>Un</span><span>R$/Un</span><span></span></div>
+          <div id="itens-pedido-rows"></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="addItemPedido()">+ Adicionar Item</button>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-pedido')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarPedido()">Salvar Pedido</button>
+        </div>
+      </div>
+    </div>`);
+  renderItensPedido();
+  // Carregar compêndio em segundo plano
+  carregarCompendio().then(lista => {
+    const dl = document.getElementById('compendio-datalist');
+    const st = document.getElementById('compendio-status');
+    if (dl) dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+    if (st) st.textContent = lista.length > 0 ? ` (${lista.length} produtos no compêndio)` : '';
+  });
+};
+
+function renderItensPedido() {
+  const el = document.getElementById('itens-pedido-rows');
+  if (!el) return;
+  el.innerHTML = itensPedidoTemp.map((item, i) => `
+    <div class="item-pedido-row">
+      <input type="text" list="compendio-datalist" value="${item.produto}" oninput="itensPedidoTemp[${i}].produto=this.value" placeholder="Digite para buscar...">
+      <input type="number" value="${item.quantidade}" oninput="itensPedidoTemp[${i}].quantidade=this.value" placeholder="0" min="0" step="0.01">
+      <select onchange="itensPedidoTemp[${i}].unidade=this.value">${UNIDADES.map(u=>`<option ${u===item.unidade?'selected':''}>${u}</option>`).join('')}</select>
+      <input type="number" value="${item.preco_unit}" oninput="itensPedidoTemp[${i}].preco_unit=this.value" placeholder="0.00" min="0" step="0.01">
+      <button onclick="removeItemPedido(${i})" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--vermelho)">✕</button>
+    </div>`).join('');
+}
+window.itensPedidoTemp = itensPedidoTemp;
+window.addItemPedido = function() { itensPedidoTemp.push({ produto:'', quantidade:'', unidade:'L', preco_unit:'' }); renderItensPedido(); };
+window.removeItemPedido = function(i) { itensPedidoTemp.splice(i, 1); renderItensPedido(); };
+
+window.salvarPedido = async function() {
+  const fornecedor = document.getElementById('ped-fornecedor').value.trim();
+  if (!fornecedor) { toast('Informe o fornecedor.', 'erro'); return; }
+  const itensValidos = itensPedidoTemp.filter(i => i.produto && i.quantidade);
+  if (itensValidos.length === 0) { toast('Adicione pelo menos um item.', 'erro'); return; }
+  const itens = itensValidos.map(i => ({
+    produto: i.produto.trim(), quantidade: parseFloat(i.quantidade)||0, quantidade_recebida: 0,
+    unidade: i.unidade, preco_unit: parseFloat(i.preco_unit)||0,
+    total: (parseFloat(i.quantidade)||0)*(parseFloat(i.preco_unit)||0)
+  }));
+  const valor_total = itens.reduce((s,i) => s+i.total, 0);
+  const pedido = {
+    fornecedor, fazenda: document.getElementById('ped-fazenda').value,
+    data_pedido: document.getElementById('ped-data').value,
+    previsao_entrega: document.getElementById('ped-entrega').value,
+    obs: document.getElementById('ped-obs').value,
+    itens, valor_total, status: 'pendente',
+    criado_em: Timestamp.now(), criado_por: usuarioAtual.uid
+  };
+  try {
+    const ref = await addDoc(collection(db, 'insumos_pedidos'), pedido);
+    pedidos.unshift({id: ref.id, ...pedido});
+    fecharModal('modal-pedido');
+    toast('Pedido criado com sucesso!');
+    // ── MELHORIA 1: oferecer conta a pagar automática ──
+    if (valor_total > 0) abrirContaAutomatica(ref.id, fornecedor, valor_total);
+    else renderPedidos();
+  } catch(e) { toast('Erro ao salvar: ' + e.message, 'erro'); }
+};
+
+// Conta a pagar automática após pedido
+function abrirContaAutomatica(pedidoId, fornecedor, valor) {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-conta-auto">
+      <div class="modal">
+        <div class="modal-titulo">💰 Gerar Contas a Pagar?</div>
+        <p style="font-size:14px;margin-bottom:18px">Pedido de <strong>${fornecedor}</strong> no valor de <strong>R$ ${fmt(valor)}</strong>.<br>
+        Deseja já lançar no contas a pagar?</p>
+        <div class="form-row">
+          <div class="form-group"><label>1º Vencimento *</label><input type="date" id="ca-venc"></div>
+          <div class="form-group"><label>Nº Parcelas</label><input type="number" id="ca-parcelas" value="1" min="1" max="12"></div>
+        </div>
+        <p style="font-size:12px;color:var(--cinza)">Parcelas mensais de valor igual a partir do 1º vencimento.</p>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-conta-auto');renderPedidos()">Agora não</button>
+          <button class="btn btn-primary" onclick="salvarContaAutomatica('${pedidoId}','${fornecedor.replace(/'/g,"\\'")}',${valor})">Gerar Contas</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+window.salvarContaAutomatica = async function(pedidoId, fornecedor, valor) {
+  const venc = document.getElementById('ca-venc').value;
+  const parcelas = parseInt(document.getElementById('ca-parcelas').value)||1;
+  if (!venc) { toast('Informe o vencimento.','erro'); return; }
+  try {
+    for (let i = 0; i < parcelas; i++) {
+      const dataVenc = new Date(venc + 'T12:00:00');
+      dataVenc.setMonth(dataVenc.getMonth() + i);
+      const conta = {
+        fornecedor, descricao: `Pedido de compra${parcelas>1?` (${i+1}/${parcelas})`:''}`,
+        valor_total: valor/parcelas, vencimento: Timestamp.fromDate(dataVenc),
+        pedido_id: pedidoId, pago: false, criado_em: Timestamp.now()
+      };
+      const ref = await addDoc(collection(db,'insumos_contas'), conta);
+      contas.push({id: ref.id, ...conta});
+    }
+    contas.sort((a,b) => (a.vencimento?.toDate?a.vencimento.toDate():new Date(a.vencimento)) - (b.vencimento?.toDate?b.vencimento.toDate():new Date(b.vencimento)));
+    fecharModal('modal-conta-auto');
+    toast(parcelas>1?`${parcelas} parcelas geradas no contas a pagar!`:'Conta a pagar gerada!');
+    renderPedidos();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.verPedido = function(id) {
+  const p = pedidos.find(x => x.id === id);
+  if (!p) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-ver-pedido">
+      <div class="modal">
+        <div class="modal-titulo">📋 Pedido — ${p.fornecedor}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px">
+          <div><strong>Data:</strong> ${p.data_pedido||'—'}</div>
+          <div><strong>Fazenda:</strong> ${p.fazenda||'—'}</div>
+          <div><strong>Previsão:</strong> ${p.previsao_entrega||'—'}</div>
+          <div><strong>Status:</strong> ${badgeStatus(p.status)}</div>
+          ${p.obs ? `<div style="grid-column:1/-1"><strong>Obs:</strong> ${p.obs}</div>` : ''}
+        </div>
+        <div class="itens-pedido">
+          <div class="baixa-item-row header-row"><span>Produto</span><span>Pedido</span><span>Recebido</span><span>Pendente</span></div>
+          ${(p.itens||[]).map(it => {
+            const pend = (it.quantidade||0) - (it.quantidade_recebida||0);
+            return `<div class="baixa-item-row">
+              <span>${it.produto}</span><span>${fmt(it.quantidade)} ${it.unidade}</span>
+              <span style="color:var(--verde);font-weight:600">${fmt(it.quantidade_recebida||0)}</span>
+              <span style="color:${pend>0?'var(--laranja)':'var(--cinza)'};font-weight:600">${fmt(pend)}</span></div>`;
+          }).join('')}
+        </div>
+        <div style="text-align:right;margin-top:12px;font-family:'Syne',sans-serif;font-weight:700;font-size:16px">Total: R$ ${fmt(p.valor_total)}</div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-ver-pedido')">Fechar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+// ── BAIXA PARCIAL + FOTO NF ──
+window.abrirBaixa = function(id) {
+  const p = pedidos.find(x => x.id === id);
+  if (!p) return;
+  const itensPend = (p.itens||[]).filter(it => (it.quantidade||0) - (it.quantidade_recebida||0) > 0);
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-baixa">
+      <div class="modal">
+        <div class="modal-titulo">📥 Receber Mercadoria — ${p.fornecedor}</div>
+        <div class="form-group"><label>Data de Recebimento</label><input type="date" id="baixa-data" value="${hoje()}"></div>
+        <div class="itens-pedido">
+          <div class="baixa-item-row header-row"><span>Produto</span><span>Pendente</span><span>Un</span><span>Receber</span></div>
+          ${itensPend.map((it, i) => {
+            const pend = (it.quantidade||0) - (it.quantidade_recebida||0);
+            return `<div class="baixa-item-row">
+              <span>${it.produto}</span><span>${fmt(pend)}</span><span>${it.unidade}</span>
+              <input type="number" id="baixa-qtd-${i}" value="${pend}" min="0" max="${pend}" step="0.01"></div>`;
+          }).join('')}
+        </div>
+        <p style="font-size:12px;color:var(--cinza)">* Itens recebidos entram no estoque automaticamente (custo médio ponderado).</p>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-baixa')">Cancelar</button>
+          <button class="btn btn-primary" id="btn-confirma-baixa" onclick="confirmarBaixa('${id}')">Confirmar Recebimento</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.confirmarBaixa = async function(id) {
+  const p = pedidos.find(x => x.id === id);
+  if (!p) return;
+  const btn = document.getElementById('btn-confirma-baixa');
+  btn.disabled = true; btn.textContent = 'Salvando...';
+  const itensPend = (p.itens||[]).filter(it => (it.quantidade||0) - (it.quantidade_recebida||0) > 0);
+  const dataReceb = document.getElementById('baixa-data').value;
+  const batch = writeBatch(db);
+  let totalRecebido = 0;
+  const novosItens = [...p.itens];
+
+  itensPend.forEach((it, i) => {
+    const qtdReceber = parseFloat(document.getElementById(`baixa-qtd-${i}`)?.value) || 0;
+    if (qtdReceber <= 0) return;
+    totalRecebido += qtdReceber;
+    const idx = novosItens.findIndex(x => x.produto === it.produto);
+    if (idx >= 0) novosItens[idx] = { ...novosItens[idx], quantidade_recebida: (novosItens[idx].quantidade_recebida||0) + qtdReceber };
+    const estoqueExist = estoque.find(e => normalizar(e.produto) === normalizar(it.produto) && e.unidade === it.unidade);
+    const novoPreco = it.preco_unit || 0;
+    if (estoqueExist) {
+      const qtdAtual = estoqueExist.quantidade || 0;
+      const custoAtual = estoqueExist.custo_medio || novoPreco;
+      const novoCusto = qtdAtual > 0 ? ((qtdAtual*custoAtual)+(qtdReceber*novoPreco))/(qtdAtual+qtdReceber) : novoPreco;
+      batch.update(doc(db, 'insumos_estoque', estoqueExist.id), { quantidade: qtdAtual+qtdReceber, custo_medio: novoCusto, ultima_entrada: dataReceb });
+      estoqueExist.quantidade = qtdAtual+qtdReceber; estoqueExist.custo_medio = novoCusto;
+    } else {
+      const eRef = doc(collection(db, 'insumos_estoque'));
+      batch.set(eRef, { produto: it.produto, unidade: it.unidade, quantidade: qtdReceber, custo_medio: novoPreco, ultima_entrada: dataReceb, fazenda: p.fazenda||'' });
+      estoque.push({ id: eRef.id, produto: it.produto, unidade: it.unidade, quantidade: qtdReceber, custo_medio: novoPreco, ultima_entrada: dataReceb, fazenda: p.fazenda });
+    }
+  });
+
+  if (totalRecebido === 0) { toast('Informe a quantidade a receber.', 'erro'); btn.disabled=false; btn.textContent='Confirmar Recebimento'; return; }
+
+  const todosEntregues = novosItens.every(it => (it.quantidade_recebida||0) >= (it.quantidade||0));
+  const novoStatus = todosEntregues ? 'entregue_total' : 'parcial';
+
+  batch.update(doc(db, 'insumos_pedidos', id), { itens: novosItens, status: novoStatus });
+  try {
+    await batch.commit();
+    const pi = pedidos.findIndex(x => x.id === id);
+    if (pi >= 0) { pedidos[pi].itens = novosItens; pedidos[pi].status = novoStatus; }
+    fecharModal('modal-baixa');
+    toast('Recebimento registrado! Estoque atualizado.');
+    renderPedidos();
+  } catch(e) { toast('Erro: ' + e.message, 'erro'); btn.disabled=false; btn.textContent='Confirmar Recebimento'; }
+};
+
+// ══════════════ ESTOQUE ══════════════
+function renderEstoque() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-header">
+      <div class="sec-titulo">📦 Estoque de Insumos</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="abrirEntradaManual()">+ Entrada Manual</button>
+        <button class="btn btn-primary" onclick="abrirModalRetirada(false)">− Retirada</button>
+      </div>
+    </div>
+    <div class="filtros">
+      <input type="text" id="filtro-est" oninput="filtrarEstoque()" placeholder="Buscar produto...">
+    </div>
+    <div id="lista-estoque"></div>`;
+  filtrarEstoque();
+}
+
+window.filtrarEstoque = function() {
+  const busca = (document.getElementById('filtro-est')?.value||'').toLowerCase();
+  const lista = estoque.filter(e => !busca || e.produto.toLowerCase().includes(busca));
+  const el = document.getElementById('lista-estoque');
+  if (!el) return;
+  if (lista.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum produto em estoque</div></div>`; return; }
+  el.innerHTML = `
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Produto</th><th>Quantidade</th><th>Un</th><th>Custo Médio</th><th>Valor Total</th><th>Última Entrada</th></tr></thead>
+      <tbody>
+        ${lista.map(e => `<tr>
+          <td><strong>${e.produto}</strong></td>
+          <td style="font-size:16px;font-weight:700;color:${e.quantidade>0?'var(--verde)':'var(--cinza)'}">${fmt(e.quantidade)}</td>
+          <td>${e.unidade}</td><td>R$ ${fmt(e.custo_medio||0)}</td>
+          <td>R$ ${fmt((e.quantidade||0)*(e.custo_medio||0))}</td><td>${e.ultima_entrada||'—'}</td></tr>`).join('')}
+      </tbody>
+      <tfoot><tr style="background:var(--creme);font-weight:700">
+        <td colspan="4" style="padding:12px 16px">Total em Estoque</td>
+        <td style="padding:12px 16px">R$ ${fmt(lista.reduce((s,e)=>s+(e.quantidade||0)*(e.custo_medio||0),0))}</td><td></td>
+      </tr></tfoot>
+    </table></div>
+    <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarEstoque()">📥 Exportar Excel</button></div>`;
+};
+
+window.exportarEstoque = function() {
+  exportarExcel('Estoque', ['Produto','Quantidade','Unidade','Custo Médio (R$)','Valor Total (R$)','Última Entrada'],
+    estoque.map(e => [e.produto, e.quantidade||0, e.unidade, e.custo_medio||0, (e.quantidade||0)*(e.custo_medio||0), e.ultima_entrada||'']));
+};
+
+window.abrirEntradaManual = async function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-entrada">
+      <div class="modal">
+        <div class="modal-titulo">📥 Entrada Manual de Estoque</div>
+        <div class="form-group"><label>Produto *</label>
+          <input type="text" id="ent-produto" placeholder="Digite para buscar..." list="compendio-datalist-2">
+          <datalist id="compendio-datalist-2"></datalist></div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantidade *</label><input type="number" id="ent-qtd" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="ent-un">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Custo Unitário (R$)</label><input type="number" id="ent-custo" min="0" step="0.01"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-entrada')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarEntrada()">Confirmar Entrada</button>
+        </div>
+      </div>
+    </div>`);
+  carregarCompendio().then(lista => {
+    const dl = document.getElementById('compendio-datalist-2');
+    if (dl) dl.innerHTML = [...new Set([...estoque.map(e=>e.produto), ...lista])].sort().map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+  });
+};
+
+window.salvarEntrada = async function() {
+  const produto = document.getElementById('ent-produto').value.trim();
+  const qtd = parseFloat(document.getElementById('ent-qtd').value)||0;
+  if (!produto || qtd <= 0) { toast('Preencha produto e quantidade.', 'erro'); return; }
+  const unidade = document.getElementById('ent-un').value;
+  const custo = parseFloat(document.getElementById('ent-custo').value)||0;
+  const exist = estoque.find(e => normalizar(e.produto) === normalizar(produto) && e.unidade === unidade);
+  try {
+    if (exist) {
+      const qtdAt = exist.quantidade||0, custoAt = exist.custo_medio||0;
+      const novoCusto = qtdAt > 0 ? ((qtdAt*custoAt)+(qtd*custo))/(qtdAt+qtd) : custo;
+      await updateDoc(doc(db,'insumos_estoque',exist.id), { quantidade: qtdAt+qtd, custo_medio: novoCusto, ultima_entrada: hoje() });
+      exist.quantidade = qtdAt+qtd; exist.custo_medio = novoCusto;
+    } else {
+      const ref = await addDoc(collection(db,'insumos_estoque'), { produto, unidade, quantidade: qtd, custo_medio: custo, ultima_entrada: hoje() });
+      estoque.push({ id: ref.id, produto, unidade, quantidade: qtd, custo_medio: custo, ultima_entrada: hoje() });
+    }
+    fecharModal('modal-entrada');
+    toast('Entrada registrada!');
+    renderEstoque();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ RETIRADAS ══════════════
+function renderRetiradas() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-header">
+      <div class="sec-titulo">🚜 Retiradas de Estoque</div>
+      <button class="btn btn-primary" onclick="abrirModalRetirada(false)">+ Nova Retirada</button>
+    </div>
+    <div class="filtros">
+      <input type="date" id="filt-ret-de" oninput="filtrarRetiradas()">
+      <input type="date" id="filt-ret-ate" oninput="filtrarRetiradas()">
+      <select id="filt-ret-fazenda" onchange="filtrarRetiradas()">
+        <option value="">Todas as fazendas</option>${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}
+      </select>
+      <input type="text" id="filt-ret-produto" oninput="filtrarRetiradas()" placeholder="Produto...">
+    </div>
+    <div id="lista-retiradas"></div>`;
+  filtrarRetiradas();
+}
+
+window.filtrarRetiradas = function() {
+  const de = document.getElementById('filt-ret-de')?.value;
+  const ate = document.getElementById('filt-ret-ate')?.value;
+  const faz = document.getElementById('filt-ret-fazenda')?.value||'';
+  const prod = (document.getElementById('filt-ret-produto')?.value||'').toLowerCase();
+  const lista = retiradas.filter(r => {
+    const d = r.data?.toDate ? r.data.toDate() : new Date(r.data);
+    const dStr = d.toISOString().split('T')[0];
+    return (!de || dStr >= de) && (!ate || dStr <= ate) && (!faz || r.fazenda === faz) && (!prod || r.produto.toLowerCase().includes(prod));
+  });
+  const el = document.getElementById('lista-retiradas');
+  if (!el) return;
+  const totalCusto = lista.reduce((s,r)=>s+(r.custo_total||0),0);
+  if (lista.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhuma retirada encontrada</div></div>`; return; }
+  el.innerHTML = `
+    <div style="margin-bottom:12px;font-size:13px;color:var(--cinza)">${lista.length} registros — Custo total: <strong>R$ ${fmt(totalCusto)}</strong></div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Custo</th></tr></thead>
+      <tbody>
+        ${lista.map(r => `<tr><td>${fmtData(r.data)}</td><td>${r.produto}</td><td>${fmt(r.quantidade)} ${r.unidade}</td>
+        <td>${r.fazenda}</td><td>${r.talhao||'—'}</td><td>${r.cultura||'—'}</td><td>${r.safra||'—'}</td><td>R$ ${fmt(r.custo_total)}</td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarRetiradas()">📥 Exportar Excel</button></div>`;
+  window._retiradasFiltradas = lista;
+};
+
+window.exportarRetiradas = function() {
+  const lista = window._retiradasFiltradas || retiradas;
+  exportarExcel('Retiradas', ['Data','Produto','Quantidade','Unidade','Fazenda','Talhão','Cultura','Safra','Custo Unit (R$)','Custo Total (R$)'],
+    lista.map(r => [fmtData(r.data), r.produto, r.quantidade||0, r.unidade, r.fazenda, r.talhao||'', r.cultura||'', r.safra||'', r.custo_unitario||0, r.custo_total||0]));
+};
+
+// Modal retirada (gestor + operador) — MELHORIA 4: talhões e safras pré-cadastrados
+window.abrirModalRetirada = function(simples) {
+  const disponiveis = estoque.filter(e => e.quantidade > 0);
+  if (disponiveis.length === 0) { toast('Nenhum produto em estoque.', 'erro'); return; }
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-retirada">
+      <div class="modal">
+        <div class="modal-titulo">📦 Retirar Produto do Estoque</div>
+        <div class="form-group"><label>Produto *</label>
+          <select id="ret-produto" onchange="atualizarInfoEstoque()" style="font-size:${simples?'16px':'14px'}">
+            <option value="">Selecione...</option>
+            ${disponiveis.map(e=>`<option value="${e.id}">${e.produto} — ${fmt(e.quantidade)} ${e.unidade}</option>`).join('')}
+          </select></div>
+        <div id="ret-info" style="background:var(--creme);border-radius:var(--radius);padding:10px 14px;font-size:13px;margin-bottom:14px;display:none">
+          Em estoque: <strong id="ret-info-qtd"></strong>${!simples?' — Custo médio: <strong id="ret-info-custo"></strong>':'<span id="ret-info-custo" style="display:none"></span>'}
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantidade *</label>
+            <input type="number" id="ret-qtd" min="0.01" step="0.01" placeholder="0" style="font-size:${simples?'18px':'14px'}"></div>
+          <div class="form-group"><label>Data</label><input type="date" id="ret-data" value="${hoje()}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Fazenda *</label>
+            <select id="ret-fazenda" onchange="atualizarTalhoes()">
+              <option value="">Selecione...</option>${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}
+            </select></div>
+          <div class="form-group"><label>Talhão</label>
+            <select id="ret-talhao"><option value="">Selecione a fazenda...</option></select></div>
+        </div>
+        ${!simples ? `
+        <div class="form-row">
+          <div class="form-group"><label>Cultura</label>
+            <input type="text" id="ret-cultura" placeholder="Ex: Soja, Milho" list="culturas-dl">
+            <datalist id="culturas-dl"><option value="Soja"><option value="Milho"><option value="Sorgo"><option value="Algodão"><option value="Pastagem"></datalist></div>
+          <div class="form-group"><label>Safra</label>
+            <select id="ret-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
+        </div>` : `
+        <div class="form-group"><label>Safra</label>
+          <select id="ret-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>`}
+        <div class="form-group"><label>Observação</label><input type="text" id="ret-obs" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-retirada')">Cancelar</button>
+          <button class="btn btn-primary" onclick="confirmarRetirada(${simples})">Confirmar Retirada</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.atualizarTalhoes = function() {
+  const faz = document.getElementById('ret-fazenda').value;
+  const sel = document.getElementById('ret-talhao');
+  const lista = talhoes.filter(t => !faz || normalizar(t.fazenda||'') === normalizar(faz));
+  sel.innerHTML = `<option value="">—</option>` + lista.map(t=>`<option value="${t.nome}">${t.nome}${t.area_ha?` (${fmt(t.area_ha)} ha)`:''}</option>`).join('');
+};
+
+window.atualizarInfoEstoque = function() {
+  const sel = document.getElementById('ret-produto').value;
+  const el = document.getElementById('ret-info');
+  if (!sel) { el.style.display='none'; return; }
+  const est = estoque.find(e => e.id === sel);
+  if (!est) return;
+  el.style.display = 'block';
+  document.getElementById('ret-info-qtd').textContent = `${fmt(est.quantidade)} ${est.unidade}`;
+  const custoEl = document.getElementById('ret-info-custo');
+  if (custoEl) custoEl.textContent = `R$ ${fmt(est.custo_medio||0)}/${est.unidade}`;
+};
+
+window.confirmarRetirada = async function(simples) {
+  const prodId = document.getElementById('ret-produto').value;
+  const qtd = parseFloat(document.getElementById('ret-qtd').value)||0;
+  const fazenda = document.getElementById('ret-fazenda').value;
+  if (!prodId) { toast('Selecione o produto.','erro'); return; }
+  if (qtd <= 0) { toast('Informe a quantidade.','erro'); return; }
+  if (!fazenda) { toast('Selecione a fazenda.','erro'); return; }
+  const est = estoque.find(e => e.id === prodId);
+  if (!est) return;
+  if (qtd > est.quantidade) { toast(`Quantidade maior que o disponível (${fmt(est.quantidade)} ${est.unidade}).`,'erro'); return; }
+  const custo_total = qtd * (est.custo_medio||0);
+  const retirada = {
+    produto: est.produto, unidade: est.unidade, quantidade: qtd, fazenda,
+    talhao: document.getElementById('ret-talhao')?.value||'',
+    cultura: document.getElementById('ret-cultura')?.value||'',
+    safra: document.getElementById('ret-safra')?.value||'',
+    obs: document.getElementById('ret-obs')?.value||'',
+    custo_unitario: est.custo_medio||0, custo_total,
+    data: Timestamp.now(), operador_uid: usuarioAtual.uid, operador_email: usuarioAtual.email
+  };
+  try {
+    const ref = await addDoc(collection(db,'insumos_retiradas'), retirada);
+    await updateDoc(doc(db,'insumos_estoque',prodId), { quantidade: est.quantidade - qtd });
+    est.quantidade -= qtd;
+    retiradas.unshift({id: ref.id, ...retirada});
+    fecharModal('modal-retirada');
+    toast('Retirada registrada com sucesso!');
+    if (simples) renderOperador(); else renderRetiradas();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ CONTAS A PAGAR ══════════════
+function renderContas() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-header">
+      <div class="sec-titulo">💰 Contas a Pagar</div>
+      <button class="btn btn-primary" onclick="abrirModalConta()">+ Nova Conta</button>
+    </div>
+    <div class="filtros">
+      <select id="filt-conta-status" onchange="filtrarContas()">
+        <option value="pendente">Pendentes</option><option value="pago">Pagas</option><option value="">Todas</option>
+      </select>
+      <input type="text" id="filt-conta-forn" oninput="filtrarContas()" placeholder="Fornecedor...">
+    </div>
+    <div id="lista-contas"></div>`;
+  filtrarContas();
+}
+
+window.filtrarContas = function() {
+  const status = document.getElementById('filt-conta-status')?.value;
+  const forn = (document.getElementById('filt-conta-forn')?.value||'').toLowerCase();
+  const lista = contas.filter(c =>
+    (status === '' || (status === 'pago' ? c.pago === true : c.pago !== true)) &&
+    (!forn || (c.fornecedor||'').toLowerCase().includes(forn)));
+  const el = document.getElementById('lista-contas');
+  if (!el) return;
+  const totalPend = lista.filter(c=>!c.pago).reduce((s,c)=>s+(c.valor_total||0),0);
+  el.innerHTML = `
+    <div style="margin-bottom:12px;font-size:13px;color:var(--cinza)">${lista.length} registros ${totalPend>0?`— Pendente: <strong>R$ ${fmt(totalPend)}</strong>`:''}</div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Fornecedor</th><th>Descrição</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead>
+      <tbody>
+        ${lista.length === 0 ? '<tr><td colspan="6" class="tabela-vazia">Nenhuma conta encontrada</td></tr>' :
+        lista.map(c => `<tr>
+          <td>${c.fornecedor||'—'}</td><td>${c.descricao||'—'}</td>
+          <td style="font-weight:600">R$ ${fmt(c.valor_total)}</td>
+          <td class="${c.pago?'venc-ok':classeVenc(c.vencimento)}">${c.pago ? fmtData(c.vencimento) : labelVenc(c.vencimento)}</td>
+          <td>${c.pago ? '<span class="badge badge-verde">Pago</span>' : '<span class="badge badge-laranja">Pendente</span>'}</td>
+          <td style="white-space:nowrap">
+            ${!c.pago ? `<button class="btn btn-sm btn-primary" onclick="marcarPago('${c.id}')">Pagar</button>` : ''}
+            <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirConta('${c.id}')">✕</button>
+          </td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarContas()">📥 Exportar Excel</button></div>`;
+  window._contasFiltradas = lista;
+};
+
+window.exportarContas = function() {
+  const lista = window._contasFiltradas || contas;
+  exportarExcel('Contas_a_Pagar', ['Fornecedor','Descrição','Valor (R$)','Vencimento','Status'],
+    lista.map(c => [c.fornecedor||'', c.descricao||'', c.valor_total||0, fmtData(c.vencimento), c.pago?'Pago':'Pendente']));
+};
+
+window.abrirModalConta = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-conta">
+      <div class="modal">
+        <div class="modal-titulo">💰 Nova Conta a Pagar</div>
+        <div class="form-group"><label>Fornecedor *</label><input type="text" id="cnt-forn" placeholder="Nome do fornecedor"></div>
+        <div class="form-group"><label>Descrição</label><input type="text" id="cnt-desc" placeholder="Ex: NF 456"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Valor Total (R$) *</label><input type="number" id="cnt-valor" min="0" step="0.01"></div>
+          <div class="form-group"><label>1º Vencimento *</label><input type="date" id="cnt-venc"></div>
+        </div>
+        <div class="form-group"><label>Nº Parcelas</label><input type="number" id="cnt-parcelas" value="1" min="1" max="12"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-conta')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarConta()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarConta = async function() {
+  const forn = document.getElementById('cnt-forn').value.trim();
+  const valor = parseFloat(document.getElementById('cnt-valor').value)||0;
+  const venc = document.getElementById('cnt-venc').value;
+  const parcelas = parseInt(document.getElementById('cnt-parcelas').value)||1;
+  if (!forn || !valor || !venc) { toast('Preencha fornecedor, valor e vencimento.','erro'); return; }
+  try {
+    for (let i = 0; i < parcelas; i++) {
+      const dataVenc = new Date(venc + 'T12:00:00');
+      dataVenc.setMonth(dataVenc.getMonth() + i);
+      const conta = {
+        fornecedor: forn,
+        descricao: document.getElementById('cnt-desc').value + (parcelas>1?` (${i+1}/${parcelas})`:''),
+        valor_total: valor/parcelas, vencimento: Timestamp.fromDate(dataVenc),
+        pago: false, criado_em: Timestamp.now()
+      };
+      const ref = await addDoc(collection(db,'insumos_contas'), conta);
+      contas.push({id: ref.id, ...conta});
+    }
+    contas.sort((a,b) => (a.vencimento?.toDate?a.vencimento.toDate():new Date(a.vencimento)) - (b.vencimento?.toDate?b.vencimento.toDate():new Date(b.vencimento)));
+    fecharModal('modal-conta');
+    toast(parcelas>1?`${parcelas} parcelas criadas!`:'Conta registrada!');
+    renderContas();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.marcarPago = async function(id) {
+  try {
+    await updateDoc(doc(db,'insumos_contas',id), { pago: true, data_pagamento: Timestamp.now() });
+    const c = contas.find(x=>x.id===id);
+    if (c) c.pago = true;
+    toast('Conta marcada como paga!');
+    renderContas();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirConta = async function(id) {
+  if (!confirm('Excluir esta conta?')) return;
+  try {
+    await deleteDoc(doc(db,'insumos_contas',id));
+    contas.splice(contas.findIndex(x=>x.id===id),1);
+    toast('Conta excluída.');
+    renderContas();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ CADASTROS (Talhões + Safras) ══════════════
+function renderCadastros() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-titulo" style="margin-bottom:20px">⚙️ Cadastros</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px" id="cadastros-grid">
+      <div>
+        <div class="sec-header">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🌾 Talhões</div>
+          <button class="btn btn-primary btn-sm" onclick="abrirModalTalhao()">+ Novo</button>
+        </div>
+        <div class="tabela-wrap"><table>
+          <thead><tr><th>Talhão</th><th>Fazenda</th><th>Área (ha)</th><th></th></tr></thead>
+          <tbody>
+            ${talhoes.length === 0 ? '<tr><td colspan="4" class="tabela-vazia">Nenhum talhão cadastrado</td></tr>' :
+            talhoes.map(t => `<tr><td><strong>${t.nome}</strong></td><td>${t.fazenda||'—'}</td>
+            <td>${t.area_ha?fmt(t.area_ha):'—'}</td>
+            <td><button class="btn btn-sm btn-secondary" onclick="excluirTalhao('${t.id}')">✕</button></td></tr>`).join('')}
+          </tbody>
+          ${talhoes.length>0?`<tfoot><tr style="background:var(--creme);font-weight:700"><td colspan="2" style="padding:10px 16px">Total</td>
+          <td style="padding:10px 16px">${fmt(talhoes.reduce((s,t)=>s+(parseFloat(t.area_ha)||0),0))} ha</td><td></td></tr></tfoot>`:''}
+        </table></div>
+        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 Cadastre a área para habilitar relatórios de custo por hectare e a previsão de cobertura.</p>
+      </div>
+      <div>
+        <div class="sec-header">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📅 Safras</div>
+          <button class="btn btn-primary btn-sm" onclick="abrirModalSafra()">+ Nova</button>
+        </div>
+        <div class="tabela-wrap"><table>
+          <thead><tr><th>Safra</th><th></th></tr></thead>
+          <tbody>
+            ${safras.length === 0 ? '<tr><td colspan="2" class="tabela-vazia">Nenhuma safra cadastrada</td></tr>' :
+            safras.map(s => `<tr><td><strong>${s.nome}</strong></td>
+            <td style="text-align:right"><button class="btn btn-sm btn-secondary" onclick="excluirSafra('${s.id}')">✕</button></td></tr>`).join('')}
+          </tbody>
+        </table></div>
+        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 Ex: "Soja 25/26", "Milho Safrinha 26", "24/25".</p>
+      </div>
+    </div>
+    <style>@media (max-width:700px){ #cadastros-grid { grid-template-columns:1fr !important; } }</style>`;
+}
+
+window.abrirModalTalhao = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-talhao">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-titulo">🌾 Novo Talhão</div>
+        <div class="form-group"><label>Nome *</label><input type="text" id="tal-nome" placeholder="Ex: Talhão 3"></div>
+        <div class="form-group"><label>Fazenda *</label>
+          <select id="tal-fazenda">${FAZENDAS.map(f=>`<option>${f}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Área (hectares)</label><input type="number" id="tal-area" min="0" step="0.01" placeholder="Ex: 85.5"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-talhao')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarTalhao()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarTalhao = async function() {
+  const nome = document.getElementById('tal-nome').value.trim();
+  if (!nome) { toast('Informe o nome.','erro'); return; }
+  const fazenda = document.getElementById('tal-fazenda').value;
+  const area_ha = parseFloat(document.getElementById('tal-area').value)||0;
+  if (talhoes.find(t => normalizar(t.nome) === normalizar(nome) && t.fazenda === fazenda)) {
+    toast('Já existe um talhão com este nome nesta fazenda.','erro'); return;
+  }
+  try {
+    const ref = await addDoc(collection(db,'insumos_talhoes'), { nome, fazenda, area_ha });
+    talhoes.push({id: ref.id, nome, fazenda, area_ha});
+    talhoes.sort((a,b)=>a.nome.localeCompare(b.nome));
+    fecharModal('modal-talhao');
+    toast('Talhão cadastrado!');
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirTalhao = async function(id) {
+  if (!confirm('Excluir este talhão? (não afeta retiradas já registradas)')) return;
+  try {
+    await deleteDoc(doc(db,'insumos_talhoes',id));
+    talhoes.splice(talhoes.findIndex(x=>x.id===id),1);
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.abrirModalSafra = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-safra">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-titulo">📅 Nova Safra</div>
+        <div class="form-group"><label>Nome *</label><input type="text" id="saf-nome" placeholder="Ex: Soja 25/26"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-safra')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarSafra()">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarSafra = async function() {
+  const nome = document.getElementById('saf-nome').value.trim();
+  if (!nome) { toast('Informe o nome.','erro'); return; }
+  if (safras.find(s => normalizar(s.nome) === normalizar(nome))) { toast('Safra já cadastrada.','erro'); return; }
+  try {
+    const ref = await addDoc(collection(db,'insumos_safras'), { nome });
+    safras.push({id: ref.id, nome});
+    safras.sort((a,b)=>a.nome.localeCompare(b.nome));
+    fecharModal('modal-safra');
+    toast('Safra cadastrada!');
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirSafra = async function(id) {
+  if (!confirm('Excluir esta safra? (não afeta retiradas já registradas)')) return;
+  try {
+    await deleteDoc(doc(db,'insumos_safras',id));
+    safras.splice(safras.findIndex(x=>x.id===id),1);
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ RELATÓRIOS ══════════════
+function renderRelatorios() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="sec-titulo" style="margin-bottom:20px">📈 Relatórios Gerenciais</div>
+    <div class="relatorio-grid">
+      <div class="relatorio-card" onclick="gerarRelatorio('custo_talhao')">
+        <div class="relatorio-card-icon">🌾</div>
+        <div class="relatorio-card-titulo">Custo por Talhão</div>
+        <div class="relatorio-card-desc">Total e R$/ha por talhão</div>
+      </div>
+      <div class="relatorio-card terra" onclick="gerarRelatorio('custo_safra')">
+        <div class="relatorio-card-icon">📅</div>
+        <div class="relatorio-card-titulo">Custo por Safra</div>
+        <div class="relatorio-card-desc">Custos agrupados por safra</div>
+      </div>
+      <div class="relatorio-card info" onclick="gerarRelatorio('custo_cultura')">
+        <div class="relatorio-card-icon">🌱</div>
+        <div class="relatorio-card-titulo">Custo por Cultura</div>
+        <div class="relatorio-card-desc">Soja, Milho, etc.</div>
+      </div>
+      <div class="relatorio-card" onclick="gerarRelatorio('custo_produto')">
+        <div class="relatorio-card-icon">🧪</div>
+        <div class="relatorio-card-titulo">Consumo por Produto</div>
+        <div class="relatorio-card-desc">Ranking dos mais usados</div>
+      </div>
+      <div class="relatorio-card alerta" onclick="gerarRelatorio('pedidos_abertos')">
+        <div class="relatorio-card-icon">📋</div>
+        <div class="relatorio-card-titulo">Pedidos em Aberto</div>
+        <div class="relatorio-card-desc">A receber dos fornecedores</div>
+      </div>
+      <div class="relatorio-card alerta" onclick="gerarRelatorio('contas_vencer')">
+        <div class="relatorio-card-icon">💸</div>
+        <div class="relatorio-card-titulo">Contas a Vencer</div>
+        <div class="relatorio-card-desc">Próximos vencimentos</div>
+      </div>
+      <div class="relatorio-card info" onclick="gerarRelatorio('estoque_valor')">
+        <div class="relatorio-card-icon">📦</div>
+        <div class="relatorio-card-titulo">Valor em Estoque</div>
+        <div class="relatorio-card-desc">Estoque com custo médio</div>
+      </div>
+      <div class="relatorio-card terra" onclick="gerarRelatorio('custo_fazenda')">
+        <div class="relatorio-card-icon">🏡</div>
+        <div class="relatorio-card-titulo">Custo por Fazenda</div>
+        <div class="relatorio-card-desc">Comparativo entre propriedades</div>
+      </div>
+    </div>
+    <div id="resultado-relatorio"></div>`;
+}
+
+let relatorioAtual = { titulo:'', colunas:[], rows:[] };
+
+window.gerarRelatorio = function(tipo) {
+  const el = document.getElementById('resultado-relatorio');
+  let html = '';
+  switch(tipo) {
+    case 'custo_talhao': {
+      // MELHORIA 7: custo por hectare
+      const mapa = {};
+      retiradas.forEach(r => {
+        const k = `${r.fazenda} / ${r.talhao||'(sem talhão)'}`;
+        if (!mapa[k]) mapa[k] = { custo:0, qtd:0, fazenda:r.fazenda, talhao:r.talhao };
+        mapa[k].qtd++; mapa[k].custo += r.custo_total||0;
+      });
+      const rows = Object.entries(mapa).sort((a,b)=>b[1].custo-a[1].custo).map(([k,v]) => {
+        const t = talhoes.find(t => normalizar(t.nome) === normalizar(v.talhao||'') && normalizar(t.fazenda||'') === normalizar(v.fazenda||''));
+        const area = t ? parseFloat(t.area_ha)||0 : 0;
+        const custoHa = area > 0 ? v.custo/area : null;
+        return [k, v.qtd, area>0?fmt(area)+' ha':'—', `R$ ${fmt(v.custo)}`, custoHa!==null?`R$ ${fmt(custoHa)}/ha`:'—'];
+      });
+      html = tabelaRelatorio('🌾 Custo por Talhão', ['Fazenda / Talhão','Registros','Área','Custo Total','Custo/ha'], rows,
+        `Total: R$ ${fmt(retiradas.reduce((s,r)=>s+(r.custo_total||0),0))}`);
+      relatorioAtual = { titulo:'Custo_por_Talhao', colunas:['Fazenda/Talhão','Registros','Área (ha)','Custo Total (R$)','Custo/ha (R$)'], rows };
+      break;
+    }
+    case 'custo_safra': {
+      const mapa = {};
+      retiradas.forEach(r => {
+        const k = r.safra||'(sem safra)';
+        if (!mapa[k]) mapa[k] = { custo:0, qtd:0 };
+        mapa[k].custo += r.custo_total||0; mapa[k].qtd++;
+      });
+      const rows = Object.entries(mapa).sort((a,b)=>b[1].custo-a[1].custo).map(([k,v]) => [k, v.qtd, `R$ ${fmt(v.custo)}`]);
+      html = tabelaRelatorio('📅 Custo por Safra', ['Safra','Retiradas','Custo Total'], rows,
+        `Total: R$ ${fmt(Object.values(mapa).reduce((s,v)=>s+v.custo,0))}`);
+      relatorioAtual = { titulo:'Custo_por_Safra', colunas:['Safra','Retiradas','Custo Total (R$)'], rows };
+      break;
+    }
+    case 'custo_cultura': {
+      const mapa = {};
+      retiradas.forEach(r => {
+        const k = r.cultura||'(sem cultura)';
+        if (!mapa[k]) mapa[k] = { custo:0, qtd:0 };
+        mapa[k].custo += r.custo_total||0; mapa[k].qtd++;
+      });
+      const rows = Object.entries(mapa).sort((a,b)=>b[1].custo-a[1].custo).map(([k,v]) => [k, v.qtd, `R$ ${fmt(v.custo)}`]);
+      html = tabelaRelatorio('🌱 Custo por Cultura', ['Cultura','Retiradas','Custo Total'], rows,
+        `Total: R$ ${fmt(Object.values(mapa).reduce((s,v)=>s+v.custo,0))}`);
+      relatorioAtual = { titulo:'Custo_por_Cultura', colunas:['Cultura','Retiradas','Custo Total (R$)'], rows };
+      break;
+    }
+    case 'custo_produto': {
+      const mapa = {};
+      retiradas.forEach(r => {
+        if (!mapa[r.produto]) mapa[r.produto] = { custo:0, qtd:0, unidade:r.unidade };
+        mapa[r.produto].custo += r.custo_total||0; mapa[r.produto].qtd += r.quantidade||0;
+      });
+      const rows = Object.entries(mapa).sort((a,b)=>b[1].custo-a[1].custo).map(([k,v]) => [k, `${fmt(v.qtd)} ${v.unidade}`, `R$ ${fmt(v.custo)}`]);
+      html = tabelaRelatorio('🧪 Consumo por Produto', ['Produto','Qtd Total','Custo Total'], rows,
+        `Total: R$ ${fmt(Object.values(mapa).reduce((s,v)=>s+v.custo,0))}`);
+      relatorioAtual = { titulo:'Consumo_por_Produto', colunas:['Produto','Qtd Total','Custo Total (R$)'], rows };
+      break;
+    }
+    case 'pedidos_abertos': {
+      const rows = [];
+      pedidos.filter(p => p.status !== 'entregue_total' && p.status !== 'cancelado').forEach(p => {
+        (p.itens||[]).forEach(it => {
+          const pend = (it.quantidade||0) - (it.quantidade_recebida||0);
+          if (pend > 0) rows.push([p.fornecedor, it.produto, `${fmt(it.quantidade)} ${it.unidade}`, `${fmt(it.quantidade_recebida||0)}`, `${fmt(pend)} ${it.unidade}`]);
+        });
+      });
+      html = rows.length === 0
+        ? `<div class="relatorio-resultado"><div style="text-align:center;padding:40px;color:var(--cinza)">✅ Nenhum pedido em aberto!</div></div>`
+        : tabelaRelatorio('📋 Pedidos em Aberto', ['Fornecedor','Produto','Pedido','Recebido','Pendente'], rows);
+      relatorioAtual = { titulo:'Pedidos_em_Aberto', colunas:['Fornecedor','Produto','Pedido','Recebido','Pendente'], rows };
+      break;
+    }
+    case 'contas_vencer': {
+      const pend = contas.filter(c => !c.pago);
+      const rows = pend.map(c => [c.fornecedor||'—', c.descricao||'—', `R$ ${fmt(c.valor_total)}`, fmtData(c.vencimento),
+        diasAte(c.vencimento)<0?'Vencida':diasAte(c.vencimento)<=7?`Em ${diasAte(c.vencimento)}d ⚠️`:`Em ${diasAte(c.vencimento)}d`]);
+      html = tabelaRelatorio('💸 Contas a Pagar — Pendentes', ['Fornecedor','Descrição','Valor','Vencimento','Situação'], rows,
+        `Total Pendente: R$ ${fmt(pend.reduce((s,c)=>s+(c.valor_total||0),0))}`);
+      relatorioAtual = { titulo:'Contas_a_Vencer', colunas:['Fornecedor','Descrição','Valor (R$)','Vencimento','Situação'], rows };
+      break;
+    }
+    case 'estoque_valor': {
+      const rows = [...estoque].sort((a,b)=>(b.quantidade*b.custo_medio)-(a.quantidade*a.custo_medio))
+        .map(e => [e.produto, fmt(e.quantidade), e.unidade, `R$ ${fmt(e.custo_medio||0)}`, `R$ ${fmt((e.quantidade||0)*(e.custo_medio||0))}`]);
+      html = tabelaRelatorio('📦 Estoque Atual — Valor', ['Produto','Quantidade','Un','Custo Médio','Valor Total'], rows,
+        `Valor Total: R$ ${fmt(estoque.reduce((s,e)=>s+(e.quantidade||0)*(e.custo_medio||0),0))}`);
+      relatorioAtual = { titulo:'Estoque_Valor', colunas:['Produto','Quantidade','Unidade','Custo Médio (R$)','Valor Total (R$)'], rows };
+      break;
+    }
+    case 'custo_fazenda': {
+      const mapa = {};
+      retiradas.forEach(r => {
+        if (!mapa[r.fazenda]) mapa[r.fazenda] = { custo:0, qtd:0 };
+        mapa[r.fazenda].custo += r.custo_total||0; mapa[r.fazenda].qtd++;
+      });
+      // custo/ha por fazenda usando soma das áreas dos talhões
+      const rows = Object.entries(mapa).sort((a,b)=>b[1].custo-a[1].custo).map(([k,v]) => {
+        const areaFaz = talhoes.filter(t=>normalizar(t.fazenda||'')===normalizar(k)).reduce((s,t)=>s+(parseFloat(t.area_ha)||0),0);
+        return [k, v.qtd, areaFaz>0?fmt(areaFaz)+' ha':'—', `R$ ${fmt(v.custo)}`, areaFaz>0?`R$ ${fmt(v.custo/areaFaz)}/ha`:'—'];
+      });
+      html = tabelaRelatorio('🏡 Custo por Fazenda', ['Fazenda','Retiradas','Área Total','Custo Total','Custo/ha'], rows,
+        `Total: R$ ${fmt(Object.values(mapa).reduce((s,v)=>s+v.custo,0))}`);
+      relatorioAtual = { titulo:'Custo_por_Fazenda', colunas:['Fazenda','Retiradas','Área Total (ha)','Custo Total (R$)','Custo/ha (R$)'], rows };
+      break;
+    }
+  }
+  el.innerHTML = html;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+function tabelaRelatorio(titulo, colunas, rows, rodape) {
+  return `
+    <div class="relatorio-resultado">
+      <div class="relatorio-resultado-titulo">
+        ${titulo}
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="exportarRelatorioAtual()">📥 Excel</button>
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('resultado-relatorio').innerHTML=''">✕</button>
+        </div>
+      </div>
+      ${rows.length === 0 ? '<div style="text-align:center;padding:30px;color:var(--cinza)">Nenhum dado para exibir.</div>' : `
+      <div class="tabela-wrap"><table>
+        <thead><tr>${colunas.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+        ${rodape ? `<tfoot><tr><td colspan="${colunas.length}" style="padding:12px 16px;font-weight:700;background:var(--creme)">${rodape}</td></tr></tfoot>` : ''}
+      </table></div>`}
+    </div>`;
+}
+
+// ── MELHORIA 3: EXPORTAR EXCEL ──
+window.exportarRelatorioAtual = function() {
+  if (!relatorioAtual.rows.length) { toast('Nada para exportar.','erro'); return; }
+  // limpar formatação (R$, badges html) para o Excel
+  const rowsLimpos = relatorioAtual.rows.map(r => r.map(c => {
+    if (typeof c !== 'string') return c;
+    const semHtml = c.replace(/<[^>]*>/g,'').trim();
+    const num = semHtml.replace('R$','').trim().replace(/\./g,'').replace(',','.');
+    return semHtml.startsWith('R$') && !isNaN(parseFloat(num)) ? parseFloat(num) : semHtml;
+  }));
+  exportarExcel(relatorioAtual.titulo, relatorioAtual.colunas, rowsLimpos);
+};
+
+function exportarExcel(nome, colunas, rows) {
+  try {
+    const ws = XLSX.utils.aoa_to_sheet([colunas, ...rows]);
+    ws['!cols'] = colunas.map((c,i) => ({ wch: Math.max(c.length+2, ...rows.map(r=>String(r[i]||'').length+2), 10) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, nome.substring(0,31));
+    XLSX.writeFile(wb, `ACF_${nome}_${hoje()}.xlsx`);
+    toast('Excel gerado!');
+  } catch(e) { toast('Erro ao gerar Excel: '+e.message,'erro'); }
+}
+
+window.fecharModal = function(id) { document.getElementById(id)?.remove(); };
+</script>
+</body>
+</html>
