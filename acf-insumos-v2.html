@@ -1568,7 +1568,7 @@ function renderCaderno() {
     <div class="sec-titulo" style="margin-bottom:16px">📓 Caderno de Campo</div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
-      <button class="nav-btn ${cadernoSubaba==='adubacao'?'ativo':''}" onclick="mudarSubabaCaderno('adubacao')">🧪 Adubação</button>
+      <button class="nav-btn ${cadernoSubaba==='adubacao'?'ativo':''}" onclick="mudarSubabaCaderno('adubacao')">🧪 Defensivos, Corretivos e Adubação</button>
       <button class="nav-btn ${cadernoSubaba==='aplicacoes'?'ativo':''}" onclick="mudarSubabaCaderno('aplicacoes')">🚁 Aplicações (AgroOp)</button>
       <button class="nav-btn ${cadernoSubaba==='colheita'?'ativo':''}" onclick="mudarSubabaCaderno('colheita')">🌾 Colheita</button>
     </div>
@@ -1594,23 +1594,32 @@ function renderPlantio() {
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${plantios.length} registro(s)</div>
       <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>População</th><th>Espaçamento</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Status</th><th></th></tr></thead>
       <tbody>
-        ${plantios.length===0?'<tr><td colspan="9" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
-        plantios.map(p=>`<tr><td>${p.data||'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
-        <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.populacao?fmt(p.populacao):'—'}</td><td>${p.espacamento?p.espacamento+' cm':'—'}</td>
-        <td><button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button></td></tr>`).join('')}
+        ${plantios.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
+        plantios.map(p=>`<tr><td>${p.status==='concluido'?(p.data_conclusao||p.data||'—'):(p.data||'—')}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+        <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${badgeStatusCampo(p.status)}</td>
+        <td style="white-space:nowrap">
+          ${p.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirPlantio('${p.id}')">✅ Concluir</button>`:''}
+          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button>
+        </td></tr>`).join('')}
       </tbody>
     </table></div>`;
+}
+
+function badgeStatusCampo(status) {
+  if (status === 'concluido') return '<span class="badge badge-verde">Concluído</span>';
+  if (status === 'enviado_operador') return '<span class="badge badge-laranja">Enviado ao Operador</span>';
+  return '<span class="badge badge-azul">Planejado</span>';
 }
 
 window.abrirModalPlantio = function() {
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-plantio">
       <div class="modal">
-        <div class="modal-titulo">🌱 Novo Registro de Plantio</div>
+        <div class="modal-titulo">🌱 Novo Planejamento de Plantio</div>
         <div class="form-row">
-          <div class="form-group"><label>Data *</label><input type="date" id="pl-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Data Planejada *</label><input type="date" id="pl-data" value="${hoje()}"></div>
           <div class="form-group"><label>Fazenda *</label><select id="pl-fazenda" onchange="atualizarTalhoesCampo('pl')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
@@ -1628,7 +1637,7 @@ window.abrirModalPlantio = function() {
         <div class="form-group"><label>Observação</label><input type="text" id="pl-obs" placeholder="Opcional"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-plantio')">Cancelar</button>
-          <button class="btn btn-primary" onclick="salvarPlantio()">Salvar</button>
+          <button class="btn btn-primary" onclick="salvarPlantio()">Salvar Planejamento</button>
         </div>
       </div>
     </div>`);
@@ -1646,30 +1655,64 @@ window.salvarPlantio = async function() {
     populacao: parseFloat(document.getElementById('pl-populacao').value)||0,
     espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
     obs: document.getElementById('pl-obs').value,
+    status: 'planejado',
     criado_em: Timestamp.now()
   };
   try {
     const ref = await addDoc(collection(db,'insumos_campo_plantio'), reg);
     plantios.unshift({id: ref.id, ...reg});
     fecharModal('modal-plantio');
-    toast('Plantio registrado!');
+    toast('Plantio planejado!');
     renderPlantio();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-// ── ADUBAÇÃO ──
+window.abrirConcluirPlantio = function(id) {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-concluir-plantio">
+      <div class="modal" style="max-width:380px">
+        <div class="modal-titulo">✅ Concluir Plantio</div>
+        <div class="form-group"><label>Data de Conclusão *</label><input type="date" id="cpl-data" value="${hoje()}"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-concluir-plantio')">Cancelar</button>
+          <button class="btn btn-primary" onclick="confirmarConcluirPlantio('${id}')">Confirmar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.confirmarConcluirPlantio = async function(id) {
+  const data_conclusao = document.getElementById('cpl-data').value;
+  try {
+    await updateDoc(doc(db,'insumos_campo_plantio',id), { status: 'concluido', data_conclusao });
+    const p = plantios.find(x=>x.id===id);
+    if (p) { p.status='concluido'; p.data_conclusao=data_conclusao; }
+    fecharModal('modal-concluir-plantio');
+    toast('Plantio concluído!');
+    renderPlantio();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ── DEFENSIVOS, CORRETIVOS E ADUBAÇÃO (integrado ao AgroOp) ──
 function renderAdubacao() {
+  verificarConclusoesAgroOp().then(mudou => { if (mudou) renderAdubacao(); });
   const el = document.getElementById('caderno-conteudo');
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${adubacoes.length} registro(s)</div>
-      <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Nova Adubação</button></div>
+      <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Novo Planejamento</button></div>
+    <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Enviar ao Operador"</strong>, o planejamento aparece automaticamente no AgroOp. Quando o operador concluir lá, o status aqui atualiza sozinho pra <strong>Concluído</strong>.</p>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Safra</th><th>Tipo</th><th>Produto</th><th>Dose</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Categoria</th><th>Produto</th><th>Dose</th><th>Status</th><th></th></tr></thead>
       <tbody>
-        ${adubacoes.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhuma adubação registrada</td></tr>':
-        adubacoes.map(a=>`<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.safra||'—'}</td>
-        <td>${a.tipo||'—'}</td><td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>
-        <td><button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button></td></tr>`).join('')}
+        ${adubacoes.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhum registro</td></tr>':
+        adubacoes.map(a=>`<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
+        <td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td><td>${badgeStatusCampo(a.status)}</td>
+        <td style="white-space:nowrap">
+          ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="enviarAoOperador('${a.id}')">🚁 Enviar ao Operador</button>
+          <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')">✅ Concluir</button>`:''}
+          ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando AgroOp</span>`:''}
+          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
+        </td></tr>`).join('')}
       </tbody>
     </table></div>`;
 }
@@ -1678,9 +1721,9 @@ window.abrirModalAdubacao = function() {
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-adubacao">
       <div class="modal">
-        <div class="modal-titulo">🧪 Nova Adubação</div>
+        <div class="modal-titulo">🧪 Novo Planejamento — Defensivo / Corretivo / Adubação</div>
         <div class="form-row">
-          <div class="form-group"><label>Data *</label><input type="date" id="ad-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Data Planejada *</label><input type="date" id="ad-data" value="${hoje()}"></div>
           <div class="form-group"><label>Fazenda *</label><select id="ad-fazenda" onchange="atualizarTalhoesCampo('ad')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
@@ -1688,8 +1731,8 @@ window.abrirModalAdubacao = function() {
           <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Tipo</label><select id="ad-tipo"><option>Base</option><option>Cobertura</option><option>Foliar</option></select></div>
-          <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" placeholder="Ex: MAP, Ureia" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
+          <div class="form-group"><label>Categoria</label><select id="ad-categoria"><option>Defensivo</option><option>Corretivo</option><option>Adubação</option></select></div>
+          <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" placeholder="Ex: MAP, Ureia, Calcário" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Dose</label><input type="number" id="ad-dose" min="0" step="0.01"></div>
@@ -1698,7 +1741,7 @@ window.abrirModalAdubacao = function() {
         <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" placeholder="Opcional"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-adubacao')">Cancelar</button>
-          <button class="btn btn-primary" onclick="salvarAdubacao()">Salvar</button>
+          <button class="btn btn-primary" onclick="salvarAdubacao()">Salvar Planejamento</button>
         </div>
       </div>
     </div>`);
@@ -1715,19 +1758,76 @@ window.salvarAdubacao = async function() {
   if (!fazenda || !talhao || !produto) { toast('Preencha fazenda, talhão e produto.','erro'); return; }
   const reg = {
     data: document.getElementById('ad-data').value, fazenda, talhao,
-    safra: document.getElementById('ad-safra').value, tipo: document.getElementById('ad-tipo').value,
+    safra: document.getElementById('ad-safra').value, categoria: document.getElementById('ad-categoria').value,
     produto, dose: parseFloat(document.getElementById('ad-dose').value)||0,
     unidade: document.getElementById('ad-unidade').value, obs: document.getElementById('ad-obs').value,
+    status: 'planejado',
     criado_em: Timestamp.now()
   };
   try {
     const ref = await addDoc(collection(db,'insumos_campo_adubacao'), reg);
     adubacoes.unshift({id: ref.id, ...reg});
     fecharModal('modal-adubacao');
-    toast('Adubação registrada!');
+    toast('Planejamento salvo!');
     renderAdubacao();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
+
+// Envia o planejamento para o AgroOp (cria doc na coleção "aplicacoes")
+window.enviarAoOperador = async function(id) {
+  const a = adubacoes.find(x=>x.id===id);
+  if (!a) return;
+  if (!confirm(`Enviar "${a.produto}" (${a.talhao}) para o AgroOp?`)) return;
+  try {
+    const nomeFazendaAgroOp = a.fazenda.startsWith('Fazenda ') ? a.fazenda : `Fazenda ${a.fazenda}`;
+    const aplicacao = {
+      data: a.data, fazenda: nomeFazendaAgroOp, talhao: a.talhao,
+      produtos: [{ produto: a.produto, dose: String(a.dose||'') }],
+      obs: a.obs||'', status: 'Pendente',
+      criadoEm: new Date().toISOString()
+    };
+    const ref = await addDoc(collection(db,'aplicacoes'), aplicacao);
+    await updateDoc(doc(db,'aplicacoes',ref.id), { id: ref.id });
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'enviado_operador', agroop_id: ref.id });
+    a.status = 'enviado_operador'; a.agroop_id = ref.id;
+    aplicacoesAgroOp = null; // invalida cache
+    toast('Enviado ao AgroOp! O operador já pode ver no app dele.');
+    renderAdubacao();
+  } catch(e) { toast('Erro ao enviar: '+e.message,'erro'); }
+};
+
+// Concluir sem passar pelo operador (ex: já foi feito, só registrando)
+window.concluirDireto = async function(id) {
+  const data_conclusao = prompt('Data de conclusão (DD/MM/AAAA ou deixe vazio para hoje):','');
+  const dataFinal = data_conclusao ? data_conclusao : hoje();
+  try {
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'concluido', data_conclusao: dataFinal });
+    const a = adubacoes.find(x=>x.id===id);
+    if (a) { a.status='concluido'; a.data_conclusao=dataFinal; }
+    toast('Registrado como concluído!');
+    renderAdubacao();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// Verifica no AgroOp se algum item "enviado_operador" já foi finalizado, e sincroniza o status
+async function verificarConclusoesAgroOp() {
+  const pendentesEnvio = adubacoes.filter(a => a.status === 'enviado_operador' && a.agroop_id);
+  if (pendentesEnvio.length === 0) return false;
+  await carregarAplicacoes();
+  let mudou = false;
+  for (const a of pendentesEnvio) {
+    const doc_agroop = aplicacoesAgroOp.find(x => x.id === a.agroop_id);
+    if (doc_agroop && (doc_agroop.finalizadoEm || doc_agroop.status === 'Finalizado')) {
+      const dataConcl = doc_agroop.finalizadoEm ? doc_agroop.finalizadoEm.split('T')[0] : hoje();
+      try {
+        await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { status: 'concluido', data_conclusao: dataConcl });
+        a.status = 'concluido'; a.data_conclusao = dataConcl;
+        mudou = true;
+      } catch(e) { /* silencioso */ }
+    }
+  }
+  return mudou;
+}
 
 // ── APLICAÇÕES (lidas do AgroOp, somente leitura) ──
 window.renderAplicacoesCampo = renderAplicacoesCampo;
@@ -1745,13 +1845,13 @@ async function renderAplicacoesCampo() {
       <tbody>
         ${lista.length===0?'<tr><td colspan="6" class="tabela-vazia">Nenhuma aplicação encontrada no AgroOp</td></tr>':
         lista.map(a => {
-          const status = a.finalizadoEm ? '<span class="badge badge-verde">Finalizado</span>' : '<span class="badge badge-azul">Pendente/Em Execução</span>';
+          const status = a.finalizadoEm || a.status === 'Finalizado' ? '<span class="badge badge-verde">Finalizado</span>' : '<span class="badge badge-azul">Pendente/Em Execução</span>';
           const prods = (a.produtos||[]).map(p => `${p.produto||p.nome||'?'} (${p.dose||'?'})`).join(', ') || '—';
           return `<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prods}</td><td>${a.operador||'—'}</td><td>${status}</td></tr>`;
         }).join('')}
       </tbody>
     </table></div>
-    <p style="font-size:12px;color:var(--cinza);margin-top:12px">💡 As aplicações são cadastradas direto no AgroOp — aqui você só acompanha. Cada produto usado já é considerado na 🔮 Previsão de Cobertura.</p>`;
+    <p style="font-size:12px;color:var(--cinza);margin-top:12px">💡 Planejamentos enviados pelo Caderno de Campo (🧪 aba anterior) também aparecem aqui assim que criados. Cada produto usado já é considerado na 🔮 Previsão de Cobertura.</p>`;
 }
 
 // ── COLHEITA ──
@@ -1759,32 +1859,36 @@ function renderColheita() {
   const el = document.getElementById('caderno-conteudo');
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${colheitas.length} registro(s)</div>
-      <button class="btn btn-primary" onclick="abrirModalColheita()">+ Nova Colheita</button></div>
+      <button class="btn btn-primary" onclick="abrirModalColheita()">+ Novo Planejamento</button></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Produtiv. Média</th><th>Umidade</th><th>PMS</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Status</th><th>Produtiv.</th><th>Umidade</th><th>PMS</th><th></th></tr></thead>
       <tbody>
-        ${colheitas.length===0?'<tr><td colspan="9" class="tabela-vazia">Nenhuma colheita registrada</td></tr>':
-        colheitas.map(c=>`<tr><td>${c.data||'—'}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        ${colheitas.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum registro</td></tr>':
+        colheitas.map(c=>`<tr><td>${c.status==='concluido'?(c.data_conclusao||c.data||'—'):(c.data||'—')}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        <td>${badgeStatusCampo(c.status)}</td>
         <td>${c.produtividade?fmt(c.produtividade)+' '+(c.unidade_produtividade||'sc/ha'):'—'}</td>
         <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
-        <td><button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_colheita','${c.id}','colheita')">✕</button></td></tr>`).join('')}
+        <td style="white-space:nowrap">
+          ${c.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirColheita('${c.id}')">✅ Concluir</button>`:''}
+          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_colheita','${c.id}','colheita')">✕</button>
+        </td></tr>`).join('')}
       </tbody>
     </table></div>
-    ${colheitas.length>0?`<div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarColheita()">📥 Exportar Excel</button></div>`:''}`;
+    ${colheitas.some(c=>c.status==='concluido')?`<div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarColheita()">📥 Exportar Excel</button></div>`:''}`;
 }
 
 window.exportarColheita = function() {
-  exportarExcel('Colheita', ['Data','Fazenda','Talhão','Cultura','Safra','Produtividade','Unidade','Umidade (%)','PMS (g)'],
-    colheitas.map(c => [c.data||'', c.fazenda||'', c.talhao||'', c.cultura||'', c.safra||'', c.produtividade||0, c.unidade_produtividade||'sc/ha', c.umidade||0, c.pms||0]));
+  exportarExcel('Colheita', ['Data','Fazenda','Talhão','Cultura','Safra','Status','Produtividade','Unidade','Umidade (%)','PMS (g)'],
+    colheitas.map(c => [c.data_conclusao||c.data||'', c.fazenda||'', c.talhao||'', c.cultura||'', c.safra||'', c.status||'', c.produtividade||0, c.unidade_produtividade||'sc/ha', c.umidade||0, c.pms||0]));
 };
 
 window.abrirModalColheita = function() {
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-colheita">
       <div class="modal">
-        <div class="modal-titulo">🌾 Nova Colheita</div>
+        <div class="modal-titulo">🌾 Novo Planejamento de Colheita</div>
         <div class="form-row">
-          <div class="form-group"><label>Data *</label><input type="date" id="col-data" value="${hoje()}"></div>
+          <div class="form-group"><label>Data Planejada *</label><input type="date" id="col-data" value="${hoje()}"></div>
           <div class="form-group"><label>Fazenda *</label><select id="col-fazenda" onchange="atualizarTalhoesCampo('col')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
@@ -1792,18 +1896,10 @@ window.abrirModalColheita = function() {
           <div class="form-group"><label>Cultura</label><select id="col-cultura"><option value="">—</option>${culturas.map(c=>`<option>${c.nome}</option>`).join('')}</select></div>
         </div>
         <div class="form-group"><label>Safra</label><select id="col-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
-        <div class="form-row">
-          <div class="form-group"><label>Produtividade Média</label><input type="number" id="col-produtividade" min="0" step="0.01"></div>
-          <div class="form-group"><label>Unidade</label><select id="col-unidade"><option>sc/ha</option><option>kg/ha</option><option>ton/ha</option></select></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Umidade (%)</label><input type="number" id="col-umidade" min="0" max="100" step="0.1"></div>
-          <div class="form-group"><label>PMS — Peso Mil Sementes (g)</label><input type="number" id="col-pms" min="0" step="0.01"></div>
-        </div>
         <div class="form-group"><label>Observação</label><input type="text" id="col-obs" placeholder="Opcional"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-colheita')">Cancelar</button>
-          <button class="btn btn-primary" onclick="salvarColheita()">Salvar</button>
+          <button class="btn btn-primary" onclick="salvarColheita()">Salvar Planejamento</button>
         </div>
       </div>
     </div>`);
@@ -1816,18 +1912,56 @@ window.salvarColheita = async function() {
   const reg = {
     data: document.getElementById('col-data').value, fazenda, talhao,
     cultura: document.getElementById('col-cultura').value, safra: document.getElementById('col-safra').value,
-    produtividade: parseFloat(document.getElementById('col-produtividade').value)||0,
-    unidade_produtividade: document.getElementById('col-unidade').value,
-    umidade: parseFloat(document.getElementById('col-umidade').value)||0,
-    pms: parseFloat(document.getElementById('col-pms').value)||0,
     obs: document.getElementById('col-obs').value,
+    status: 'planejado',
     criado_em: Timestamp.now()
   };
   try {
     const ref = await addDoc(collection(db,'insumos_campo_colheita'), reg);
     colheitas.unshift({id: ref.id, ...reg});
     fecharModal('modal-colheita');
-    toast('Colheita registrada!');
+    toast('Colheita planejada!');
+    renderColheita();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.abrirConcluirColheita = function(id) {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-concluir-colheita">
+      <div class="modal">
+        <div class="modal-titulo">✅ Concluir Colheita</div>
+        <div class="form-group"><label>Data de Conclusão *</label><input type="date" id="ccol-data" value="${hoje()}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Produtividade Média</label><input type="number" id="ccol-produtividade" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="ccol-unidade"><option>sc/ha</option><option>kg/ha</option><option>ton/ha</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Umidade (%)</label><input type="number" id="ccol-umidade" min="0" max="100" step="0.1"></div>
+          <div class="form-group"><label>PMS — Peso Mil Sementes (g)</label><input type="number" id="ccol-pms" min="0" step="0.01"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-concluir-colheita')">Cancelar</button>
+          <button class="btn btn-primary" onclick="confirmarConcluirColheita('${id}')">Confirmar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.confirmarConcluirColheita = async function(id) {
+  const upd = {
+    status: 'concluido',
+    data_conclusao: document.getElementById('ccol-data').value,
+    produtividade: parseFloat(document.getElementById('ccol-produtividade').value)||0,
+    unidade_produtividade: document.getElementById('ccol-unidade').value,
+    umidade: parseFloat(document.getElementById('ccol-umidade').value)||0,
+    pms: parseFloat(document.getElementById('ccol-pms').value)||0
+  };
+  try {
+    await updateDoc(doc(db,'insumos_campo_colheita',id), upd);
+    const c = colheitas.find(x=>x.id===id);
+    if (c) Object.assign(c, upd);
+    fecharModal('modal-concluir-colheita');
+    toast('Colheita concluída!');
     renderColheita();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
