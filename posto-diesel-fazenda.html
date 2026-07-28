@@ -1227,20 +1227,103 @@ function Rep(props){
     return Object.assign({},m,{tot:tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,getMachineMt(m)),cnt:mf.length});
   }).filter(function(x){return x!==null;});
 
-  function exportCSV(){
-    var header="Data;Fazenda;Maquina;Descricao;Operador;Medidor;Unidade;Litros;CustoUnit;CustoTotal;RegistradoPor";
-    var lines=rows.map(function(x){
-      var op=null, mc=null, fa=getFarm(data,x.farmId);
+  function exportExtrato(){
+    var avg=data.avgCostPerLiter||0;
+    var farmName=fil.farm ? (getFarm(data,fil.farm)||{}).name||"Todas" : "Todas as Fazendas";
+
+    // Monta todos os eventos: entradas (positivo) e saidas (negativo), ordenados por data
+    var eventos=[];
+
+    // ENTRADAS: cada alocacao de supply que pertence a esta fazenda
+    data.supplies.forEach(function(s){
+      var allocs=s.allocations||[];
+      if(fil.farm){
+        allocs=allocs.filter(function(a){return a.farmId===Number(fil.farm);});
+      }
+      allocs.forEach(function(a){
+        if(Number(a.liters)<=0) return;
+        eventos.push({
+          date:s.date||"",
+          tipo:"ENTRADA",
+          descricao:"Compra diesel",
+          fornecedor:s.supplier||"",
+          nf:s.nf||"",
+          fazenda:fil.farm?(getFarm(data,a.farmId)||{}).name||"-":allocs.map(function(b){return (getFarm(data,b.farmId)||{}).name||"?";}).join("/"),
+          maquina:"",
+          operador:"",
+          medidor:"",
+          unidade:"",
+          litros:Number(a.liters),
+          preco:Number(s.pricePerLiter)||0,
+          custo:Number(a.liters)*(Number(s.pricePerLiter)||0),
+          registradoPor:""
+        });
+      });
+    });
+
+    // SAIDAS: abastecimentos filtrados pela fazenda
+    rows.forEach(function(x){
+      var op=null,mc=null,fa=getFarm(data,x.farmId);
       for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
       for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
-      var cu=avg>0?avg.toFixed(4):"";
-      var ct=avg>0?(x.liters*avg).toFixed(2):"";
-      return [x.date,fa?fa.name:"",mc?mc.code:"",mc?getMachineDesc(mc):"",op?op.name:"",x.meter,mUnit(mc?getMachineMt(mc):"hourmeter"),x.liters,cu,ct,x.registeredBy].join(";");
+      eventos.push({
+        date:x.date||"",
+        tipo:"SAIDA",
+        descricao:"Abastecimento",
+        fornecedor:"",
+        nf:"",
+        fazenda:fa?fa.name:"-",
+        maquina:mc?mc.code+"-"+getMachineDesc(mc):"",
+        operador:op?op.name:"",
+        medidor:x.meter?" "+fmtN(x.meter)+" "+mUnit(mc?getMachineMt(mc):"hourmeter"):"",
+        unidade:mUnit(mc?getMachineMt(mc):"hourmeter"),
+        litros:-Number(x.liters),
+        preco:avg,
+        custo:-(Number(x.liters)*avg),
+        registradoPor:x.registeredBy||""
+      });
     });
-    var csv="\uFEFF"+header+"\n"+lines.join("\n");
+
+    // Ordena por data crescente para calcular saldo
+    eventos.sort(function(a,b){ return a.date>b.date?1:a.date<b.date?-1:0; });
+
+    // Calcula saldo corrido por fazenda filtrada
+    // Saldo inicial = estoque atual + litros consumidos - litros entrados (reconstrucao aproximada)
+    var totalEntradas=eventos.filter(function(e){return e.tipo==="ENTRADA";}).reduce(function(s,e){return s+e.litros;},0);
+    var totalSaidas=eventos.filter(function(e){return e.tipo==="SAIDA";}).reduce(function(s,e){return s+Math.abs(e.litros);},0);
+    var estoqueAtual=fil.farm?(getFarm(data,fil.farm)||{}).tankStock||0:farmTotalStock(data);
+    var saldo=estoqueAtual+totalSaidas-totalEntradas; // estoque antes de tudo
+
+    // Monta CSV
+    var bom="\uFEFF";
+    var titulo="EXTRATO DE COMBUSTIVEL - ACF - "+farmName;
+    var gerado="Gerado em: "+new Date().toLocaleDateString("pt-BR")+" "+new Date().toLocaleTimeString("pt-BR");
+    var sep=";;;;;;;;;;;;;";
+
+    var header="Data;Hora;Tipo;Descricao;Fazenda;Fornecedor/Maquina;NF/Operador;Medidor;Entrada (L);Saida (L);Saldo (L);Preco/L (R$);Custo (R$);Registrado Por";
+
+    var lines=eventos.map(function(e){
+      var entrada=e.tipo==="ENTRADA"?e.litros.toFixed(0):"";
+      var saida=e.tipo==="SAIDA"?Math.abs(e.litros).toFixed(0):"";
+      saldo+=e.litros;
+      var datePart=e.date?e.date.slice(0,10):"";
+      var hourPart=e.date&&e.date.length>=16?e.date.slice(11,16):"";
+      var fornOuMaq=e.tipo==="ENTRADA"?e.fornecedor:e.maquina;
+      var nfOuOp=e.tipo==="ENTRADA"?e.nf:e.operador;
+      var preco=e.preco>0?e.preco.toFixed(4):"";
+      var custo=e.custo!==0?Math.abs(e.custo).toFixed(2):"";
+      return [datePart,hourPart,e.tipo,e.descricao,e.fazenda,fornOuMaq,nfOuOp,e.medidor,entrada,saida,saldo.toFixed(0),preco,custo,e.registradoPor].join(";");
+    });
+
+    var totalEntrL=totalEntradas.toFixed(0);
+    var totalSaiL=totalSaidas.toFixed(0);
+    var totalCusto=eventos.reduce(function(s,e){return s+Math.abs(e.custo);},0).toFixed(2);
+    var rodape=";;;;TOTAL;;;"+""+";"+totalEntrL+";"+totalSaiL+";"+estoqueAtual.toFixed(0)+";;;";
+
+    var csv=bom+titulo+"\n"+gerado+"\n"+sep+"\n"+header+"\n"+lines.join("\n")+"\n"+sep+"\n"+rodape;
     var a=document.createElement("a");
     a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
-    a.download="abastecimentos_acf.csv";
+    a.download="extrato_diesel_acf_"+farmName.replace(/ /g,"_")+".csv";
     a.click();
   }
 
@@ -1248,7 +1331,7 @@ function Rep(props){
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div className="sec" style={{marginBottom:0}}>Relatorios de Consumo</div>
-        <Btn onClick={exportCSV} color={BLU} style={{fontSize:13,padding:"8px 16px"}}>Exportar Excel/CSV</Btn>
+        <Btn onClick={exportExtrato} color={BLU} style={{fontSize:13,padding:"8px 16px"}}>⬇ Exportar Extrato Excel</Btn>
       </div>
       <div className="card" style={{marginBottom:18}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
@@ -1389,13 +1472,34 @@ function Adj(props){
     toast("Ajuste aplicado em "+farm.name);
   }
   function saveE(){
-    var oldL=Number(em.liters), newL=Number(ef.liters);
-    var diff=oldL-newL; // se diminuiu litros, devolve ao estoque
-    var emFarm=getFarm(data,em.farmId);
-    // atualiza o documento individual do abastecimento
-    addFuel(Object.assign({},em,{liters:newL,meter:Number(ef.meter)}));
-    if(diff!==0&&emFarm) updFarm(emFarm.id,{tankStock:Math.max(0,Math.min(emFarm.tankCapacity,emFarm.tankStock+diff))});
-    setEm(null);toast("Abastecimento atualizado"+(diff!==0?" - estoque ajustado":""));
+    var oldL=Number(em.liters);
+    var newL=Number(ef.liters||em.liters);
+    var oldFarmId=em.farmId;
+    var newFarmId=Number(ef.farmId||em.farmId);
+    var oldFarm=getFarm(data,oldFarmId);
+    var newFarm=getFarm(data,newFarmId);
+
+    // salva o registro atualizado
+    addFuel(Object.assign({},em,{
+      farmId:newFarmId,
+      operatorId:Number(ef.operatorId||em.operatorId),
+      machineId:Number(ef.machineId||em.machineId),
+      meter:Number(ef.meter||em.meter),
+      liters:newL,
+      date:ef.date||(em.date||tsNow())
+    }));
+
+    if(oldFarmId===newFarmId){
+      // mesma fazenda: ajusta diferenca de litros
+      var diff=oldL-newL;
+      if(diff!==0&&oldFarm) updFarm(oldFarmId,{tankStock:Math.max(0,Math.min(oldFarm.tankCapacity,oldFarm.tankStock+diff))});
+    } else {
+      // mudou de fazenda: devolve litros antigos para fazenda antiga, debita novos da nova
+      if(oldFarm) updFarm(oldFarmId,{tankStock:Math.min(oldFarm.tankCapacity,oldFarm.tankStock+oldL)});
+      if(newFarm) updFarm(newFarmId,{tankStock:Math.max(0,newFarm.tankStock-newL)});
+    }
+    setEm(null);
+    toast("Abastecimento atualizado");
   }
   function delE(id){
     var x=null;
@@ -1599,15 +1703,42 @@ function Adj(props){
 
       {em&&(
         <Modal title="Editar Abastecimento" onClose={function(){setEm(null);}}>
+          <div style={{fontSize:12,color:MUT,marginBottom:14,background:"#fef9c3",borderRadius:8,padding:"8px 12px",border:"1px solid #fde047"}}>
+            Editando: {fmtDateTime(em.date)} — alteracoes ajustam o estoque automaticamente.
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:13,marginBottom:16}}>
-            <Fld label={mLbl(emMc?getMachineMt(emMc):"hourmeter")} type="number" value={ef.meter||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{meter:v});});}}/>
-            <Fld label="Litros" type="number" value={ef.liters||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{liters:v});});}}/>
+            <div className="fg">
+              <div className="flbl">Fazenda</div>
+              <select value={ef.farmId||em.farmId||""} onChange={function(e){setEf(function(p){return Object.assign({},p,{farmId:e.target.value});});}}>
+                {(data.farms||[]).filter(function(fa){return fa.active!==false;}).map(function(fa){return <option key={fa.id} value={fa.id}>{fa.name}</option>;})}
+              </select>
+            </div>
+            <div className="fg">
+              <div className="flbl">Data e Hora (aaaa-mm-dd hh:mm)</div>
+              <input type="text" value={ef.date||em.date||""} onChange={function(e){setEf(function(p){return Object.assign({},p,{date:e.target.value});});}} placeholder="Ex: 2026-05-10 08:30"/>
+            </div>
+            <div className="fg">
+              <div className="flbl">Operador</div>
+              <select value={ef.operatorId||em.operatorId||""} onChange={function(e){setEf(function(p){return Object.assign({},p,{operatorId:e.target.value});});}}>
+                <option value="">Selecione</option>
+                {data.operators.map(function(o){return <option key={o.id} value={o.id}>{o.name}</option>;})}
+              </select>
+            </div>
+            <div className="fg">
+              <div className="flbl">Maquina / Equipamento</div>
+              <select value={ef.machineId||em.machineId||""} onChange={function(e){setEf(function(p){return Object.assign({},p,{machineId:e.target.value});});}}>
+                <option value="">Selecione</option>
+                {data.machines.map(function(m){return <option key={m.id} value={m.id}>{m.code} - {getMachineDesc(m)}</option>;})}
+              </select>
+            </div>
+            <Fld label={mLbl(emMc?getMachineMt(emMc):"hourmeter")+" (Medidor)"} type="number" value={ef.meter!==undefined?ef.meter:em.meter||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{meter:v});});}}/>
+            <Fld label="Litros abastecidos" type="number" value={ef.liters!==undefined?ef.liters:em.liters||""} onChange={function(v){setEf(function(p){return Object.assign({},p,{liters:v});});}}/>
           </div>
           <div style={{display:"flex",gap:10}}>
             <Btn onClick={function(){delE(em.id);}} color={RED} style={{padding:"9px 14px",fontSize:14}}>Excluir</Btn>
             <div style={{flex:1}}/>
             <Btn onClick={function(){setEm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
-            <Btn onClick={saveE}>Salvar</Btn>
+            <Btn onClick={saveE} color={GN}>Salvar</Btn>
           </div>
         </Modal>
       )}
