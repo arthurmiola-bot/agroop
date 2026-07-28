@@ -281,7 +281,9 @@ let usuarioAtual = null;
 let perfilAtual = null;
 let pedidos = [], estoque = [], retiradas = [], contas = [], talhoes = [], safras = [], fazendas = [], culturas = [];
 let plantios = [], adubacoes = [], colheitas = [];
-let compendio = null;     // cache de estoque_ins_produtos (carrega sob demanda)
+let compendio = null;     // cache de nomes de estoque_ins_produtos (carrega sob demanda)
+let compendioDetalhado = null; // cache com todos os campos do compêndio
+let entradasRaw = [];     // entradas reais da coleção estoque_ins_entradas (ACF Estoque)
 let aplicacoesAgroOp = null; // cache das aplicações do AgroOp
 const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton'];
 function nomesFazendas() { return fazendas.map(f=>f.nome); }
@@ -294,6 +296,12 @@ function fmtData(ts) {
   return d.toLocaleDateString('pt-BR');
 }
 function hoje() { return new Date().toISOString().split('T')[0]; }
+function somarDias(dataStr, dias) {
+  if (!dataStr) return '';
+  const d = new Date(dataStr + 'T12:00:00');
+  d.setDate(d.getDate() + (parseInt(dias)||0));
+  return d.toISOString().split('T')[0];
+}
 function diasAte(ts) {
   if (!ts) return 9999;
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -368,9 +376,9 @@ onAuthStateChanged(auth, async (user) => {
 
 // ── DADOS ──
 async function carregarDados() {
-  const [pSnap, eSnap, rSnap, cSnap, tSnap, sSnap, fSnap, cuSnap, plSnap, adSnap, colSnap] = await Promise.all([
+  const [pSnap, enSnap, rSnap, cSnap, tSnap, sSnap, fSnap, cuSnap, plSnap, adSnap, colSnap] = await Promise.all([
     getDocs(query(collection(db, 'insumos_pedidos'), orderBy('criado_em', 'desc'))),
-    getDocs(query(collection(db, 'insumos_estoque'), orderBy('produto'))),
+    getDocs(collection(db, 'estoque_ins_entradas')),
     getDocs(query(collection(db, 'insumos_retiradas'), orderBy('data', 'desc'))),
     getDocs(query(collection(db, 'insumos_contas'), orderBy('vencimento'))),
     getDocs(query(collection(db, 'insumos_talhoes'), orderBy('nome'))),
@@ -382,7 +390,7 @@ async function carregarDados() {
     getDocs(query(collection(db, 'insumos_campo_colheita'), orderBy('data', 'desc')))
   ]);
   pedidos = pSnap.docs.map(d => ({id: d.id, ...d.data()}));
-  estoque = eSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  entradasRaw = enSnap.docs.map(d => ({id: d.id, ...d.data()}));
   retiradas = rSnap.docs.map(d => ({id: d.id, ...d.data()}));
   contas = cSnap.docs.map(d => ({id: d.id, ...d.data()}));
   talhoes = tSnap.docs.map(d => ({id: d.id, ...d.data()}));
@@ -396,6 +404,38 @@ async function carregarDados() {
   if (fazendas.length === 0) {
     fazendas = [{id:'_tmp1',nome:'Rodeio'},{id:'_tmp2',nome:'Córrego das Flores'},{id:'_tmp3',nome:'Palmeiras'}];
   }
+  recalcularEstoque();
+}
+
+// Estoque real = soma das entradas (compras) do ACF Estoque, menos as retiradas lançadas aqui no Insumos.
+// O ACF Estoque nunca teve "saídas" para insumos — essa é a peça que o ACF Insumos adiciona.
+function recalcularEstoque() {
+  const mapa = {};
+  entradasRaw.forEach(e => {
+    const nome = (e.prodNome || '').trim();
+    if (!nome) return;
+    const k = normalizar(nome);
+    if (!mapa[k]) mapa[k] = { produto: nome, unidade: e.unid||'', qtdEntradas:0, valorEntradas:0, prodId: e.prodId||'' };
+    const qtd = parseFloat(e.qtd)||0;
+    const preco = parseFloat(e.preco)||0;
+    mapa[k].qtdEntradas += qtd;
+    mapa[k].valorEntradas += qtd*preco;
+    if (e.unid) mapa[k].unidade = e.unid;
+    if (e.prodId) mapa[k].prodId = e.prodId;
+    const dtVal = e.dt?.toDate ? e.dt.toDate() : (e.dt ? new Date(e.dt) : null);
+    if (dtVal && (!mapa[k].ultimaEntradaDt || dtVal > mapa[k].ultimaEntradaDt)) mapa[k].ultimaEntradaDt = dtVal;
+  });
+  const qtdRetiradaPorProduto = {};
+  retiradas.forEach(r => {
+    const k = normalizar(r.produto);
+    qtdRetiradaPorProduto[k] = (qtdRetiradaPorProduto[k]||0) + (parseFloat(r.quantidade)||0);
+  });
+  estoque = Object.entries(mapa).map(([k, m]) => ({
+    id: k, produto: m.produto, unidade: m.unidade, prodId: m.prodId,
+    custo_medio: m.qtdEntradas>0 ? m.valorEntradas/m.qtdEntradas : 0,
+    quantidade: m.qtdEntradas - (qtdRetiradaPorProduto[k]||0),
+    ultima_entrada: m.ultimaEntradaDt ? m.ultimaEntradaDt.toLocaleDateString('pt-BR') : ''
+  })).sort((a,b) => a.produto.localeCompare(b.produto));
 }
 
 // Carrega o compêndio (estoque_ins_produtos) só quando necessário, com cache
@@ -403,12 +443,10 @@ async function carregarCompendio() {
   if (compendio) return compendio;
   try {
     const snap = await getDocs(collection(db, 'estoque_ins_produtos'));
-    compendio = snap.docs.map(d => {
-      const dt = d.data();
-      return dt.nome || dt.produto || dt.marca_comercial || dt.marcaComercial || Object.values(dt).find(v=>typeof v==='string') || '';
-    }).filter(Boolean).sort();
+    compendioDetalhado = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    compendio = compendioDetalhado.map(dt => dt.nome || '').filter(Boolean).sort();
   } catch(e) {
-    compendio = [];
+    compendio = []; compendioDetalhado = [];
   }
   return compendio;
 }
@@ -910,13 +948,14 @@ window.abrirBaixa = function(id) {
               <input type="number" id="baixa-qtd-${i}" value="${pend}" min="0" max="${pend}" step="0.01"></div>`;
           }).join('')}
         </div>
-        <p style="font-size:12px;color:var(--cinza)">* Itens recebidos entram no estoque automaticamente (custo médio ponderado).</p>
+        <p style="font-size:12px;color:var(--cinza)">* Itens recebidos entram como entrada no ACF Estoque (custo médio ponderado calculado automaticamente).</p>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-baixa')">Cancelar</button>
           <button class="btn btn-primary" id="btn-confirma-baixa" onclick="confirmarBaixa('${id}')">Confirmar Recebimento</button>
         </div>
       </div>
     </div>`);
+  carregarCompendio();
 };
 
 window.confirmarBaixa = async function(id) {
@@ -936,19 +975,16 @@ window.confirmarBaixa = async function(id) {
     totalRecebido += qtdReceber;
     const idx = novosItens.findIndex(x => x.produto === it.produto);
     if (idx >= 0) novosItens[idx] = { ...novosItens[idx], quantidade_recebida: (novosItens[idx].quantidade_recebida||0) + qtdReceber };
-    const estoqueExist = estoque.find(e => normalizar(e.produto) === normalizar(it.produto) && e.unidade === it.unidade);
-    const novoPreco = it.preco_unit || 0;
-    if (estoqueExist) {
-      const qtdAtual = estoqueExist.quantidade || 0;
-      const custoAtual = estoqueExist.custo_medio || novoPreco;
-      const novoCusto = qtdAtual > 0 ? ((qtdAtual*custoAtual)+(qtdReceber*novoPreco))/(qtdAtual+qtdReceber) : novoPreco;
-      batch.update(doc(db, 'insumos_estoque', estoqueExist.id), { quantidade: qtdAtual+qtdReceber, custo_medio: novoCusto, ultima_entrada: dataReceb });
-      estoqueExist.quantidade = qtdAtual+qtdReceber; estoqueExist.custo_medio = novoCusto;
-    } else {
-      const eRef = doc(collection(db, 'insumos_estoque'));
-      batch.set(eRef, { produto: it.produto, unidade: it.unidade, quantidade: qtdReceber, custo_medio: novoPreco, ultima_entrada: dataReceb, fazenda: p.fazenda||'' });
-      estoque.push({ id: eRef.id, produto: it.produto, unidade: it.unidade, quantidade: qtdReceber, custo_medio: novoPreco, ultima_entrada: dataReceb, fazenda: p.fazenda });
-    }
+    // tenta casar com o compêndio pra herdar prodId/cat/ia (opcional, não bloqueia se não achar)
+    const match = (compendioDetalhado||[]).find(c => normalizar(c.nome||'') === normalizar(it.produto));
+    const novaEntrada = {
+      cat: match?.cat || '', dt: Timestamp.now(), forn: p.fornecedor, funcId: '', funcNome: '',
+      ia: match?.ia || '', nf: '', preco: it.preco_unit||0, prodId: match?.id || '',
+      prodNome: it.produto, qtd: qtdReceber, unid: it.unidade
+    };
+    const eRef = doc(collection(db, 'estoque_ins_entradas'));
+    batch.set(eRef, novaEntrada);
+    entradasRaw.push({ id: eRef.id, ...novaEntrada });
   });
 
   if (totalRecebido === 0) { toast('Informe a quantidade a receber.', 'erro'); btn.disabled=false; btn.textContent='Confirmar Recebimento'; return; }
@@ -961,8 +997,9 @@ window.confirmarBaixa = async function(id) {
     await batch.commit();
     const pi = pedidos.findIndex(x => x.id === id);
     if (pi >= 0) { pedidos[pi].itens = novosItens; pedidos[pi].status = novoStatus; }
+    recalcularEstoque();
     fecharModal('modal-baixa');
-    toast('Recebimento registrado! Estoque atualizado.');
+    toast('Recebimento registrado no ACF Estoque!');
     renderPedidos();
   } catch(e) { toast('Erro: ' + e.message, 'erro'); btn.disabled=false; btn.textContent='Confirmar Recebimento'; }
 };
@@ -1044,19 +1081,18 @@ window.salvarEntrada = async function() {
   if (!produto || qtd <= 0) { toast('Preencha produto e quantidade.', 'erro'); return; }
   const unidade = document.getElementById('ent-un').value;
   const custo = parseFloat(document.getElementById('ent-custo').value)||0;
-  const exist = estoque.find(e => normalizar(e.produto) === normalizar(produto) && e.unidade === unidade);
+  const match = (compendioDetalhado||[]).find(c => normalizar(c.nome||'') === normalizar(produto));
+  const novaEntrada = {
+    cat: match?.cat || '', dt: Timestamp.now(), forn: '', funcId: '', funcNome: '',
+    ia: match?.ia || '', nf: '', preco: custo, prodId: match?.id || '',
+    prodNome: produto, qtd, unid: unidade
+  };
   try {
-    if (exist) {
-      const qtdAt = exist.quantidade||0, custoAt = exist.custo_medio||0;
-      const novoCusto = qtdAt > 0 ? ((qtdAt*custoAt)+(qtd*custo))/(qtdAt+qtd) : custo;
-      await updateDoc(doc(db,'insumos_estoque',exist.id), { quantidade: qtdAt+qtd, custo_medio: novoCusto, ultima_entrada: hoje() });
-      exist.quantidade = qtdAt+qtd; exist.custo_medio = novoCusto;
-    } else {
-      const ref = await addDoc(collection(db,'insumos_estoque'), { produto, unidade, quantidade: qtd, custo_medio: custo, ultima_entrada: hoje() });
-      estoque.push({ id: ref.id, produto, unidade, quantidade: qtd, custo_medio: custo, ultima_entrada: hoje() });
-    }
+    const ref = await addDoc(collection(db,'estoque_ins_entradas'), novaEntrada);
+    entradasRaw.push({ id: ref.id, ...novaEntrada });
+    recalcularEstoque();
     fecharModal('modal-entrada');
-    toast('Entrada registrada!');
+    toast('Entrada registrada no ACF Estoque!');
     renderEstoque();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
@@ -1202,9 +1238,8 @@ window.confirmarRetirada = async function(simples) {
   };
   try {
     const ref = await addDoc(collection(db,'insumos_retiradas'), retirada);
-    await updateDoc(doc(db,'insumos_estoque',prodId), { quantidade: est.quantidade - qtd });
-    est.quantidade -= qtd;
     retiradas.unshift({id: ref.id, ...retirada});
+    recalcularEstoque();
     fecharModal('modal-retirada');
     toast('Retirada registrada com sucesso!');
     if (simples) renderOperador(); else renderRetiradas();
@@ -1565,7 +1600,10 @@ let cadernoSubaba = 'plantio';
 
 function renderCaderno() {
   document.getElementById('main-content').innerHTML = `
-    <div class="sec-titulo" style="margin-bottom:16px">📓 Caderno de Campo</div>
+    <div class="sec-header" style="margin-bottom:16px">
+      <div class="sec-titulo">📓 Caderno de Campo</div>
+      <button class="btn btn-secondary btn-sm" onclick="exportarCadernoCompleto()">📥 Exportar Tudo (Excel)</button>
+    </div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
       <button class="nav-btn ${cadernoSubaba==='adubacao'?'ativo':''}" onclick="mudarSubabaCaderno('adubacao')">🧪 Defensivos, Corretivos e Adubação</button>
@@ -1592,15 +1630,23 @@ function renderPlantio() {
   const el = document.getElementById('caderno-conteudo');
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${plantios.length} registro(s)</div>
-      <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="baixarModelo('plantio')">📋 Baixar Modelo</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-plantio').click()">📤 Importar Excel</button>
+        <input type="file" id="import-plantio" accept=".xlsx,.xls" style="display:none" onchange="importarPlanilha(this,'plantio')">
+        <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('plantio')">📥 Exportar Excel</button>
+        <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button>
+      </div></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Ciclo</th><th>Previsão Colheita</th><th>Status</th><th></th></tr></thead>
       <tbody>
-        ${plantios.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
+        ${plantios.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
         plantios.map(p=>`<tr><td>${p.status==='concluido'?(p.data_conclusao||p.data||'—'):(p.data||'—')}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
-        <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${badgeStatusCampo(p.status)}</td>
+        <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.ciclo_dias?fmt(p.ciclo_dias)+'d':'—'}</td>
+        <td>${p.data_prevista_colheita||'—'}</td><td>${badgeStatusCampo(p.status)}</td>
         <td style="white-space:nowrap">
           ${p.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirPlantio('${p.id}')">✅ Concluir</button>`:''}
+          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalPlantio('${p.id}')">✏️</button>
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button>
         </td></tr>`).join('')}
       </tbody>
@@ -1613,56 +1659,80 @@ function badgeStatusCampo(status) {
   return '<span class="badge badge-azul">Planejado</span>';
 }
 
-window.abrirModalPlantio = function() {
+window.abrirModalPlantio = function(id) {
+  const p = id ? plantios.find(x=>x.id===id) : null;
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-plantio">
       <div class="modal">
-        <div class="modal-titulo">🌱 Novo Planejamento de Plantio</div>
+        <div class="modal-titulo">🌱 ${p?'Editar':'Novo'} Planejamento de Plantio</div>
         <div class="form-row">
-          <div class="form-group"><label>Data Planejada *</label><input type="date" id="pl-data" value="${hoje()}"></div>
-          <div class="form-group"><label>Fazenda *</label><select id="pl-fazenda" onchange="atualizarTalhoesCampo('pl')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Data Planejada *</label><input type="date" id="pl-data" value="${p?.data||hoje()}" onchange="atualizarPrevisaoColheita()"></div>
+          <div class="form-group"><label>Fazenda *</label><select id="pl-fazenda" onchange="atualizarTalhoesCampo('pl')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option ${f===p?.fazenda?'selected':''}>${f}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Talhão *</label><select id="pl-talhao"><option value="">Selecione a fazenda...</option></select></div>
-          <div class="form-group"><label>Cultura *</label><select id="pl-cultura"><option value="">Selecione...</option>${culturas.map(c=>`<option>${c.nome}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Cultura *</label><select id="pl-cultura"><option value="">Selecione...</option>${culturas.map(c=>`<option ${c.nome===p?.cultura?'selected':''}>${c.nome}</option>`).join('')}</select></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Safra</label><select id="pl-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Cultivar/Variedade</label><input type="text" id="pl-cultivar" placeholder="Ex: TMG 7062"></div>
+          <div class="form-group"><label>Safra</label><select id="pl-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===p?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Cultivar/Variedade</label><input type="text" id="pl-cultivar" value="${p?.cultivar||''}" placeholder="Ex: TMG 7062"></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>População (plantas ou sementes/ha)</label><input type="number" id="pl-populacao" min="0" step="1"></div>
-          <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" min="0" step="0.1"></div>
+          <div class="form-group"><label>Ciclo da Cultivar (dias)</label><input type="number" id="pl-ciclo" value="${p?.ciclo_dias||''}" min="0" step="1" onchange="atualizarPrevisaoColheita()" placeholder="Ex: 115"></div>
+          <div class="form-group"><label>Previsão de Colheita</label><input type="date" id="pl-previsao-colheita" value="${p?.data_prevista_colheita||''}" readonly style="background:var(--creme);color:var(--cinza)"></div>
         </div>
-        <div class="form-group"><label>Observação</label><input type="text" id="pl-obs" placeholder="Opcional"></div>
+        <div class="form-row">
+          <div class="form-group"><label>População (plantas ou sementes/ha)</label><input type="number" id="pl-populacao" value="${p?.populacao||''}" min="0" step="1"></div>
+          <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" value="${p?.espacamento||''}" min="0" step="0.1"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="pl-obs" value="${p?.obs||''}" placeholder="Opcional"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-plantio')">Cancelar</button>
-          <button class="btn btn-primary" onclick="salvarPlantio()">Salvar Planejamento</button>
+          <button class="btn btn-primary" onclick="salvarPlantio(${p?`'${id}'`:'null'})">Salvar</button>
         </div>
       </div>
     </div>`);
+  if (p?.fazenda) { atualizarTalhoesCampo('pl'); setTimeout(()=>{ const s=document.getElementById('pl-talhao'); if(s) s.value=p.talhao||''; },0); }
 };
 
-window.salvarPlantio = async function() {
+// Recalcula a previsão de colheita (data do plantio + ciclo da cultivar) em tempo real no formulário
+window.atualizarPrevisaoColheita = function() {
+  const data = document.getElementById('pl-data')?.value;
+  const ciclo = parseFloat(document.getElementById('pl-ciclo')?.value)||0;
+  const campo = document.getElementById('pl-previsao-colheita');
+  if (campo) campo.value = (data && ciclo>0) ? somarDias(data, ciclo) : '';
+};
+
+window.salvarPlantio = async function(id) {
   const fazenda = document.getElementById('pl-fazenda').value;
   const talhao = document.getElementById('pl-talhao').value;
   const cultura = document.getElementById('pl-cultura').value;
   if (!fazenda || !talhao || !cultura) { toast('Preencha fazenda, talhão e cultura.','erro'); return; }
+  const data = document.getElementById('pl-data').value;
+  const ciclo_dias = parseFloat(document.getElementById('pl-ciclo').value)||0;
   const reg = {
-    data: document.getElementById('pl-data').value, fazenda, talhao, cultura,
+    data, fazenda, talhao, cultura,
     safra: document.getElementById('pl-safra').value,
     cultivar: document.getElementById('pl-cultivar').value,
+    ciclo_dias,
+    data_prevista_colheita: ciclo_dias>0 ? somarDias(data, ciclo_dias) : '',
     populacao: parseFloat(document.getElementById('pl-populacao').value)||0,
     espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
-    obs: document.getElementById('pl-obs').value,
-    status: 'planejado',
-    criado_em: Timestamp.now()
+    obs: document.getElementById('pl-obs').value
   };
   try {
-    const ref = await addDoc(collection(db,'insumos_campo_plantio'), reg);
-    plantios.unshift({id: ref.id, ...reg});
+    if (id) {
+      await updateDoc(doc(db,'insumos_campo_plantio',id), reg);
+      const i = plantios.findIndex(x=>x.id===id);
+      if (i>=0) plantios[i] = { ...plantios[i], ...reg };
+      toast('Plantio atualizado!');
+    } else {
+      reg.status = 'planejado'; reg.criado_em = Timestamp.now();
+      const ref = await addDoc(collection(db,'insumos_campo_plantio'), reg);
+      plantios.unshift({id: ref.id, ...reg});
+      toast('Plantio planejado!');
+    }
     fecharModal('modal-plantio');
-    toast('Plantio planejado!');
     renderPlantio();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
@@ -1699,49 +1769,104 @@ function renderAdubacao() {
   const el = document.getElementById('caderno-conteudo');
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${adubacoes.length} registro(s)</div>
-      <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Novo Planejamento</button></div>
-    <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Enviar ao Operador"</strong>, o planejamento aparece automaticamente no AgroOp. Quando o operador concluir lá, o status aqui atualiza sozinho pra <strong>Concluído</strong>.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="baixarModelo('adubacao')">📋 Baixar Modelo</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-adubacao').click()">📤 Importar Excel</button>
+        <input type="file" id="import-adubacao" accept=".xlsx,.xls" style="display:none" onchange="importarPlanilha(this,'adubacao')">
+        <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('adubacao')">📥 Exportar Excel</button>
+        <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Novo Planejamento</button>
+      </div></div>
+    <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Enviar ao Operador"</strong>, o planejamento aparece automaticamente no AgroOp. Quando o operador concluir lá, o status aqui atualiza sozinho pra <strong>Concluído</strong>. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular se a referência mudar.</p>
     <div class="tabela-wrap"><table>
       <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Categoria</th><th>Produto</th><th>Dose</th><th>Status</th><th></th></tr></thead>
       <tbody>
         ${adubacoes.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhum registro</td></tr>':
-        adubacoes.map(a=>`<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
+        adubacoes.map(a=>`<tr><td>${a.data||'—'}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
         <td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td><td>${badgeStatusCampo(a.status)}</td>
         <td style="white-space:nowrap">
-          ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="enviarAoOperador('${a.id}')">🚁 Enviar ao Operador</button>
-          <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')">✅ Concluir</button>`:''}
+          ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="enviarAoOperador('${a.id}')">🚁 Enviar</button>
+          <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')">✅</button>`:''}
           ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando AgroOp</span>`:''}
+          ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
+          ${a.status==='planejado'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}')">✏️</button>`:''}
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
         </td></tr>`).join('')}
       </tbody>
     </table></div>`;
 }
 
-window.abrirModalAdubacao = function() {
+// Gera o HTML dos campos de data (fixa / X dias após plantio / X dias após outra aplicação)
+function renderModoDataCampos(valores) {
+  valores = valores || {};
+  const fazenda = document.getElementById('ad-fazenda')?.value||'';
+  const talhao = document.getElementById('ad-talhao')?.value||'';
+  const modo = document.getElementById('ad-modo-data')?.value || valores.modo_data || 'fixa';
+  if (modo === 'plantio') {
+    const opcoes = plantios.filter(p => normalizar(p.fazenda||'')===normalizar(fazenda) && normalizar(p.talhao||'')===normalizar(talhao));
+    if (opcoes.length===0) return `<p style="font-size:12px;color:var(--laranja)">Nenhum plantio cadastrado para esse talhão ainda. Cadastre o plantio primeiro, ou use Data fixa.</p>`;
+    return `
+      <div class="form-row">
+        <div class="form-group"><label>Plantio de referência</label>
+          <select id="ad-ref-plantio">${opcoes.map(p=>`<option value="${p.id}" ${p.id===valores.ref_plantio_id?'selected':''}>${p.cultura||'Plantio'} — ${p.data} (${p.cultivar||''})</option>`).join('')}</select></div>
+        <div class="form-group"><label>Dias após o plantio</label><input type="number" id="ad-dias-apos" value="${valores.dias_apos!=null?valores.dias_apos:''}" min="0" step="1"></div>
+      </div>`;
+  }
+  if (modo === 'aplicacao') {
+    const opcoes = adubacoes.filter(a => normalizar(a.fazenda||'')===normalizar(fazenda) && normalizar(a.talhao||'')===normalizar(talhao) && a.id!==valores.idAtual);
+    if (opcoes.length===0) return `<p style="font-size:12px;color:var(--laranja)">Nenhum outro planejamento nesse talhão ainda para usar como referência.</p>`;
+    return `
+      <div class="form-row">
+        <div class="form-group"><label>Aplicação de referência</label>
+          <select id="ad-ref-aplicacao">${opcoes.map(a=>`<option value="${a.id}" ${a.id===valores.ref_aplicacao_id?'selected':''}>${a.produto} — ${a.data}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Dias após essa aplicação</label><input type="number" id="ad-dias-apos" value="${valores.dias_apos!=null?valores.dias_apos:''}" min="0" step="1"></div>
+      </div>`;
+  }
+  return `<div class="form-group"><label>Data Planejada *</label><input type="date" id="ad-data" value="${valores.data||hoje()}"></div>`;
+}
+
+window.atualizarModoDataAdubacao = function() {
+  const cont = document.getElementById('ad-modo-data-campos');
+  if (cont) cont.innerHTML = renderModoDataCampos({});
+};
+
+// Chamado quando fazenda/talhão mudam — as opções de "plantio/aplicação de referência" dependem deles
+window.atualizarOpcoesModoData = function() {
+  const cont = document.getElementById('ad-modo-data-campos');
+  if (!cont) return;
+  cont.innerHTML = renderModoDataCampos({});
+};
+
+window.abrirModalAdubacao = function(id) {
+  const a = id ? adubacoes.find(x=>x.id===id) : null;
+  const modoInicial = a?.modo_data || 'fixa';
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-adubacao">
       <div class="modal">
-        <div class="modal-titulo">🧪 Novo Planejamento — Defensivo / Corretivo / Adubação</div>
+        <div class="modal-titulo">🧪 ${a?'Editar':'Novo'} Planejamento — Defensivo / Corretivo / Adubação</div>
         <div class="form-row">
-          <div class="form-group"><label>Data Planejada *</label><input type="date" id="ad-data" value="${hoje()}"></div>
-          <div class="form-group"><label>Fazenda *</label><select id="ad-fazenda" onchange="atualizarTalhoesCampo('ad')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option>${f}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Fazenda *</label><select id="ad-fazenda" onchange="atualizarTalhoesCampo('ad')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option ${f===a?.fazenda?'selected':''}>${f}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Talhão *</label><select id="ad-talhao" onchange="atualizarOpcoesModoData()"><option value="">Selecione a fazenda...</option></select></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Talhão *</label><select id="ad-talhao"><option value="">Selecione a fazenda...</option></select></div>
-          <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option>${s.nome}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===a?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Categoria</label><select id="ad-categoria">${['Defensivo','Corretivo','Adubação'].map(c=>`<option ${c===a?.categoria?'selected':''}>${c}</option>`).join('')}</select></div>
         </div>
+        <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" value="${a?.produto||''}" placeholder="Ex: MAP, Ureia, Calcário" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
         <div class="form-row">
-          <div class="form-group"><label>Categoria</label><select id="ad-categoria"><option>Defensivo</option><option>Corretivo</option><option>Adubação</option></select></div>
-          <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" placeholder="Ex: MAP, Ureia, Calcário" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
+          <div class="form-group"><label>Dose</label><input type="number" id="ad-dose" value="${a?.dose||''}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="ad-unidade">${UNIDADES.map(u=>`<option ${u===a?.unidade?'selected':''}>${u}</option>`).join('')}</select></div>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>Dose</label><input type="number" id="ad-dose" min="0" step="0.01"></div>
-          <div class="form-group"><label>Unidade</label><select id="ad-unidade">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
-        </div>
-        <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" placeholder="Opcional"></div>
+        <div class="form-group"><label>Como definir a data? *</label>
+          <select id="ad-modo-data" onchange="atualizarModoDataAdubacao()">
+            <option value="fixa" ${modoInicial==='fixa'?'selected':''}>Data fixa</option>
+            <option value="plantio" ${modoInicial==='plantio'?'selected':''}>X dias após o plantio</option>
+            <option value="aplicacao" ${modoInicial==='aplicacao'?'selected':''}>X dias após outra aplicação já planejada</option>
+          </select></div>
+        <div id="ad-modo-data-campos"></div>
+        <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" value="${a?.obs||''}" placeholder="Opcional"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-adubacao')">Cancelar</button>
-          <button class="btn btn-primary" onclick="salvarAdubacao()">Salvar Planejamento</button>
+          <button class="btn btn-primary" onclick="salvarAdubacao(${a?`'${id}'`:'null'})">Salvar</button>
         </div>
       </div>
     </div>`);
@@ -1749,26 +1874,87 @@ window.abrirModalAdubacao = function() {
     const dl = document.getElementById('compendio-datalist-3');
     if (dl) dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
   });
+  if (a?.fazenda) {
+    atualizarTalhoesCampo('ad');
+    setTimeout(()=>{
+      const s=document.getElementById('ad-talhao'); if(s) s.value=a.talhao||'';
+      const cont = document.getElementById('ad-modo-data-campos');
+      if (cont) cont.innerHTML = renderModoDataCampos({...a, idAtual: id});
+    },0);
+  } else {
+    document.getElementById('ad-modo-data-campos').innerHTML = renderModoDataCampos({});
+  }
 };
 
-window.salvarAdubacao = async function() {
+window.salvarAdubacao = async function(id) {
   const fazenda = document.getElementById('ad-fazenda').value;
   const talhao = document.getElementById('ad-talhao').value;
   const produto = document.getElementById('ad-produto').value.trim();
   if (!fazenda || !talhao || !produto) { toast('Preencha fazenda, talhão e produto.','erro'); return; }
+
+  const modo_data = document.getElementById('ad-modo-data').value;
+  let dataFinal = '', ref_plantio_id = '', ref_aplicacao_id = '', dias_apos = 0;
+  if (modo_data === 'fixa') {
+    dataFinal = document.getElementById('ad-data')?.value || '';
+    if (!dataFinal) { toast('Informe a data.','erro'); return; }
+  } else if (modo_data === 'plantio') {
+    ref_plantio_id = document.getElementById('ad-ref-plantio')?.value || '';
+    dias_apos = parseFloat(document.getElementById('ad-dias-apos')?.value)||0;
+    const pRef = plantios.find(p=>p.id===ref_plantio_id);
+    if (!pRef) { toast('Selecione o plantio de referência.','erro'); return; }
+    dataFinal = somarDias(pRef.data, dias_apos);
+  } else if (modo_data === 'aplicacao') {
+    ref_aplicacao_id = document.getElementById('ad-ref-aplicacao')?.value || '';
+    dias_apos = parseFloat(document.getElementById('ad-dias-apos')?.value)||0;
+    const aRef = adubacoes.find(x=>x.id===ref_aplicacao_id);
+    if (!aRef) { toast('Selecione a aplicação de referência.','erro'); return; }
+    dataFinal = somarDias(aRef.data, dias_apos);
+  }
+
   const reg = {
-    data: document.getElementById('ad-data').value, fazenda, talhao,
+    data: dataFinal, fazenda, talhao,
     safra: document.getElementById('ad-safra').value, categoria: document.getElementById('ad-categoria').value,
     produto, dose: parseFloat(document.getElementById('ad-dose').value)||0,
     unidade: document.getElementById('ad-unidade').value, obs: document.getElementById('ad-obs').value,
-    status: 'planejado',
-    criado_em: Timestamp.now()
+    modo_data, ref_plantio_id, ref_aplicacao_id, dias_apos
   };
   try {
-    const ref = await addDoc(collection(db,'insumos_campo_adubacao'), reg);
-    adubacoes.unshift({id: ref.id, ...reg});
+    if (id) {
+      await updateDoc(doc(db,'insumos_campo_adubacao',id), reg);
+      const i = adubacoes.findIndex(x=>x.id===id);
+      if (i>=0) adubacoes[i] = { ...adubacoes[i], ...reg };
+      toast('Planejamento atualizado!');
+    } else {
+      reg.status = 'planejado'; reg.criado_em = Timestamp.now();
+      const ref = await addDoc(collection(db,'insumos_campo_adubacao'), reg);
+      adubacoes.unshift({id: ref.id, ...reg});
+      toast('Planejamento salvo!');
+    }
     fecharModal('modal-adubacao');
-    toast('Planejamento salvo!');
+    renderAdubacao();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// Recalcula a data de um item "X dias após..." com base no valor atual da referência
+// (útil se a data do plantio ou da aplicação-base mudou depois que este item foi criado)
+window.recalcularDataAdubacao = async function(id) {
+  const a = adubacoes.find(x=>x.id===id);
+  if (!a || !a.modo_data || a.modo_data==='fixa') return;
+  let novaData = a.data;
+  if (a.modo_data==='plantio') {
+    const p = plantios.find(x=>x.id===a.ref_plantio_id);
+    if (!p) { toast('Plantio de referência não encontrado (pode ter sido excluído).','erro'); return; }
+    novaData = somarDias(p.data, a.dias_apos);
+  } else if (a.modo_data==='aplicacao') {
+    const ref = adubacoes.find(x=>x.id===a.ref_aplicacao_id);
+    if (!ref) { toast('Aplicação de referência não encontrada (pode ter sido excluída).','erro'); return; }
+    novaData = somarDias(ref.data, a.dias_apos);
+  }
+  if (novaData === a.data) { toast('A data já está atualizada.'); return; }
+  try {
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { data: novaData });
+    a.data = novaData;
+    toast('Data recalculada para '+novaData);
     renderAdubacao();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
@@ -1859,7 +2045,13 @@ function renderColheita() {
   const el = document.getElementById('caderno-conteudo');
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${colheitas.length} registro(s)</div>
-      <button class="btn btn-primary" onclick="abrirModalColheita()">+ Novo Planejamento</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="baixarModelo('colheita')">📋 Baixar Modelo</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-colheita').click()">📤 Importar Excel</button>
+        <input type="file" id="import-colheita" accept=".xlsx,.xls" style="display:none" onchange="importarPlanilha(this,'colheita')">
+        <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('colheita')">📥 Exportar Excel</button>
+        <button class="btn btn-primary" onclick="abrirModalColheita()">+ Novo Planejamento</button>
+      </div></div>
     <div class="tabela-wrap"><table>
       <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Status</th><th>Produtiv.</th><th>Umidade</th><th>PMS</th><th></th></tr></thead>
       <tbody>
@@ -1870,17 +2062,12 @@ function renderColheita() {
         <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
         <td style="white-space:nowrap">
           ${c.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirColheita('${c.id}')">✅ Concluir</button>`:''}
+          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirEditarColheita('${c.id}')">✏️</button>
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_colheita','${c.id}','colheita')">✕</button>
         </td></tr>`).join('')}
       </tbody>
-    </table></div>
-    ${colheitas.some(c=>c.status==='concluido')?`<div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarColheita()">📥 Exportar Excel</button></div>`:''}`;
+    </table></div>`;
 }
-
-window.exportarColheita = function() {
-  exportarExcel('Colheita', ['Data','Fazenda','Talhão','Cultura','Safra','Status','Produtividade','Unidade','Umidade (%)','PMS (g)'],
-    colheitas.map(c => [c.data_conclusao||c.data||'', c.fazenda||'', c.talhao||'', c.cultura||'', c.safra||'', c.status||'', c.produtividade||0, c.unidade_produtividade||'sc/ha', c.umidade||0, c.pms||0]));
-};
 
 window.abrirModalColheita = function() {
   document.body.insertAdjacentHTML('beforeend', `
@@ -1966,7 +2153,73 @@ window.confirmarConcluirColheita = async function(id) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-// Helper compartilhado: atualizar talhões conforme fazenda escolhida (prefixo dos ids: pl-, ad-, col-)
+// Edição completa de um registro de colheita (planejamento + resultado, se já concluído)
+window.abrirEditarColheita = function(id) {
+  const c = colheitas.find(x=>x.id===id);
+  if (!c) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-editar-colheita">
+      <div class="modal">
+        <div class="modal-titulo">✏️ Editar Colheita</div>
+        <div class="form-row">
+          <div class="form-group"><label>Data *</label><input type="date" id="ecol-data" value="${c.data||''}"></div>
+          <div class="form-group"><label>Fazenda *</label><select id="ecol-fazenda" onchange="atualizarTalhoesCampo('ecol')">${nomesFazendas().map(f=>`<option ${f===c.fazenda?'selected':''}>${f}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Talhão *</label><select id="ecol-talhao"></select></div>
+          <div class="form-group"><label>Cultura</label><select id="ecol-cultura"><option value="">—</option>${culturas.map(c2=>`<option ${c2.nome===c.cultura?'selected':''}>${c2.nome}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Safra</label><select id="ecol-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===c.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
+        ${c.status==='concluido' ? `
+        <div class="form-group"><label>Data de Conclusão</label><input type="date" id="ecol-dataconclusao" value="${c.data_conclusao||''}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Produtividade Média</label><input type="number" id="ecol-produtividade" value="${c.produtividade||''}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="ecol-unidade"><option ${c.unidade_produtividade==='sc/ha'?'selected':''}>sc/ha</option><option ${c.unidade_produtividade==='kg/ha'?'selected':''}>kg/ha</option><option ${c.unidade_produtividade==='ton/ha'?'selected':''}>ton/ha</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Umidade (%)</label><input type="number" id="ecol-umidade" value="${c.umidade||''}" min="0" max="100" step="0.1"></div>
+          <div class="form-group"><label>PMS (g)</label><input type="number" id="ecol-pms" value="${c.pms||''}" min="0" step="0.01"></div>
+        </div>` : ''}
+        <div class="form-group"><label>Observação</label><input type="text" id="ecol-obs" value="${c.obs||''}" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-editar-colheita')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarEdicaoColheita('${id}')">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+  atualizarTalhoesCampo('ecol');
+  setTimeout(()=>{ const s=document.getElementById('ecol-talhao'); if(s) s.value=c.talhao||''; },0);
+};
+
+window.salvarEdicaoColheita = async function(id) {
+  const upd = {
+    data: document.getElementById('ecol-data').value,
+    fazenda: document.getElementById('ecol-fazenda').value,
+    talhao: document.getElementById('ecol-talhao').value,
+    cultura: document.getElementById('ecol-cultura').value,
+    safra: document.getElementById('ecol-safra').value,
+    obs: document.getElementById('ecol-obs').value
+  };
+  const campoConclusao = document.getElementById('ecol-dataconclusao');
+  if (campoConclusao) {
+    upd.data_conclusao = campoConclusao.value;
+    upd.produtividade = parseFloat(document.getElementById('ecol-produtividade').value)||0;
+    upd.unidade_produtividade = document.getElementById('ecol-unidade').value;
+    upd.umidade = parseFloat(document.getElementById('ecol-umidade').value)||0;
+    upd.pms = parseFloat(document.getElementById('ecol-pms').value)||0;
+  }
+  if (!upd.fazenda || !upd.talhao) { toast('Preencha fazenda e talhão.','erro'); return; }
+  try {
+    await updateDoc(doc(db,'insumos_campo_colheita',id), upd);
+    const i = colheitas.findIndex(x=>x.id===id);
+    if (i>=0) colheitas[i] = { ...colheitas[i], ...upd };
+    fecharModal('modal-editar-colheita');
+    toast('Colheita atualizada!');
+    renderColheita();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// Helper compartilhado: atualizar talhões conforme fazenda escolhida (prefixo dos ids: pl-, ad-, col-, ecol-)
 window.atualizarTalhoesCampo = function(prefixo) {
   const faz = document.getElementById(`${prefixo}-fazenda`).value;
   const sel = document.getElementById(`${prefixo}-talhao`);
@@ -1985,6 +2238,142 @@ window.excluirRegistroCampo = async function(colecao, id, tipo) {
     renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
+
+// ══════════════ IMPORTAR / EXPORTAR PLANEJAMENTO (Excel) ══════════════
+const MODELOS_CADERNO = {
+  plantio: { colecao: 'insumos_campo_plantio', lista: () => plantios,
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Cultura','Safra','Cultivar','Ciclo (dias)','População','Espaçamento (cm)','Observação'],
+    linhaExemplo: ['2026-09-15','Rodeio','Rod 1','Soja','Soja 26/27','TMG 7062','115','280000','45','Exemplo'],
+    doExcel: (row) => {
+      const data = row['Data (AAAA-MM-DD)']||row['Data']||'';
+      const ciclo_dias = parseFloat(row['Ciclo (dias)'])||0;
+      return {
+        data, fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
+        cultura: row['Cultura']||'', safra: row['Safra']||'', cultivar: row['Cultivar']||'',
+        ciclo_dias, data_prevista_colheita: (data && ciclo_dias>0) ? somarDias(data, ciclo_dias) : '',
+        populacao: parseFloat(row['População'])||0, espacamento: parseFloat(row['Espaçamento (cm)'])||0,
+        obs: row['Observação']||'', status: 'planejado', criado_em: Timestamp.now()
+      };
+    },
+    obrigatorios: ['fazenda','talhao','cultura'],
+    paraExportar: (p) => ({
+      'Data': p.data||'', 'Fazenda': p.fazenda||'', 'Talhão': p.talhao||'', 'Cultura': p.cultura||'', 'Safra': p.safra||'',
+      'Cultivar': p.cultivar||'', 'Ciclo (dias)': p.ciclo_dias||0, 'Previsão Colheita': p.data_prevista_colheita||'',
+      'População': p.populacao||0, 'Espaçamento (cm)': p.espacamento||0,
+      'Status': p.status||'', 'Data Conclusão': p.data_conclusao||'', 'Observação': p.obs||''
+    })
+  },
+  adubacao: { colecao: 'insumos_campo_adubacao', lista: () => adubacoes,
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Defensivo/Corretivo/Adubação)','Produto','Dose','Unidade','Observação'],
+    linhaExemplo: ['2026-10-01','Rodeio','Rod 1','Soja 26/27','Defensivo','Glifosato','3','L','Exemplo'],
+    doExcel: (row) => ({
+      data: row['Data (AAAA-MM-DD)']||row['Data']||'', fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
+      safra: row['Safra']||'', categoria: row['Categoria (Defensivo/Corretivo/Adubação)']||row['Categoria']||'Defensivo',
+      produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
+      obs: row['Observação']||'', status: 'planejado', criado_em: Timestamp.now()
+    }),
+    obrigatorios: ['fazenda','talhao','produto'],
+    paraExportar: (a) => ({
+      'Data': a.data||'', 'Fazenda': a.fazenda||'', 'Talhão': a.talhao||'', 'Safra': a.safra||'', 'Categoria': a.categoria||'',
+      'Produto': a.produto||'', 'Dose': a.dose||0, 'Unidade': a.unidade||'',
+      'Regra de Data': a.modo_data==='plantio'?`${a.dias_apos||0} dias após o plantio`:a.modo_data==='aplicacao'?`${a.dias_apos||0} dias após outra aplicação`:'Data fixa',
+      'Status': a.status||'', 'Data Conclusão': a.data_conclusao||'', 'Observação': a.obs||''
+    })
+  },
+  colheita: { colecao: 'insumos_campo_colheita', lista: () => colheitas,
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Cultura','Safra','Observação'],
+    linhaExemplo: ['2027-02-10','Rodeio','Rod 1','Soja','Soja 26/27','Exemplo'],
+    doExcel: (row) => ({
+      data: row['Data (AAAA-MM-DD)']||row['Data']||'', fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
+      cultura: row['Cultura']||'', safra: row['Safra']||'', obs: row['Observação']||'',
+      status: 'planejado', criado_em: Timestamp.now()
+    }),
+    obrigatorios: ['fazenda','talhao'],
+    paraExportar: (c) => ({
+      'Data': c.data||'', 'Fazenda': c.fazenda||'', 'Talhão': c.talhao||'', 'Cultura': c.cultura||'', 'Safra': c.safra||'',
+      'Status': c.status||'', 'Data Conclusão': c.data_conclusao||'', 'Produtividade': c.produtividade||0,
+      'Unidade Produtividade': c.unidade_produtividade||'', 'Umidade (%)': c.umidade||0, 'PMS (g)': c.pms||0, 'Observação': c.obs||''
+    })
+  }
+};
+
+window.baixarModelo = function(tipo) {
+  const m = MODELOS_CADERNO[tipo];
+  try {
+    const ws = XLSX.utils.aoa_to_sheet([m.colunas, m.linhaExemplo]);
+    ws['!cols'] = m.colunas.map(c => ({ wch: Math.max(c.length+2, 16) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+    XLSX.writeFile(wb, `ACF_Modelo_${tipo}.xlsx`);
+  } catch(e) { toast('Erro ao gerar modelo: '+e.message,'erro'); }
+};
+
+window.importarPlanilha = function(input, tipo) {
+  const file = input.files[0];
+  if (!file) return;
+  const m = MODELOS_CADERNO[tipo];
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const linhas = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (linhas.length === 0) { toast('Planilha vazia.','erro'); input.value=''; return; }
+      let importados = 0, ignorados = 0;
+      const batch = writeBatch(db);
+      const novosLocais = [];
+      linhas.forEach(row => {
+        const reg = m.doExcel(row);
+        const faltando = m.obrigatorios.some(campo => !reg[campo]);
+        if (faltando) { ignorados++; return; }
+        const ref = doc(collection(db, m.colecao));
+        batch.set(ref, reg);
+        novosLocais.push({ id: ref.id, ...reg });
+        importados++;
+      });
+      if (importados === 0) { toast('Nenhuma linha válida encontrada — confira as colunas obrigatórias.','erro'); input.value=''; return; }
+      await batch.commit();
+      if (tipo==='plantio') plantios.unshift(...novosLocais);
+      if (tipo==='adubacao') adubacoes.unshift(...novosLocais);
+      if (tipo==='colheita') colheitas.unshift(...novosLocais);
+      toast(`${importados} registro(s) importado(s)${ignorados>0?`, ${ignorados} ignorado(s) por falta de dados obrigatórios`:''}.`);
+      renderSubabaCaderno();
+    } catch(e) { toast('Erro ao importar: '+e.message,'erro'); }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+window.exportarCaderno = function(tipo) {
+  const m = MODELOS_CADERNO[tipo];
+  const lista = m.lista();
+  if (lista.length === 0) { toast('Nada para exportar.','erro'); return; }
+  try {
+    const linhas = lista.map(m.paraExportar);
+    const ws = XLSX.utils.json_to_sheet(linhas);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, tipo.substring(0,31));
+    XLSX.writeFile(wb, `ACF_${tipo}_${hoje()}.xlsx`);
+    toast('Excel gerado!');
+  } catch(e) { toast('Erro ao exportar: '+e.message,'erro'); }
+};
+
+// Exporta os 3 módulos (planejamento + execução) num único arquivo com 3 abas
+window.exportarCadernoCompleto = function() {
+  try {
+    const wb = XLSX.utils.book_new();
+    ['plantio','adubacao','colheita'].forEach(tipo => {
+      const m = MODELOS_CADERNO[tipo];
+      const lista = m.lista();
+      const linhas = lista.length > 0 ? lista.map(m.paraExportar) : [{}];
+      const ws = XLSX.utils.json_to_sheet(linhas);
+      XLSX.utils.book_append_sheet(wb, ws, tipo);
+    });
+    XLSX.writeFile(wb, `ACF_Caderno_de_Campo_${hoje()}.xlsx`);
+    toast('Excel gerado com as 3 abas!');
+  } catch(e) { toast('Erro ao exportar: '+e.message,'erro'); }
+};
+
 
 // ══════════════ RELATÓRIOS ══════════════
 function renderRelatorios() {
