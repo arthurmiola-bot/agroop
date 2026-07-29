@@ -681,6 +681,7 @@ function Fuel(props){
   var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
   var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""}), f=_f[0], setF=_f[1];
   var _conf=useState(false), conf=_conf[0], setConf=_conf[1];
+  var _success=useState(null), success=_success[0], setSuccess=_success[1];
 
   function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
 
@@ -700,14 +701,62 @@ function Fuel(props){
   function submit(){
     if(submitting.current||!farm) return; // evita duplo clique
     submitting.current=true;
+    var op=null;
+    for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===Number(f.op)){op=data.operators[i];break;}}
+    var litros=Number(f.lts);
+    var novoEstoque=Math.max(0,farm.tankStock-litros);
+    // captura os detalhes para a tela de sucesso ANTES de limpar
+    var det={
+      fazenda:farm.name,
+      maquina:mc?mc.code+" - "+getMachineDesc(mc):"",
+      operador:op?op.name:"",
+      litros:litros,
+      medidor:fmtN(f.meter)+" "+mUnit(mt),
+      estoqueApos:novoEstoque
+    };
     // adiciona o abastecimento como documento individual (sem sobrescrever nada)
-    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:Number(f.lts),date:tsNow(),registeredBy:role});
+    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:litros,date:tsNow(),registeredBy:role});
     // atualiza apenas o estoque da fazenda especifica
-    updFarm(farm.id,{tankStock:Math.max(0,farm.tankStock-Number(f.lts))});
+    updFarm(farm.id,{tankStock:novoEstoque});
     setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""});
     setConf(false);
-    toast("Abastecimento registrado: "+f.lts+"L em "+farm.name);
+    setSuccess(det);
     setTimeout(function(){submitting.current=false;},1500);
+  }
+
+  if(success){
+    return (
+      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"linear-gradient(160deg,#16a34a,#15803d)",zIndex:200,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
+        <div className="fi" style={{textAlign:"center",width:"100%",maxWidth:440}}>
+          <div style={{width:120,height:120,borderRadius:"50%",background:"rgba(255,255,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px"}}>
+            <div style={{width:88,height:88,borderRadius:"50%",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:52,color:"#16a34a",fontWeight:800,lineHeight:1}}>✓</div>
+          </div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:32,color:"#fff",letterSpacing:1,marginBottom:6}}>ABASTECIMENTO<br/>CONFIRMADO!</div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:64,color:"#e6b800",lineHeight:1,margin:"14px 0"}}>{fmtN(success.litros)} L</div>
+          <div style={{background:"rgba(255,255,255,0.14)",borderRadius:14,padding:"18px 20px",marginTop:14,textAlign:"left"}}>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.2)"}}>
+              <span style={{color:"#d4f0a0",fontSize:15}}>Fazenda</span>
+              <strong style={{color:"#fff",fontSize:15}}>{success.fazenda}</strong>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.2)"}}>
+              <span style={{color:"#d4f0a0",fontSize:15}}>Maquina</span>
+              <strong style={{color:"#fff",fontSize:15,textAlign:"right",maxWidth:"60%"}}>{success.maquina}</strong>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.2)"}}>
+              <span style={{color:"#d4f0a0",fontSize:15}}>Operador</span>
+              <strong style={{color:"#fff",fontSize:15}}>{success.operador}</strong>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0"}}>
+              <span style={{color:"#d4f0a0",fontSize:15}}>Estoque restante</span>
+              <strong style={{color:"#fff",fontSize:15}}>{fmtN(success.estoqueApos)} L</strong>
+            </div>
+          </div>
+          <button onClick={function(){setSuccess(null);}} style={{marginTop:24,background:"#fff",border:"none",borderRadius:12,padding:"18px 24px",fontSize:19,fontFamily:"'Barlow Condensed'",fontWeight:800,color:"#15803d",letterSpacing:1,width:"100%",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)"}}>
+            NOVO ABASTECIMENTO
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
