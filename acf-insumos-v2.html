@@ -674,21 +674,35 @@ window.filtrarPedidos = function() {
   const el = document.getElementById('lista-pedidos');
   if (!el) return;
   if (lista.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum pedido encontrado</div></div>`; return; }
+
+  // Achata pedidos -> um item por linha, ordenado por fornecedor (agrupa visualmente)
+  const linhas = [];
+  lista.forEach(p => {
+    (p.itens||[]).forEach(it => {
+      const saldo = (it.quantidade||0) - (it.quantidade_recebida||0);
+      const statusItem = saldo<=0 ? 'entregue_total' : (it.quantidade_recebida||0)>0 ? 'parcial' : 'pendente';
+      linhas.push({ pedidoId: p.id, pedidoStatus: p.status, fornecedor: p.fornecedor, produto: it.produto,
+        unidade: it.unidade, volumeCompra: it.quantidade||0, volumeRecebido: it.quantidade_recebida||0, saldo, statusItem });
+    });
+  });
+  linhas.sort((a,b) => a.fornecedor.localeCompare(b.fornecedor) || a.produto.localeCompare(b.produto));
+
   el.innerHTML = `
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fornecedor</th><th>Itens</th><th>Total</th><th>Status</th><th>Ações</th></tr></thead>
+      <thead><tr><th>Fornecedor</th><th>Produto</th><th>Volume Compra</th><th>Volume Recebido</th><th>Saldo</th><th>Status</th><th>Ações</th></tr></thead>
       <tbody>
-        ${lista.map(p => `
+        ${linhas.map(l => `
           <tr>
-            <td>${p.data_pedido||fmtData(p.criado_em)}</td>
-            <td><strong>${p.fornecedor}</strong></td>
-            <td style="text-align:center">${(p.itens||[]).length}</td>
-            <td>R$ ${fmt(p.valor_total)}</td>
-            <td>${badgeStatus(p.status)}</td>
+            <td><strong>${l.fornecedor}</strong></td>
+            <td>${l.produto}</td>
+            <td>${fmt(l.volumeCompra)} ${l.unidade}</td>
+            <td>${fmt(l.volumeRecebido)} ${l.unidade}</td>
+            <td style="font-weight:700;color:${l.saldo>0?'var(--laranja)':'var(--verde)'}">${fmt(l.saldo)} ${l.unidade}</td>
+            <td>${badgeStatus(l.statusItem)}</td>
             <td style="white-space:nowrap">
-              <button class="btn btn-sm btn-secondary" onclick="verPedido('${p.id}')">Ver</button>
-              ${p.status !== 'entregue_total' && p.status !== 'cancelado' ?
-                `<button class="btn btn-sm btn-laranja" style="margin-left:6px" onclick="abrirBaixa('${p.id}')">Receber</button>` : ''}
+              <button class="btn btn-sm btn-secondary" onclick="verPedido('${l.pedidoId}')">Ver</button>
+              ${l.pedidoStatus !== 'entregue_total' && l.pedidoStatus !== 'cancelado' ?
+                `<button class="btn btn-sm btn-laranja" style="margin-left:6px" onclick="abrirBaixa('${l.pedidoId}')">Receber</button>` : ''}
             </td>
           </tr>`).join('')}
       </tbody>
@@ -721,18 +735,15 @@ window.importarPedidosExcel = function(input) {
       const linhas = XLSX.utils.sheet_to_json(ws, { defval: '' });
       if (linhas.length === 0) { toast('Planilha vazia.','erro'); input.value=''; return; }
 
-      let importados = 0, ignorados = 0;
-      const novosPedidos = [];
-      const novasContas = [];
-      let batch = writeBatch(db);
-      let contadorBatch = 0;
-
-      for (const row of linhas) {
+      // 1ª passada: ler e agrupar por fornecedor
+      const gruposPorFornecedor = {}; // fornecedor -> { itens:[...], vencimentos:[{produto,valor,vencimento}] }
+      let ignorados = 0;
+      linhas.forEach(row => {
         const fornecedor = (row['Fornecedor']||'').toString().trim();
         const produto = (row['Produto']||'').toString().trim();
         const volume = parseFloat(row['Volume'])||0;
         const unidade = (row['Unidade (L, Kg, Ton, Bag, sc)']||row['Unidade']||'').toString().trim();
-        if (!fornecedor || !produto || volume<=0 || !unidade) { ignorados++; continue; }
+        if (!fornecedor || !produto || volume<=0 || !unidade) { ignorados++; return; }
 
         const grupo = (row['Grupo']||'').toString().trim();
         const safra = (row['Safra']||'').toString().trim();
@@ -742,33 +753,50 @@ window.importarPedidosExcel = function(input) {
         if (!valorTotal && precoUnit) valorTotal = precoUnit*volume;
         const vencimento = (row['Vencimento (AAAA-MM-DD)']||row['Vencimento']||'').toString().trim();
 
-        const item = {
+        if (!gruposPorFornecedor[fornecedor]) gruposPorFornecedor[fornecedor] = { itens: [], vencimentos: [] };
+        gruposPorFornecedor[fornecedor].itens.push({
           produto, categoria: grupo, safra, quantidade: volume, quantidade_recebida: 0,
           unidade, preco_unit: precoUnit, total: valorTotal
-        };
+        });
+        if (vencimento) gruposPorFornecedor[fornecedor].vencimentos.push({ produto, valor: valorTotal, vencimento });
+      });
+
+      const fornecedoresImportados = Object.keys(gruposPorFornecedor);
+      if (fornecedoresImportados.length === 0) { toast('Nenhuma linha válida — confira Fornecedor, Produto, Volume e Unidade.','erro'); input.value=''; return; }
+
+      // 2ª passada: gravar 1 pedido por fornecedor (com todos os itens) + 1 conta por item com vencimento
+      const novosPedidos = [];
+      const novasContas = [];
+      let batch = writeBatch(db);
+      let contadorBatch = 0;
+      let itensImportados = 0;
+
+      for (const fornecedor of fornecedoresImportados) {
+        const grupo = gruposPorFornecedor[fornecedor];
+        const valor_total = grupo.itens.reduce((s,it) => s+it.total, 0);
         const pedido = {
           fornecedor, fazenda: '', data_pedido: hoje(), previsao_entrega: '', obs: '',
-          itens: [item], valor_total: valorTotal, status: 'pendente',
+          itens: grupo.itens, valor_total, status: 'pendente',
           criado_em: Timestamp.now(), criado_por: usuarioAtual.uid
         };
         const pRef = doc(collection(db,'insumos_pedidos'));
         batch.set(pRef, pedido);
         novosPedidos.push({ id: pRef.id, ...pedido });
         contadorBatch++;
+        itensImportados += grupo.itens.length;
 
-        if (vencimento) {
+        grupo.vencimentos.forEach(v => {
           const conta = {
-            fornecedor, descricao: `${produto} (importado)`, valor_total: valorTotal,
-            vencimento: Timestamp.fromDate(new Date(vencimento+'T12:00:00')),
+            fornecedor, descricao: `${v.produto} (importado)`, valor_total: v.valor,
+            vencimento: Timestamp.fromDate(new Date(v.vencimento+'T12:00:00')),
             pedido_id: pRef.id, pago: false, criado_em: Timestamp.now()
           };
           const cRef = doc(collection(db,'insumos_contas'));
           batch.set(cRef, conta);
           novasContas.push({ id: cRef.id, ...conta });
           contadorBatch++;
-        }
+        });
 
-        importados++;
         // Firestore limita 500 operações por batch — fecha e abre um novo a cada 400
         if (contadorBatch >= 400) {
           await batch.commit();
@@ -777,14 +805,13 @@ window.importarPedidosExcel = function(input) {
         }
       }
 
-      if (importados === 0) { toast('Nenhuma linha válida — confira Fornecedor, Produto, Volume e Unidade.','erro'); input.value=''; return; }
       if (contadorBatch > 0) await batch.commit();
 
       pedidos.unshift(...novosPedidos);
       contas.push(...novasContas);
       contas.sort((a,b) => (a.vencimento?.toDate?a.vencimento.toDate():new Date(a.vencimento)) - (b.vencimento?.toDate?b.vencimento.toDate():new Date(b.vencimento)));
 
-      toast(`${importados} pedido(s) importado(s) como Pendente${novasContas.length>0?`, ${novasContas.length} conta(s) a pagar gerada(s)`:''}${ignorados>0?`. ${ignorados} linha(s) ignorada(s)`:''}.`);
+      toast(`${fornecedoresImportados.length} pedido(s) criado(s) (${itensImportados} ite${itensImportados>1?'ns':'m'}) como Pendente${novasContas.length>0?`, ${novasContas.length} conta(s) a pagar gerada(s)`:''}${ignorados>0?`. ${ignorados} linha(s) ignorada(s)`:''}.`);
       renderPedidos();
     } catch(e) { toast('Erro ao importar: '+e.message,'erro'); }
     input.value = '';
@@ -936,6 +963,7 @@ window.salvarContaAutomatica = async function(pedidoId, fornecedor, valor) {
 window.verPedido = function(id) {
   const p = pedidos.find(x => x.id === id);
   if (!p) return;
+  carregarCompendio();
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-ver-pedido">
       <div class="modal">
@@ -948,22 +976,164 @@ window.verPedido = function(id) {
           ${p.obs ? `<div style="grid-column:1/-1"><strong>Obs:</strong> ${p.obs}</div>` : ''}
         </div>
         <div class="itens-pedido">
-          <div class="baixa-item-row header-row"><span>Produto</span><span>Pedido</span><span>Recebido</span><span>Pendente</span></div>
-          ${(p.itens||[]).map(it => {
+          <div class="baixa-item-row header-row" style="grid-template-columns:2fr 1fr 1fr 1fr auto"><span>Produto</span><span>Pedido</span><span>Recebido</span><span>Pendente</span><span></span></div>
+          ${(p.itens||[]).map((it, idx) => {
             const pend = (it.quantidade||0) - (it.quantidade_recebida||0);
             const meta = [it.categoria, it.safra].filter(Boolean).join(' · ');
-            return `<div class="baixa-item-row">
+            return `<div class="baixa-item-row" style="grid-template-columns:2fr 1fr 1fr 1fr auto">
               <span>${it.produto}${meta?`<div style="font-size:11px;color:var(--cinza)">${meta}</div>`:''}</span><span>${fmt(it.quantidade)} ${it.unidade}</span>
               <span style="color:var(--verde);font-weight:600">${fmt(it.quantidade_recebida||0)}</span>
-              <span style="color:${pend>0?'var(--laranja)':'var(--cinza)'};font-weight:600">${fmt(pend)}</span></div>`;
+              <span style="color:${pend>0?'var(--laranja)':'var(--cinza)'};font-weight:600">${fmt(pend)}</span>
+              <span style="display:flex;gap:4px">
+                <button class="btn btn-sm btn-secondary" onclick="abrirEditarItemPedido('${id}',${idx})">✏️</button>
+                <button class="btn btn-sm btn-secondary" onclick="removerItemPedido('${id}',${idx})">✕</button>
+              </span></div>`;
           }).join('')}
         </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="abrirAdicionarItemPedido('${id}')">+ Adicionar Item</button>
         <div style="text-align:right;margin-top:12px;font-family:'Syne',sans-serif;font-weight:700;font-size:16px">Total: R$ ${fmt(p.valor_total)}</div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-ver-pedido')">Fechar</button>
         </div>
       </div>
     </div>`);
+};
+
+// Recalcula valor_total e status de um pedido a partir dos itens, grava e atualiza a lista local
+async function salvarItensPedido(pedidoId, novosItens) {
+  const valor_total = novosItens.reduce((s,x) => s+(x.total||0), 0);
+  const todosEntregues = novosItens.length>0 && novosItens.every(x => (x.quantidade_recebida||0) >= (x.quantidade||0));
+  const algumEntregue = novosItens.some(x => (x.quantidade_recebida||0) > 0);
+  const status = todosEntregues ? 'entregue_total' : algumEntregue ? 'parcial' : 'pendente';
+  await updateDoc(doc(db,'insumos_pedidos',pedidoId), { itens: novosItens, valor_total, status });
+  const p = pedidos.find(x=>x.id===pedidoId);
+  if (p) { p.itens = novosItens; p.valor_total = valor_total; p.status = status; }
+}
+
+window.abrirEditarItemPedido = function(pedidoId, idx) {
+  const p = pedidos.find(x=>x.id===pedidoId);
+  if (!p) return;
+  const it = p.itens[idx];
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-editar-item-pedido">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-titulo">✏️ Editar Item</div>
+        <div class="form-group"><label>Produto *</label><input type="text" id="eip-produto" value="${it.produto}" list="compendio-datalist-4"><datalist id="compendio-datalist-4"></datalist></div>
+        <div class="form-row">
+          <div class="form-group"><label>Categoria/Grupo</label><input type="text" id="eip-categoria" value="${it.categoria||''}"></div>
+          <div class="form-group"><label>Safra</label><input type="text" id="eip-safra" value="${it.safra||''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantidade (Pedido) *</label><input type="number" id="eip-qtd" value="${it.quantidade}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="eip-unidade">${UNIDADES.map(u=>`<option ${u===it.unidade?'selected':''}>${u}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Preço Unitário (R$)</label><input type="number" id="eip-preco" value="${it.preco_unit||0}" min="0" step="0.01"></div>
+        ${(it.quantidade_recebida||0)>0 ? `<p style="font-size:12px;color:var(--laranja)">⚠️ ${fmt(it.quantidade_recebida)} ${it.unidade} já foram recebidos. A quantidade não pode ficar menor que isso.</p>` : ''}
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-editar-item-pedido')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarEdicaoItemPedido('${pedidoId}',${idx})">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+  carregarCompendio().then(lista => {
+    const dl = document.getElementById('compendio-datalist-4');
+    if (dl) dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+  });
+};
+
+window.salvarEdicaoItemPedido = async function(pedidoId, idx) {
+  const p = pedidos.find(x=>x.id===pedidoId);
+  if (!p) return;
+  const produto = document.getElementById('eip-produto').value.trim();
+  const quantidade = parseFloat(document.getElementById('eip-qtd').value)||0;
+  if (!produto) { toast('Informe o produto.','erro'); return; }
+  const it = p.itens[idx];
+  if (quantidade < (it.quantidade_recebida||0)) { toast(`A quantidade não pode ser menor que o já recebido (${fmt(it.quantidade_recebida)} ${it.unidade}).`,'erro'); return; }
+  const preco_unit = parseFloat(document.getElementById('eip-preco').value)||0;
+  const novosItens = [...p.itens];
+  novosItens[idx] = {
+    ...it, produto, categoria: document.getElementById('eip-categoria').value,
+    safra: document.getElementById('eip-safra').value, quantidade,
+    unidade: document.getElementById('eip-unidade').value, preco_unit,
+    total: quantidade * preco_unit
+  };
+  try {
+    await salvarItensPedido(pedidoId, novosItens);
+    toast('Item atualizado!');
+    fecharModal('modal-editar-item-pedido');
+    fecharModal('modal-ver-pedido');
+    verPedido(pedidoId);
+    filtrarPedidos();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.removerItemPedido = async function(pedidoId, idx) {
+  const p = pedidos.find(x=>x.id===pedidoId);
+  if (!p) return;
+  const it = p.itens[idx];
+  if (p.itens.length <= 1) { toast('Um pedido precisa ter ao menos um item. Exclua o pedido inteiro na lista se quiser remover tudo.','erro'); return; }
+  const aviso = (it.quantidade_recebida||0) > 0
+    ? `Este item já teve ${fmt(it.quantidade_recebida)} ${it.unidade} recebido(s) (esse histórico de estoque não será apagado). Remover a pendência mesmo assim?`
+    : `Remover "${it.produto}" deste pedido?`;
+  if (!confirm(aviso)) return;
+  const novosItens = p.itens.filter((_,i) => i!==idx);
+  try {
+    await salvarItensPedido(pedidoId, novosItens);
+    toast('Item removido.');
+    fecharModal('modal-ver-pedido');
+    verPedido(pedidoId);
+    filtrarPedidos();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.abrirAdicionarItemPedido = function(pedidoId) {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-add-item-pedido">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-titulo">+ Adicionar Item ao Pedido</div>
+        <div class="form-group"><label>Produto *</label><input type="text" id="aip-produto" placeholder="Digite para buscar..." list="compendio-datalist-5"><datalist id="compendio-datalist-5"></datalist></div>
+        <div class="form-row">
+          <div class="form-group"><label>Categoria/Grupo</label><input type="text" id="aip-categoria"></div>
+          <div class="form-group"><label>Safra</label><input type="text" id="aip-safra"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantidade *</label><input type="number" id="aip-qtd" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="aip-unidade">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Preço Unitário (R$)</label><input type="number" id="aip-preco" min="0" step="0.01"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-add-item-pedido')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarNovoItemPedido('${pedidoId}')">Adicionar</button>
+        </div>
+      </div>
+    </div>`);
+  carregarCompendio().then(lista => {
+    const dl = document.getElementById('compendio-datalist-5');
+    if (dl) dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+  });
+};
+
+window.salvarNovoItemPedido = async function(pedidoId) {
+  const p = pedidos.find(x=>x.id===pedidoId);
+  if (!p) return;
+  const produto = document.getElementById('aip-produto').value.trim();
+  const quantidade = parseFloat(document.getElementById('aip-qtd').value)||0;
+  if (!produto || quantidade<=0) { toast('Preencha produto e quantidade.','erro'); return; }
+  const preco_unit = parseFloat(document.getElementById('aip-preco').value)||0;
+  const novoItem = {
+    produto, categoria: document.getElementById('aip-categoria').value, safra: document.getElementById('aip-safra').value,
+    quantidade, quantidade_recebida: 0, unidade: document.getElementById('aip-unidade').value,
+    preco_unit, total: quantidade*preco_unit
+  };
+  const novosItens = [...p.itens, novoItem];
+  try {
+    await salvarItensPedido(pedidoId, novosItens);
+    toast('Item adicionado!');
+    fecharModal('modal-add-item-pedido');
+    fecharModal('modal-ver-pedido');
+    verPedido(pedidoId);
+    filtrarPedidos();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
 // ── BAIXA PARCIAL + FOTO NF ──
@@ -1066,20 +1236,123 @@ window.filtrarEstoque = function() {
   if (lista.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum produto em estoque</div></div>`; return; }
   el.innerHTML = `
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Produto</th><th>Quantidade</th><th>Un</th><th>Custo Médio</th><th>Valor Total</th><th>Última Entrada</th></tr></thead>
+      <thead><tr><th>Produto</th><th>Quantidade</th><th>Un</th><th>Custo Médio</th><th>Valor Total</th><th>Última Entrada</th><th></th></tr></thead>
       <tbody>
         ${lista.map(e => `<tr>
           <td><strong>${e.produto}</strong></td>
           <td style="font-size:16px;font-weight:700;color:${e.quantidade>0?'var(--verde)':'var(--cinza)'}">${fmt(e.quantidade)}</td>
           <td>${e.unidade}</td><td>R$ ${fmt(e.custo_medio||0)}</td>
-          <td>R$ ${fmt((e.quantidade||0)*(e.custo_medio||0))}</td><td>${e.ultima_entrada||'—'}</td></tr>`).join('')}
+          <td>R$ ${fmt((e.quantidade||0)*(e.custo_medio||0))}</td><td>${e.ultima_entrada||'—'}</td>
+          <td><button class="btn btn-sm btn-secondary" onclick="abrirLotesProduto('${e.produto.replace(/'/g,"\\'")}')">Editar lotes</button></td></tr>`).join('')}
       </tbody>
       <tfoot><tr style="background:var(--creme);font-weight:700">
         <td colspan="4" style="padding:12px 16px">Total em Estoque</td>
-        <td style="padding:12px 16px">R$ ${fmt(lista.reduce((s,e)=>s+(e.quantidade||0)*(e.custo_medio||0),0))}</td><td></td>
+        <td style="padding:12px 16px">R$ ${fmt(lista.reduce((s,e)=>s+(e.quantidade||0)*(e.custo_medio||0),0))}</td><td colspan="2"></td>
       </tr></tfoot>
     </table></div>
     <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarEstoque()">📥 Exportar Excel</button></div>`;
+};
+
+// Mostra os lotes de entrada (compras) que formam o saldo de um produto — cada um editável
+window.abrirLotesProduto = function(produtoNome) {
+  const lotes = entradasRaw.filter(e => normalizar(e.prodNome||'') === normalizar(produtoNome))
+    .sort((a,b) => {
+      const da = a.dt?.toDate ? a.dt.toDate() : new Date(a.dt||0);
+      const db2 = b.dt?.toDate ? b.dt.toDate() : new Date(b.dt||0);
+      return db2 - da;
+    });
+  const retiradasProduto = retiradas.filter(r => normalizar(r.produto)===normalizar(produtoNome)).reduce((s,r)=>s+(r.quantidade||0),0);
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-lotes">
+      <div class="modal" style="max-width:640px">
+        <div class="modal-titulo">📦 Lotes de Entrada — ${produtoNome}</div>
+        <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">Cada linha é uma compra/entrada. Editar aqui recalcula o saldo e o custo médio. Já foram retirados <strong>${fmt(retiradasProduto)}</strong> deste produto (retiradas ficam na aba 🚜 Retiradas).</p>
+        <div class="tabela-wrap"><table>
+          <thead><tr><th>Data</th><th>Fornecedor</th><th>Qtd</th><th>Un</th><th>Preço</th><th></th></tr></thead>
+          <tbody>
+            ${lotes.length===0?'<tr><td colspan="6" class="tabela-vazia">Nenhum lote de entrada encontrado</td></tr>':
+            lotes.map(l => `<tr>
+              <td>${l.dt?.toDate ? l.dt.toDate().toLocaleDateString('pt-BR') : '—'}</td>
+              <td>${l.forn||'—'}</td>
+              <td style="font-weight:600">${fmt(l.qtd)}</td>
+              <td>${l.unid||''}</td>
+              <td>R$ ${fmt(l.preco||0)}</td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-secondary" onclick="abrirEditarLote('${l.id}')">✏️</button>
+                <button class="btn btn-sm btn-secondary" onclick="removerLote('${l.id}','${produtoNome.replace(/'/g,"\\'")}')">✕</button>
+              </td></tr>`).join('')}
+          </tbody>
+        </table></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-lotes')">Fechar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.abrirEditarLote = function(loteId) {
+  const l = entradasRaw.find(e => e.id === loteId);
+  if (!l) return;
+  const dataStr = l.dt?.toDate ? l.dt.toDate().toISOString().split('T')[0] : hoje();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-editar-lote">
+      <div class="modal" style="max-width:460px">
+        <div class="modal-titulo">✏️ Editar Lote de Entrada</div>
+        <div class="form-group"><label>Produto *</label><input type="text" id="el-produto" value="${(l.prodNome||'').replace(/"/g,'&quot;')}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantidade *</label><input type="number" id="el-qtd" value="${l.qtd||0}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><select id="el-unid">${UNIDADES.map(u=>`<option ${u===l.unid?'selected':''}>${u}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Preço Unitário (R$)</label><input type="number" id="el-preco" value="${l.preco||0}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Data</label><input type="date" id="el-data" value="${dataStr}"></div>
+        </div>
+        <div class="form-group"><label>Fornecedor</label><input type="text" id="el-forn" value="${(l.forn||'').replace(/"/g,'&quot;')}"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-editar-lote')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarEdicaoLote('${loteId}')">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarEdicaoLote = async function(loteId) {
+  const l = entradasRaw.find(e => e.id === loteId);
+  if (!l) return;
+  const prodNome = document.getElementById('el-produto').value.trim();
+  const qtd = parseFloat(document.getElementById('el-qtd').value)||0;
+  if (!prodNome || qtd<=0) { toast('Preencha produto e quantidade.','erro'); return; }
+  const upd = {
+    prodNome, qtd, unid: document.getElementById('el-unid').value,
+    preco: parseFloat(document.getElementById('el-preco').value)||0,
+    dt: Timestamp.fromDate(new Date(document.getElementById('el-data').value+'T12:00:00')),
+    forn: document.getElementById('el-forn').value
+  };
+  try {
+    await updateDoc(doc(db,'estoque_ins_entradas',loteId), upd);
+    Object.assign(l, upd);
+    recalcularEstoque();
+    fecharModal('modal-editar-lote');
+    fecharModal('modal-lotes');
+    abrirLotesProduto(prodNome);
+    filtrarEstoque();
+    toast('Lote atualizado! Saldo e custo médio recalculados.');
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.removerLote = async function(loteId, produtoNome) {
+  if (!confirm('Excluir este lote de entrada? O saldo do produto vai diminuir e o custo médio será recalculado.')) return;
+  try {
+    await deleteDoc(doc(db,'estoque_ins_entradas',loteId));
+    const i = entradasRaw.findIndex(e => e.id === loteId);
+    if (i>=0) entradasRaw.splice(i,1);
+    recalcularEstoque();
+    fecharModal('modal-lotes');
+    const aindaTem = entradasRaw.some(e => normalizar(e.prodNome||'')===normalizar(produtoNome));
+    if (aindaTem) abrirLotesProduto(produtoNome);
+    filtrarEstoque();
+    toast('Lote excluído. Estoque recalculado.');
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
 window.exportarEstoque = function() {
