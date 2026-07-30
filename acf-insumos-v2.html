@@ -116,9 +116,9 @@
 
   .tabela-wrap { background: var(--branco); border-radius: var(--radius); box-shadow: var(--sombra); overflow: auto; }
   .tabela-wrap table { width: 100%; border-collapse: collapse; }
-  .tabela-wrap th { background: var(--verde); color: white; padding: 12px 16px; text-align: left; font-family: 'Syne', sans-serif;
-    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
-  .tabela-wrap td { padding: 12px 16px; border-bottom: 1px solid var(--creme-escuro); font-size: 14px; vertical-align: middle; }
+  .tabela-wrap th { background: var(--verde); color: white; padding: 16px 10px; text-align: left; font-family: 'Syne', sans-serif;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; line-height: 1.3; }
+  .tabela-wrap td { padding: 10px 10px; border-bottom: 1px solid var(--creme-escuro); font-size: 13px; vertical-align: middle; }
   .tabela-wrap tr:last-child td { border-bottom: none; }
   .tabela-wrap tbody tr:hover td { background: var(--creme); }
   .tabela-vazia { text-align: center; padding: 40px; color: var(--cinza); font-style: italic; }
@@ -420,7 +420,6 @@
 
   <div class="nav" id="nav-gestor">
     <button class="nav-btn ativo" onclick="mostrarAba('dashboard')" data-aba="dashboard">📊 Dashboard</button>
-    <button class="nav-btn" onclick="mostrarAba('cobertura')" data-aba="cobertura">🔮 Previsão</button>
     <button class="nav-btn" onclick="mostrarAba('caderno')" data-aba="caderno">📓 Caderno de Campo</button>
     <button class="nav-btn" onclick="mostrarAba('pedidos')" data-aba="pedidos">📋 Pedidos</button>
     <button class="nav-btn" onclick="mostrarAba('estoque')" data-aba="estoque">📦 Estoque</button>
@@ -1036,7 +1035,6 @@ window.mostrarAba = function(aba) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('ativo', b.dataset.aba === aba));
   switch(aba) {
     case 'dashboard': renderDashboard(); break;
-    case 'cobertura': renderCobertura(); break;
     case 'caderno': renderCaderno(); break;
     case 'pedidos': renderPedidos(); break;
     case 'estoque': renderEstoque(); break;
@@ -1049,69 +1047,94 @@ window.mostrarAba = function(aba) {
 
 // ══════════════ DASHBOARD ══════════════
 function renderDashboard() {
-  const totalEstoqueValor = estoque.reduce((s,e) => s + (e.quantidade||0)*(e.custo_medio||0), 0);
-  const pedidosAbertos = pedidos.filter(p => p.status !== 'entregue_total' && p.status !== 'cancelado').length;
-  const contasVencer7 = contas.filter(c => !c.pago && diasAte(c.vencimento) <= 7 && diasAte(c.vencimento) >= 0).length;
-  const contasVencidas = contas.filter(c => !c.pago && diasAte(c.vencimento) < 0).length;
-  const totalContasPendentes = contas.filter(c => !c.pago).reduce((s,c) => s + (c.valor_total||0), 0);
-  const d30 = new Date(); d30.setDate(d30.getDate()-30);
-  const custoRetiradas30 = retiradas.filter(r => {
-    const d = r.data?.toDate ? r.data.toDate() : new Date(r.data);
-    return d >= d30;
-  }).reduce((s,r) => s + (r.custo_total||0), 0);
+  const hojeStr = hoje();
+  // Junta todas as operações do caderno num formato comum
+  const ops = [];
+  plantios.forEach(p => ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${p.cultivar?` (${p.cultivar})`:''}` }));
+  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc:`${a.produto||'—'}${a.dose?` — ${fmt(a.dose)} ${a.unidade||''}/ha`:''}` }));
+  colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
+
+  // Contadores por status
+  const nPlanejadas = ops.filter(o => o.status==='planejado' || o.status==='enviado_operador').length;
+  const nExecucao = ops.filter(o => o.status==='execucao').length;
+  const nConcluidas = ops.filter(o => o.status==='concluido').length;
+
+  // Atrasadas: data planejada já passou E não concluída
+  const atrasadas = ops.filter(o => o.status!=='concluido' && o.data && o.data < hojeStr)
+    .sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+
+  // Próximas 5 planejadas (data >= hoje, não concluídas)
+  const proximas = ops.filter(o => o.status!=='concluido' && o.data && o.data >= hojeStr)
+    .sort((a,b)=>(a.data||'').localeCompare(b.data||''))
+    .slice(0,5);
+
+  const badgeOp = (s) => s==='execucao'?'<span class="badge badge-laranja">Em execução</span>':s==='enviado_operador'?'<span class="badge badge-laranja">Liberada</span>':'<span class="badge badge-azul">Planejada</span>';
 
   document.getElementById('main-content').innerHTML = `
     <div class="cards-grid">
-      <div class="card-resumo">
-        <div class="card-resumo-valor">R$ ${fmt(totalEstoqueValor)}</div>
-        <div class="card-resumo-label">📦 Valor em Estoque</div>
-      </div>
-      <div class="card-resumo alerta">
-        <div class="card-resumo-valor">${pedidosAbertos}</div>
-        <div class="card-resumo-label">📋 Pedidos em Aberto</div>
-      </div>
-      <div class="card-resumo ${contasVencidas > 0 ? 'perigo' : contasVencer7 > 0 ? 'alerta' : ''}">
-        <div class="card-resumo-valor">R$ ${fmt(totalContasPendentes)}</div>
-        <div class="card-resumo-label">💰 Contas a Pagar${contasVencidas>0?` (${contasVencidas} vencida${contasVencidas>1?'s':''})`:contasVencer7>0?` (${contasVencer7} em 7d)`:''}</div>
-      </div>
       <div class="card-resumo info">
-        <div class="card-resumo-valor">R$ ${fmt(custoRetiradas30)}</div>
-        <div class="card-resumo-label">🚜 Custo Retiradas (30d)</div>
+        <div class="card-resumo-valor">${nPlanejadas}</div>
+        <div class="card-resumo-label">📋 Operações Planejadas</div>
+      </div>
+      <div class="card-resumo ${nExecucao>0?'alerta':''}">
+        <div class="card-resumo-valor">${nExecucao}</div>
+        <div class="card-resumo-label">🚧 Em Execução</div>
+      </div>
+      <div class="card-resumo">
+        <div class="card-resumo-valor">${nConcluidas}</div>
+        <div class="card-resumo-label">✅ Executadas</div>
+      </div>
+      <div class="card-resumo ${atrasadas.length>0?'perigo':''}">
+        <div class="card-resumo-valor">${atrasadas.length}</div>
+        <div class="card-resumo-label">⚠️ Atrasadas</div>
       </div>
     </div>
 
-    ${contasVencidas > 0 || contasVencer7 > 0 ? `
-    <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius);padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px">
-      <span style="font-size:20px">⚠️</span>
-      <div>${contasVencidas>0?`<strong>${contasVencidas} conta(s) vencida(s)!</strong> `:''}${contasVencer7>0?`${contasVencer7} conta(s) vencem nos próximos 7 dias.`:''}
-      <a href="#" onclick="mostrarAba('contas');return false" style="color:var(--verde);font-weight:600;margin-left:8px">Ver contas →</a></div>
-    </div>` : ''}
-
-    <div style="background:linear-gradient(135deg,#1a3a2a,#2d6a4f);border-radius:var(--radius);padding:20px 24px;margin-bottom:24px;color:white;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-      <div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🔮 Previsão de Cobertura de Estoque</div>
-        <div style="font-size:13px;opacity:0.85;margin-top:4px">Cruze os planejamentos de aplicação com seu estoque e pedidos</div>
-      </div>
-      <button class="btn" style="background:white;color:var(--verde);font-weight:600" onclick="mostrarAba('cobertura')">Ver Previsão →</button>
-    </div>
+    ${atrasadas.length > 0 ? `
+    <div class="tabela-wrap" style="margin-bottom:24px">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro);color:var(--vermelho)">⚠️ Operações Atrasadas (${atrasadas.length})</div>
+      <table>
+        <thead><tr><th>Data Planejada</th><th>Operação</th><th>Fazenda</th><th>Talhão</th><th>Descrição</th><th>Status</th></tr></thead>
+        <tbody>
+          ${atrasadas.map(o => `<tr>
+            <td style="color:var(--vermelho);font-weight:600">${fmtDataBR(o.data)}</td>
+            <td>${o.icone} ${o.tipo}</td>
+            <td>${o.fazenda||'—'}</td>
+            <td>${o.talhao||'—'}</td>
+            <td>${o.desc}</td>
+            <td>${badgeOp(o.status)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `
+    <div style="background:#eaf3ee;border:1px solid #b7dcc6;border-radius:var(--radius);padding:14px 18px;margin-bottom:24px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">✅</span>
+      <div style="color:#2f7a55;font-weight:600">Nenhuma operação atrasada. Tudo em dia!</div>
+    </div>`}
 
     <div class="tabela-wrap">
-      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">🚜 Últimas Retiradas</div>
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">📅 Próximas 5 Operações Planejadas</div>
       <table>
-        <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Fazenda / Talhão</th><th>Safra</th><th>Custo</th></tr></thead>
+        <thead><tr><th>Data Planejada</th><th>Operação</th><th>Fazenda</th><th>Talhão</th><th>Descrição</th><th>Status</th></tr></thead>
         <tbody>
-          ${retiradas.slice(0,6).map(r => `
-            <tr><td>${fmtData(r.data)}</td><td>${r.produto}</td><td>${fmt(r.quantidade)} ${r.unidade}</td>
-            <td>${r.fazenda}${r.talhao?' / '+r.talhao:''}</td><td>${r.safra||'—'}</td><td>R$ ${fmt(r.custo_total)}</td></tr>
-          `).join('') || '<tr><td colspan="6" class="tabela-vazia">Nenhuma retirada registrada</td></tr>'}
+          ${proximas.length > 0 ? proximas.map(o => `<tr>
+            <td style="font-weight:600">${fmtDataBR(o.data)}</td>
+            <td>${o.icone} ${o.tipo}</td>
+            <td>${o.fazenda||'—'}</td>
+            <td>${o.talhao||'—'}</td>
+            <td>${o.desc}</td>
+            <td>${badgeOp(o.status)}</td>
+          </tr>`).join('') : '<tr><td colspan="6" class="tabela-vazia">Nenhuma operação planejada para o futuro</td></tr>'}
         </tbody>
       </table>
     </div>`;
 }
 
 // ══════════════ PREVISÃO DE COBERTURA ══════════════
+window.renderCobertura = renderCobertura;
 async function renderCobertura() {
-  document.getElementById('main-content').innerHTML = `<div class="loading"><div class="spinner"></div> Cruzando planejamento e estoque...</div>`;
+  const alvo = () => document.getElementById('estoque-conteudo') || document.getElementById('main-content');
+  alvo().innerHTML = `<div class="loading"><div class="spinner"></div> Cruzando planejamento e estoque...</div>`;
 
   // Aplicações planejadas = todas que ainda não foram concluídas (planejado, liberado, em execução)
   const planejadasBrutas = adubacoes.filter(a => a.status !== 'concluido');
@@ -1170,10 +1193,10 @@ async function renderCobertura() {
   const faltando = rows.filter(r => r.saldo < 0).length;
   const semArea = rows.filter(r => r.aplicacoesSemArea > 0).length;
 
-  document.getElementById('main-content').innerHTML = `
+  alvo().innerHTML = `
     <div class="sec-header">
       <div class="sec-titulo">🔮 Previsão de Cobertura de Estoque</div>
-      <button class="btn btn-secondary btn-sm" onclick="mostrarAba('cobertura')">↻ Atualizar</button>
+      <button class="btn btn-secondary btn-sm" onclick="renderCobertura()">↻ Atualizar</button>
     </div>
     <p style="font-size:13px;color:var(--cinza);margin-bottom:16px">
       Baseado em <strong>${planejadas.length}</strong> aplicações planejadas (não concluídas),
@@ -1837,10 +1860,27 @@ window.confirmarBaixa = async function(id) {
 };
 
 // ══════════════ ESTOQUE ══════════════
+let estoqueSubaba = 'estoque';
+
 function renderEstoque() {
   document.getElementById('main-content').innerHTML = `
+    <div class="sec-titulo" style="margin-bottom:16px">📦 Estoque</div>
+    <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
+      <button class="nav-btn ${estoqueSubaba==='estoque'?'ativo':''}" onclick="mudarSubabaEstoque('estoque')">📦 Estoque Atual</button>
+      <button class="nav-btn ${estoqueSubaba==='previsao'?'ativo':''}" onclick="mudarSubabaEstoque('previsao')">🔮 Previsão de Cobertura</button>
+    </div>
+    <div id="estoque-conteudo"></div>`;
+  renderSubabaEstoque();
+}
+
+window.mudarSubabaEstoque = function(sub) { estoqueSubaba = sub; renderEstoque(); };
+
+function renderSubabaEstoque() {
+  if (estoqueSubaba === 'previsao') { renderCobertura(); return; }
+  const el = document.getElementById('estoque-conteudo');
+  el.innerHTML = `
     <div class="sec-header">
-      <div class="sec-titulo">📦 Estoque de Insumos</div>
+      <div style="font-size:14px;color:var(--cinza)">Estoque de insumos</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-secondary" onclick="abrirEntradaManual()">+ Entrada Manual</button>
         <button class="btn btn-primary" onclick="abrirModalRetirada()">− Retirada</button>
