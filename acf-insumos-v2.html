@@ -212,6 +212,91 @@
     .cob-row span:nth-child(3), .cob-row span:nth-child(4) { display: none; }
     .cob-row.header span:nth-child(3), .cob-row.header span:nth-child(4) { display: none; }
   }
+
+  /* ═══════ MODO APLICAÇÕES — visual clean ═══════ */
+  :root {
+    --aplic-fundo: #f4f6f3;
+    --aplic-card: #ffffff;
+    --aplic-borda: #e6ebe4;
+    --aplic-texto: #1f2a24;
+    --aplic-texto2: #5b6b60;
+    --aplic-texto3: #9aa89f;
+    --aplic-verde: #2f7a55;
+    --aplic-verde-suave: #eaf3ee;
+    --aplic-ambar: #b9772a;
+    --aplic-ambar-suave: #fbf1e3;
+    --aplic-azul: #3a6b9c;
+    --aplic-azul-suave: #eef3f8;
+  }
+  .aplic-card {
+    background: var(--aplic-card);
+    border: 1px solid var(--aplic-borda);
+    border-radius: 14px;
+    overflow: hidden;
+    transition: box-shadow .18s ease, border-color .18s ease;
+  }
+  .aplic-card:hover { box-shadow: 0 4px 16px rgba(31,42,36,.07); }
+  .aplic-card.execucao { border-left: 4px solid var(--aplic-ambar); }
+  .aplic-card.concluido { border-left: 4px solid var(--aplic-verde); }
+  .aplic-card.planejado, .aplic-card.enviado_operador { border-left: 4px solid var(--aplic-azul); }
+  .aplic-card-head {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 16px 18px; cursor: pointer; user-select: none;
+  }
+  .aplic-card-data {
+    font-family: 'DM Mono', ui-monospace, monospace;
+    font-size: 12px; color: var(--aplic-texto3);
+    letter-spacing: .02em; margin-bottom: 4px;
+  }
+  .aplic-card-local { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .aplic-card-fazenda { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 16px; color: var(--aplic-texto); }
+  .aplic-card-talhao {
+    background: var(--aplic-verde-suave); color: var(--aplic-verde);
+    font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px;
+  }
+  .aplic-card-resumo { font-size: 13px; color: var(--aplic-texto2); margin-top: 6px; }
+  .aplic-card-seta { color: var(--aplic-texto3); font-size: 14px; transition: transform .22s ease; }
+  .aplic-card.aberto .aplic-card-seta { transform: rotate(180deg); }
+  .aplic-chip {
+    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+    letter-spacing: .02em; white-space: nowrap;
+  }
+  .aplic-chip-pend { background: var(--aplic-azul-suave); color: var(--aplic-azul); }
+  .aplic-chip-exec { background: var(--aplic-ambar-suave); color: var(--aplic-ambar); }
+  .aplic-chip-ok   { background: var(--aplic-verde-suave); color: var(--aplic-verde); }
+  .aplic-card-detalhes {
+    max-height: 0; overflow: hidden;
+    transition: max-height .28s ease;
+  }
+  .aplic-card.aberto .aplic-card-detalhes {
+    max-height: 1200px; border-top: 1px solid var(--aplic-borda);
+  }
+  .aplic-produto {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--aplic-borda);
+  }
+  .aplic-produto:last-child { border-bottom: none; }
+  .aplic-produto-nome { font-weight: 600; font-size: 14px; color: var(--aplic-texto); }
+  .aplic-produto-dose { font-size: 13px; color: var(--aplic-texto2); margin-top: 2px; }
+  .aplic-produto-obs {
+    font-size: 13px; color: var(--aplic-texto2); margin-top: 6px;
+    padding: 7px 11px; background: var(--aplic-fundo); border-radius: 8px;
+  }
+  .aplic-produto-ts {
+    font-family: 'DM Mono', ui-monospace, monospace;
+    font-size: 11px; color: var(--aplic-texto3); margin-top: 6px;
+  }
+  .aplic-btn {
+    border: none; border-radius: 10px; font-family: 'DM Sans', sans-serif;
+    font-weight: 600; font-size: 13px; padding: 10px 16px; cursor: pointer;
+    white-space: nowrap; transition: filter .15s ease, transform .1s ease;
+  }
+  .aplic-btn:active { transform: scale(.97); }
+  .aplic-btn-iniciar { background: var(--aplic-ambar); color: #fff; }
+  .aplic-btn-iniciar:hover { filter: brightness(1.05); }
+  .aplic-btn-concluir { background: var(--aplic-verde); color: #fff; }
+  .aplic-btn-concluir:hover { filter: brightness(1.05); }
 </style>
 </head>
 <body>
@@ -521,51 +606,93 @@ function renderSubabaAplic() {
     lista = adubacoes.filter(a => a.status==='execucao');
     vazio = 'Nenhuma aplicação em execução';
   } else {
-    lista = adubacoes.filter(a => a.status==='concluido').slice().reverse();
+    lista = adubacoes.filter(a => a.status==='concluido');
     vazio = 'Nenhuma aplicação concluída';
   }
   if (lista.length === 0) {
-    el.innerHTML = `<div style="text-align:center;padding:48px 16px;color:var(--cinza)"><div style="font-size:34px;opacity:.4;margin-bottom:8px">🌾</div>${vazio}</div>`;
+    el.innerHTML = `<div style="text-align:center;padding:56px 16px;color:var(--aplic-texto3)"><div style="font-size:34px;opacity:.35;margin-bottom:10px">🌾</div>${vazio}</div>`;
     return;
   }
-  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${lista.map(a => cardAplicacao(a)).join('')}</div>`;
+
+  // Agrupa por data + fazenda + talhão (uma "operação" pode ter vários produtos)
+  const grupos = {};
+  lista.forEach(a => {
+    const k = `${a.data||''}||${normalizar(a.fazenda||'')}||${normalizar(a.talhao||'')}`;
+    if (!grupos[k]) grupos[k] = { data: a.data||'', fazenda: a.fazenda||'—', talhao: a.talhao||'—', status: a.status, itens: [] };
+    grupos[k].itens.push(a);
+    // status do grupo: execucao > pendente > concluido (prioridade visual)
+    if (a.status === 'execucao') grupos[k].status = 'execucao';
+  });
+
+  // Ordena por data → fazenda → talhão
+  const ordenados = Object.values(grupos).sort((a,b) => {
+    if ((a.data||'') !== (b.data||'')) return (a.data||'').localeCompare(b.data||'');
+    if (normalizar(a.fazenda) !== normalizar(b.fazenda)) return a.fazenda.localeCompare(b.fazenda);
+    return a.talhao.localeCompare(b.talhao);
+  });
+  if (aplicSubaba === 'concluidas') ordenados.reverse();
+
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px">${ordenados.map((g,i) => cardAplicacao(g,i)).join('')}</div>`;
 }
 
-function cardAplicacao(a) {
-  const doseTxt = a.dose ? `${fmt(a.dose)} ${a.unidade||''}` : '';
-  const meta = [a.categoria, a.safra].filter(Boolean).join(' · ');
-  let acao = '';
-  if (a.status === 'planejado' || a.status === 'enviado_operador') {
-    acao = `<button class="btn btn-laranja" onclick="aplicIniciar('${a.id}')">▶ Iniciar</button>`;
-  } else if (a.status === 'execucao') {
-    acao = `<button class="btn btn-primary" onclick="aplicConcluir('${a.id}')">■ Concluir</button>`;
-  }
-  const ts = [];
-  if (a.iniciado_em) ts.push(`<span style="color:var(--laranja)">▶ Início: ${fmtDataHora(a.iniciado_em)}</span>`);
-  if (a.data_conclusao) ts.push(`<span style="color:var(--verde)">■ Fim: ${a.data_conclusao}</span>`);
-  return `
-    <div class="card" style="padding:16px 18px;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;${a.status==='execucao'?'border-left:3px solid var(--laranja)':a.status==='concluido'?'border-left:3px solid var(--verde)':''}">
-      <div style="flex:1">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-          <strong style="font-size:15px">${a.fazenda||'—'}</strong>
-          <span style="background:var(--verde-menta);color:var(--verde-escuro,#1a3a2a);font-size:12px;font-weight:600;padding:2px 8px;border-radius:5px">${a.talhao||'—'}</span>
-          ${badgeStatusAplic(a.status)}
+// Card compacto e clean; expande ao clicar mostrando produtos e observações
+function cardAplicacao(g, idx) {
+  const cardId = `aplic-card-${idx}`;
+  const nProdutos = g.itens.length;
+  const acaoTopo = g.status === 'execucao'
+    ? `<span class="aplic-chip aplic-chip-exec">Em execução</span>`
+    : g.status === 'concluido'
+      ? `<span class="aplic-chip aplic-chip-ok">Concluída</span>`
+      : `<span class="aplic-chip aplic-chip-pend">Pendente</span>`;
+
+  // Detalhes (escondido por padrão): lista de produtos + observações
+  const detalhes = g.itens.map(it => {
+    const dose = it.dose ? `${fmt(it.dose)} ${it.unidade||''}` : '—';
+    const ts = [];
+    if (it.iniciado_em) ts.push(`Início: ${fmtDataHora(it.iniciado_em)}`);
+    if (it.data_conclusao) ts.push(`Concluído: ${it.data_conclusao}`);
+    let btn = '';
+    if (it.status === 'planejado' || it.status === 'enviado_operador') {
+      btn = `<button class="aplic-btn aplic-btn-iniciar" onclick="event.stopPropagation();aplicIniciar('${it.id}')">▶ Iniciar</button>`;
+    } else if (it.status === 'execucao') {
+      btn = `<button class="aplic-btn aplic-btn-concluir" onclick="event.stopPropagation();aplicConcluir('${it.id}')">■ Concluir</button>`;
+    }
+    return `
+      <div class="aplic-produto">
+        <div style="flex:1">
+          <div class="aplic-produto-nome">${it.produto||'—'}</div>
+          <div class="aplic-produto-dose">Dose: ${dose}</div>
+          ${it.obs?`<div class="aplic-produto-obs">📝 ${it.obs}</div>`:''}
+          ${ts.length?`<div class="aplic-produto-ts">${ts.join(' · ')}</div>`:''}
         </div>
-        <div style="font-size:14px;margin-bottom:4px"><strong>${a.produto||'—'}</strong>${doseTxt?` — ${doseTxt}`:''}</div>
-        ${meta?`<div style="font-size:12px;color:var(--cinza)">${meta}</div>`:''}
-        <div style="font-size:12px;color:var(--cinza);margin-top:4px">Data planejada: ${a.data||'—'}</div>
-        ${a.obs?`<div style="font-size:12px;color:var(--cinza);margin-top:4px;padding:6px 10px;background:var(--creme);border-radius:6px">${a.obs}</div>`:''}
-        ${ts.length?`<div style="font-size:11px;font-family:monospace;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${ts.join('')}</div>`:''}
+        ${btn}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="aplic-card ${g.status}" id="${cardId}">
+      <div class="aplic-card-head" onclick="toggleAplicCard('${cardId}')">
+        <div style="flex:1;min-width:0">
+          <div class="aplic-card-data">${g.data||'—'}</div>
+          <div class="aplic-card-local">
+            <span class="aplic-card-fazenda">${g.fazenda}</span>
+            <span class="aplic-card-talhao">${g.talhao}</span>
+          </div>
+          <div class="aplic-card-resumo">${nProdutos} produto${nProdutos>1?'s':''}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          ${acaoTopo}
+          <span class="aplic-card-seta">▾</span>
+        </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">${acao}</div>
+      <div class="aplic-card-detalhes">${detalhes}</div>
     </div>`;
 }
 
-function badgeStatusAplic(status) {
-  if (status === 'concluido') return '<span class="badge badge-verde">Concluída</span>';
-  if (status === 'execucao') return '<span class="badge badge-laranja">Em execução</span>';
-  return '<span class="badge badge-azul">Pendente</span>';
-}
+window.toggleAplicCard = function(cardId) {
+  const card = document.getElementById(cardId);
+  if (card) card.classList.toggle('aberto');
+};
 
 function fmtDataHora(ts) {
   if (!ts) return '—';
