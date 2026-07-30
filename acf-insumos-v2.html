@@ -337,6 +337,10 @@
   .aplic-btn-concluir { background: var(--aplic-verde); color: #fff; }
   .aplic-btn-concluir:hover { filter: brightness(1.05); }
 
+  /* Coluna de ações alinhada à direita nas tabelas do caderno */
+  th.col-acoes, td.col-acoes { text-align: right; white-space: nowrap; }
+  .acoes-wrap { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+
   /* ═══════ PAINEL POR TALHÃO ═══════ */
   .talhao-card { background:#fff; border:1px solid #e6ebe4; border-radius:14px; margin-bottom:10px; overflow:hidden; }
   .talhao-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:16px 18px; cursor:pointer; user-select:none; }
@@ -2491,12 +2495,33 @@ window.excluirSafra = async function(id) {
 
 // ══════════════ CADERNO DE CAMPO ══════════════
 let cadernoSubaba = 'plantio';
+let cadernoSafra = '';  // '' = todas as safras (filtro global do caderno)
+
+// Lista de safras disponíveis (cadastro + as que aparecem em registros)
+function safrasDisponiveis() {
+  const s = new Set();
+  [...plantios, ...adubacoes, ...colheitas].forEach(r => { if (r.safra) s.add(r.safra); });
+  safras.forEach(x => s.add(x.nome));
+  return [...s].filter(Boolean).sort();
+}
+// Aplica o filtro global de safra (usado por plantio/adubação/colheita)
+function filtroCadernoSafra(r) { return !cadernoSafra || r.safra === cadernoSafra; }
 
 function renderCaderno() {
+  const listaSafras = safrasDisponiveis();
   document.getElementById('main-content').innerHTML = `
     <div class="sec-header" style="margin-bottom:16px">
       <div class="sec-titulo">📓 Caderno de Campo</div>
-      <button class="btn btn-secondary btn-sm" onclick="exportarCadernoCompleto()">📥 Exportar Tudo (Excel)</button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:13px;color:var(--cinza)">Safra:</label>
+          <select onchange="mudarSafraCaderno(this.value)" style="padding:8px 12px;border:1.5px solid var(--creme-escuro);border-radius:8px">
+            <option value="">Todas</option>
+            ${listaSafras.map(s=>`<option value="${s}" ${s===cadernoSafra?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="exportarCadernoCompleto()">📥 Exportar Tudo (Excel)</button>
+      </div>
     </div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
@@ -2508,6 +2533,11 @@ function renderCaderno() {
     <div id="caderno-conteudo"></div>`;
   renderSubabaCaderno();
 }
+
+window.mudarSafraCaderno = function(v) {
+  cadernoSafra = v;
+  renderSubabaCaderno();
+};
 
 window.mudarSubabaCaderno = function(sub) { cadernoSubaba = sub; renderCaderno(); };
 
@@ -2524,8 +2554,9 @@ function renderSubabaCaderno() {
 // ── PLANTIO ──
 function renderPlantio() {
   const el = document.getElementById('caderno-conteudo');
+  const lista = plantios.filter(filtroCadernoSafra);
   el.innerHTML = `
-    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${plantios.length} registro(s)</div>
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s)${cadernoSafra?` — ${cadernoSafra}`:''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="baixarModelo('plantio')">📋 Baixar Modelo</button>
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-plantio').click()">📤 Importar Excel</button>
@@ -2534,17 +2565,17 @@ function renderPlantio() {
         <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button>
       </div></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Ciclo</th><th>Previsão Colheita</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Ciclo</th><th>Previsão Colheita</th><th>Status</th><th class="col-acoes">Ações</th></tr></thead>
       <tbody>
-        ${plantios.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
-        plantios.map(p=>`<tr><td>${p.status==='concluido'?fmtDataBR(p.data_conclusao||p.data):fmtDataBR(p.data)}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+        ${lista.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
+        lista.map(p=>`<tr><td>${p.status==='concluido'?fmtDataBR(p.data_conclusao||p.data):fmtDataBR(p.data)}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
         <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.ciclo_dias?fmt(p.ciclo_dias)+'d':'—'}</td>
         <td>${fmtDataBR(p.data_prevista_colheita)}</td><td>${badgeStatusCampo(p.status)}</td>
-        <td style="white-space:nowrap">
+        <td class="col-acoes"><div class="acoes-wrap">
           ${p.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirPlantio('${p.id}')">✅ Concluir</button>`:''}
-          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalPlantio('${p.id}')">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button>
-        </td></tr>`).join('')}
+          <button class="btn btn-sm btn-secondary" onclick="abrirModalPlantio('${p.id}')">✏️</button>
+          <button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button>
+        </div></td></tr>`).join('')}
       </tbody>
     </table></div>`;
 }
@@ -2667,7 +2698,7 @@ function tipoDaAdubacao(a) { return a.tipo_aplicacao === 'pulverizacao' ? 'pulve
 function renderAdubacao(tipo) {
   tipo = tipo || 'solido';
   const el = document.getElementById('caderno-conteudo');
-  const lista = adubacoes.filter(a => tipoDaAdubacao(a) === tipo);
+  const lista = adubacoes.filter(a => tipoDaAdubacao(a) === tipo && filtroCadernoSafra(a));
   const ehPulv = tipo === 'pulverizacao';
   const rotulo = ehPulv ? 'Pulverização' : 'Sólidos';
   el.innerHTML = `
@@ -2681,20 +2712,20 @@ function renderAdubacao(tipo) {
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Produto</th><th>Categoria</th><th>Dose</th>${ehPulv?'<th>Vazão</th>':''}<th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Produto</th><th>Categoria</th><th>Dose</th>${ehPulv?'<th>Vazão</th>':''}<th>Status</th><th class="col-acoes">Ações</th></tr></thead>
       <tbody>
         ${lista.length===0?`<tr><td colspan="${ehPulv?9:8}" class="tabela-vazia">Nenhum registro</td></tr>`:
         lista.map(a=>`<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.produto||'—'}</td><td>${a.categoria||'—'}</td>
         <td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
-        <td style="white-space:nowrap">
+        <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
-          <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
-          ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando execução</span>`:''}
-          ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja)">Em execução no campo</span>`:''}
-          ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
-          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}','${tipo}')" title="Editar (requer senha master)">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
-        </td></tr>`).join('')}
+          <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
+          ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza);align-self:center">Aguardando execução</span>`:''}
+          ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja);align-self:center">Em execução no campo</span>`:''}
+          ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
+          <button class="btn btn-sm btn-secondary" onclick="abrirModalAdubacao('${a.id}','${tipo}')" title="Editar (requer senha master)">✏️</button>
+          <button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
+        </div></td></tr>`).join('')}
       </tbody>
     </table></div>`;
 }
@@ -2921,35 +2952,18 @@ window.concluirDireto = async function(id) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-// ══════════════ PAINEL POR TALHÃO (com filtro de safra) ══════════════
-let painelTalhaoSafra = '';  // '' = todas as safras
-
+// ══════════════ PAINEL POR TALHÃO (usa o filtro de safra global do caderno) ══════════════
 function renderPainelTalhoes() {
   const el = document.getElementById('caderno-conteudo');
-  // Safras disponíveis (do cadastro + as que aparecem nos registros)
-  const safrasReg = new Set();
-  [...plantios, ...adubacoes, ...colheitas].forEach(r => { if (r.safra) safrasReg.add(r.safra); });
-  safras.forEach(s => safrasReg.add(s.nome));
-  const listaSafras = [...safrasReg].filter(Boolean).sort();
-
   el.innerHTML = `
     <div class="sec-header">
-      <div style="font-size:14px;color:var(--cinza)">Situação de cada talhão — plantio, aplicações e colheita</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <label style="font-size:13px;color:var(--cinza)">Safra:</label>
-        <select id="painel-safra" onchange="mudarSafraPainel(this.value)" style="padding:8px 12px;border:1.5px solid var(--creme-escuro);border-radius:8px">
-          <option value="">Todas</option>
-          ${listaSafras.map(s=>`<option value="${s}" ${s===painelTalhaoSafra?'selected':''}>${s}</option>`).join('')}
-        </select>
-      </div>
+      <div style="font-size:14px;color:var(--cinza)">Situação de cada talhão — plantio, aplicações e colheita${cadernoSafra?` · safra ${cadernoSafra}`:' · todas as safras'}</div>
     </div>
     <div id="painel-talhoes-lista"></div>`;
   renderListaTalhoes();
 }
 
-window.mudarSafraPainel = function(v) { painelTalhaoSafra = v; renderListaTalhoes(); };
-
-function filtraSafra(r) { return !painelTalhaoSafra || r.safra === painelTalhaoSafra; }
+function filtraSafra(r) { return filtroCadernoSafra(r); }
 
 function renderListaTalhoes() {
   const cont = document.getElementById('painel-talhoes-lista');
@@ -3045,8 +3059,9 @@ window.toggleTalhaoCard = function(cardId) {
 // ── COLHEITA ──
 function renderColheita() {
   const el = document.getElementById('caderno-conteudo');
+  const lista = colheitas.filter(filtroCadernoSafra);
   el.innerHTML = `
-    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${colheitas.length} registro(s)</div>
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s)${cadernoSafra?` — ${cadernoSafra}`:''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="baixarModelo('colheita')">📋 Baixar Modelo</button>
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-colheita').click()">📤 Importar Excel</button>
@@ -3055,18 +3070,18 @@ function renderColheita() {
         <button class="btn btn-primary" onclick="abrirModalColheita()">+ Novo Planejamento</button>
       </div></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Status</th><th>Produtiv.</th><th>Umidade</th><th>PMS</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Status</th><th>Produtiv.</th><th>Umidade</th><th>PMS</th><th class="col-acoes">Ações</th></tr></thead>
       <tbody>
-        ${colheitas.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum registro</td></tr>':
-        colheitas.map(c=>`<tr><td>${c.status==='concluido'?fmtDataBR(c.data_conclusao||c.data):fmtDataBR(c.data)}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        ${lista.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum registro</td></tr>':
+        lista.map(c=>`<tr><td>${c.status==='concluido'?fmtDataBR(c.data_conclusao||c.data):fmtDataBR(c.data)}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
         <td>${badgeStatusCampo(c.status)}</td>
         <td>${c.produtividade?fmt(c.produtividade)+' '+(c.unidade_produtividade||'sc/ha'):'—'}</td>
         <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
-        <td style="white-space:nowrap">
+        <td class="col-acoes"><div class="acoes-wrap">
           ${c.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirColheita('${c.id}')">✅ Concluir</button>`:''}
-          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirEditarColheita('${c.id}')">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_colheita','${c.id}','colheita')">✕</button>
-        </td></tr>`).join('')}
+          <button class="btn btn-sm btn-secondary" onclick="abrirEditarColheita('${c.id}')">✏️</button>
+          <button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_colheita','${c.id}','colheita')">✕</button>
+        </div></td></tr>`).join('')}
       </tbody>
     </table></div>`;
 }
