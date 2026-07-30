@@ -15,9 +15,9 @@
 <!-- ▼▼▼ COLE AQUI AS SUAS CONFIGURAÇÕES DO FIREBASE ▼▼▼ -->
 <script type="module">
 import { initializeApp }        from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, doc, onSnapshot,
+import { collection, doc, onSnapshot,
          setDoc, updateDoc, deleteDoc,
-         enableIndexedDbPersistence }
+         initializeFirestore, persistentLocalCache, persistentMultipleTabManager }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ════════════════════════════════════════════════
@@ -25,22 +25,20 @@ import { getFirestore, collection, doc, onSnapshot,
 // (copiados do Firebase Console → Configurações)
 // ════════════════════════════════════════════════
 const firebaseConfig = {
- apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
-  authDomain: "agroop-d73d4.firebaseapp.com",
-  projectId: "agroop-d73d4",
-  storageBucket: "agroop-d73d4.firebasestorage.app",
-  messagingSenderId: "591049190246",
-  appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  apiKey:            "COLE_AQUI_apiKey",
+  authDomain:        "COLE_AQUI_authDomain",
+  projectId:         "COLE_AQUI_projectId",
+  storageBucket:     "COLE_AQUI_storageBucket",
+  messagingSenderId: "COLE_AQUI_messagingSenderId",
+  appId:             "COLE_AQUI_appId"
 };
 // ════════════════════════════════════════════════
 
 const fbApp = initializeApp(firebaseConfig);
-const db    = getFirestore(fbApp);
 
-// Ativa persistência offline (IndexedDB) — funciona sem internet
-enableIndexedDbPersistence(db).catch(err => {
-  if (err.code === 'failed-precondition') console.warn('Offline persistence: múltiplas abas abertas.');
-  else if (err.code === 'unimplemented')  console.warn('Offline persistence não suportada neste navegador.');
+// ✅ Forma correta no Firebase SDK v10 — persistência offline automática
+const db = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 });
 
 // Expõe para o código principal
@@ -560,12 +558,21 @@ function iniciarSync(){
     window._col('aplicacoes'),
     (snapshot) => {
       apps = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      // migração: garante array de produtos
-      apps = apps.map(ap => ({
-        ...ap,
-        talhao: COMPAT[ap.talhao] || ap.talhao,
-        produtos: ap.produtos || (ap.produto ? [{produto:ap.produto,dose:ap.dose||''}] : [])
-      }));
+      // migração: garante array de produtos + normaliza status
+      // (status vindo de outros apps pode chegar como "Pendente"/"PENDENTE";
+      //  normalizar aqui garante que os filtros pendente/execucao/finalizado sempre funcionem)
+      apps = apps.map(ap => {
+        let st = (ap.status || 'pendente').toString().trim().toLowerCase();
+        if(st==='em execução' || st==='em execucao' || st==='execução') st='execucao';
+        if(st==='finalizada' || st==='concluido' || st==='concluída' || st==='concluido') st='finalizado';
+        if(st==='pendentes') st='pendente';
+        return {
+          ...ap,
+          status: st,
+          talhao: COMPAT[ap.talhao] || ap.talhao,
+          produtos: ap.produtos || (ap.produto ? [{produto:ap.produto,dose:ap.dose||''}] : [])
+        };
+      });
       atualizarBadges();
       renderStats();
       // re-renderiza painel ativo
@@ -577,7 +584,8 @@ function iniciarSync(){
         else if(id==='historico') renderHistorico();
         else if(id==='planejamento') renderStats();
       }
-      setSyncPill(snapshot.metadata.fromCache ? 'pending' : 'synced');
+      const pendente = snapshot.metadata.hasPendingWrites || snapshot.metadata.fromCache;
+      setSyncPill(pendente ? 'pending' : 'synced');
     },
     (error) => {
       console.error('Firestore error:', error);
@@ -594,34 +602,27 @@ function setSyncPill(estado){
   else if(estado==='pending') p.textContent = '⏳ aguardando rede';
 }
 
-// Salva no Firestore (funciona offline — vai para fila automática)
-async function salvarNoFirestore(ap){
+// Salva no Firestore SEM aguardar o servidor (funciona offline — fila automática).
+// A promise só resolve quando o servidor confirma, então offline ela ficaria
+// pendurada para sempre. O snapshot local atualiza a tela imediatamente.
+function salvarNoFirestore(ap){
   if(!window._firebaseReady) return;
-  try{
-    setSyncPill('syncing');
-    await window._setDoc(window._doc('aplicacoes', ap.id), ap);
-    setSyncPill('synced');
-  } catch(e){
-    // Offline: o Firestore enfileira automaticamente
-    setSyncPill('pending');
-  }
+  window._setDoc(window._doc('aplicacoes', ap.id), ap)
+    .catch(e => console.warn('Write pendente (offline):', e.code));
 }
 
-async function atualizarNoFirestore(id, campos){
+function atualizarNoFirestore(id, campos){
   if(!window._firebaseReady) return;
-  try{
-    setSyncPill('syncing');
-    await window._updateDoc(window._doc('aplicacoes', id), campos);
-    setSyncPill('synced');
-  } catch(e){
-    setSyncPill('pending');
-  }
+  // setDoc com merge em vez de updateDoc: não falha se o doc tiver sido
+  // excluído por outro dispositivo enquanto este estava offline
+  window._setDoc(window._doc('aplicacoes', id), campos, {merge:true})
+    .catch(e => console.warn('Write pendente (offline):', e.code));
 }
 
-async function deletarNoFirestore(id){
+function deletarNoFirestore(id){
   if(!window._firebaseReady) return;
-  try{ await window._deleteDoc(window._doc('aplicacoes', id)); }
-  catch(e){ console.error(e); }
+  window._deleteDoc(window._doc('aplicacoes', id))
+    .catch(e => console.warn('Delete pendente (offline):', e.code));
 }
 
 // ════════════════════════════════════════════════
@@ -752,7 +753,7 @@ async function criarAplicacao(dados){
     ap={fazenda,talhao,data,operador,vazao,obs,produtos};
   }
   const novaAp = {id:uid(),...ap,status:'pendente',criadoEm:new Date().toISOString(),iniciadoEm:null,finalizadoEm:null};
-  await salvarNoFirestore(novaAp); // salva no Firebase (ou enfileira se offline)
+  salvarNoFirestore(novaAp); // salva no Firebase (ou enfileira se offline)
   if(!dados){
     ['f-fazenda','f-data','f-operador','f-vazao','f-obs'].forEach(id=>document.getElementById(id).value='');
     document.getElementById('f-talhao').innerHTML='<option>Selecione a fazenda...</option>';
@@ -849,22 +850,22 @@ function renderHistorico(){
 // ════════════════════════════════════════════════
 // AÇÕES (escrevem no Firestore)
 // ════════════════════════════════════════════════
-async function iniciar(id){
+function iniciar(id){
   const agora = new Date().toISOString();
-  await atualizarNoFirestore(id, {status:'execucao', iniciadoEm:agora});
+  atualizarNoFirestore(id, {status:'execucao', iniciadoEm:agora});
   toast('Aplicação iniciada!','ok-green');
 }
 
-async function finalizar(id){
+function finalizar(id){
   const agora = new Date().toISOString();
-  await atualizarNoFirestore(id, {status:'finalizado', finalizadoEm:agora});
+  atualizarNoFirestore(id, {status:'finalizado', finalizadoEm:agora});
   toast('Aplicação finalizada!','ok-green');
 }
 
-async function excluir(id){
+function excluir(id){
   if(getSessao()!=='admin'){toast('Sem permissão.','erro');return;}
   if(!confirm('Excluir este planejamento?'))return;
-  await deletarNoFirestore(id);
+  deletarNoFirestore(id);
 }
 
 // ════════════════════════════════════════════════
@@ -962,11 +963,11 @@ function abrirModal(rows){
   document.getElementById('modal-import').classList.add('open');
 }
 function fecharModal(){document.getElementById('modal-import').classList.remove('open');pendingImport=[];}
-async function confirmarImport(){
+function confirmarImport(){
   const validos=pendingImport.filter(r=>r._ok);
   for(const {_linhas,_erros,_ok,...ap} of validos){
     const novaAp={id:uid(),...ap,status:'pendente',criadoEm:new Date().toISOString(),iniciadoEm:null,finalizadoEm:null};
-    await salvarNoFirestore(novaAp);
+    salvarNoFirestore(novaAp);
   }
   fecharModal();
   toast(`${validos.length} aplicação(ões) importada(s)!`,'ok-green');

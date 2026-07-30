@@ -264,7 +264,7 @@ import {
   getAuth, signInAnonymously, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, getDocs, updateDoc, deleteDoc,
+  getFirestore, collection, doc, addDoc, getDocs, updateDoc, deleteDoc, setDoc,
   query, orderBy, Timestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -308,6 +308,27 @@ function somarDias(dataStr, dias) {
   d.setDate(d.getDate() + (parseInt(dias)||0));
   return d.toISOString().split('T')[0];
 }
+
+// Interpreta o texto da coluna Vencimento. Retorna:
+//  { tipo:'data', data:'AAAA-MM-DD', texto }            -> data fixa informada
+//  { tipo:'ddf', dias:30, texto:'30 DDF' }              -> dias após faturamento (calcula no recebimento)
+//  { tipo:'texto', texto:'Barter' }                     -> condição sem data (ex: barter)
+//  null                                                  -> vazio
+function interpretarCondicaoPagamento(valor) {
+  const txt = (valor==null?'':valor).toString().trim();
+  if (!txt) return null;
+  // data ISO AAAA-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(txt)) return { tipo:'data', data: txt.split('T')[0].substring(0,10), texto: txt };
+  // data BR DD/MM/AAAA
+  const br = txt.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return { tipo:'data', data: `${br[3]}-${br[2]}-${br[1]}`, texto: txt };
+  // "30 DDF", "360 ddf", "30DDF", "30 dias" etc -> extrai o número de dias
+  const ddf = txt.match(/(\d+)\s*(ddf|dias|d)\b/i);
+  if (ddf) return { tipo:'ddf', dias: parseInt(ddf[1]), texto: txt };
+  // qualquer outro texto (Barter, "à vista", "a combinar"...)
+  return { tipo:'texto', texto: txt };
+}
+
 function diasAte(ts) {
   if (!ts) return 9999;
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -710,8 +731,8 @@ window.filtrarPedidos = function() {
 };
 
 // ══════════════ IMPORTAR PEDIDOS DE COMPRA (Excel) ══════════════
-const COLUNAS_PEDIDOS = ['Safra','Grupo','Fornecedor','Produto','Volume','Unidade (L, Kg, Ton, Bag, sc)','R$/unidade','R$ Total','Vencimento (AAAA-MM-DD)'];
-const EXEMPLO_PEDIDOS = ['Soja 26/27','Herbicida','Agro Insumos Ltda','Glifosato 480','200','L','32.50','6500','2026-09-30'];
+const COLUNAS_PEDIDOS = ['Safra','Grupo','Fornecedor','Produto','Volume','Unidade (L, Kg, Ton, Bag, sc)','R$/unidade','R$ Total','Vencimento (data, "Barter" ou "30 DDF")'];
+const EXEMPLO_PEDIDOS = ['Soja 26/27','Herbicida','Agro Insumos Ltda','Glifosato 480','200','L','32.50','6500','30 DDF'];
 
 window.baixarModeloPedidos = function() {
   try {
@@ -751,14 +772,22 @@ window.importarPedidosExcel = function(input) {
         let valorTotal = parseFloat(row['R$ Total'])||0;
         if (!precoUnit && valorTotal) precoUnit = valorTotal/volume;
         if (!valorTotal && precoUnit) valorTotal = precoUnit*volume;
-        const vencimento = (row['Vencimento (AAAA-MM-DD)']||row['Vencimento']||'').toString().trim();
+        const condTxt = (row['Vencimento (data, "Barter" ou "30 DDF")']||row['Vencimento (AAAA-MM-DD)']||row['Vencimento']||'').toString().trim();
+        const cond = interpretarCondicaoPagamento(condTxt);
 
         if (!gruposPorFornecedor[fornecedor]) gruposPorFornecedor[fornecedor] = { itens: [], vencimentos: [] };
         gruposPorFornecedor[fornecedor].itens.push({
           produto, categoria: grupo, safra, quantidade: volume, quantidade_recebida: 0,
-          unidade, preco_unit: precoUnit, total: valorTotal
+          unidade, preco_unit: precoUnit, total: valorTotal,
+          cond_pagamento: cond ? cond.texto : '',
+          cond_tipo: cond ? cond.tipo : '',
+          cond_dias: cond && cond.tipo==='ddf' ? cond.dias : 0
         });
-        if (vencimento) gruposPorFornecedor[fornecedor].vencimentos.push({ produto, valor: valorTotal, vencimento });
+        // Só cria conta com vencimento em data se o texto já for uma data.
+        // "X DDF" vira conta na hora do recebimento; "Barter"/texto não gera vencimento.
+        if (cond && cond.tipo==='data') {
+          gruposPorFornecedor[fornecedor].vencimentos.push({ produto, valor: valorTotal, vencimento: cond.data, cond: cond.texto });
+        }
       });
 
       const fornecedoresImportados = Object.keys(gruposPorFornecedor);
@@ -787,7 +816,7 @@ window.importarPedidosExcel = function(input) {
 
         grupo.vencimentos.forEach(v => {
           const conta = {
-            fornecedor, descricao: `${v.produto} (importado)`, valor_total: v.valor,
+            fornecedor, descricao: `${v.produto} (importado)${v.cond?` — ${v.cond}`:''}`, valor_total: v.valor,
             vencimento: Timestamp.fromDate(new Date(v.vencimento+'T12:00:00')),
             pedido_id: pRef.id, pago: false, criado_em: Timestamp.now()
           };
@@ -979,7 +1008,7 @@ window.verPedido = function(id) {
           <div class="baixa-item-row header-row" style="grid-template-columns:2fr 1fr 1fr 1fr auto"><span>Produto</span><span>Pedido</span><span>Recebido</span><span>Pendente</span><span></span></div>
           ${(p.itens||[]).map((it, idx) => {
             const pend = (it.quantidade||0) - (it.quantidade_recebida||0);
-            const meta = [it.categoria, it.safra].filter(Boolean).join(' · ');
+            const meta = [it.categoria, it.safra, it.cond_pagamento].filter(Boolean).join(' · ');
             return `<div class="baixa-item-row" style="grid-template-columns:2fr 1fr 1fr 1fr auto">
               <span>${it.produto}${meta?`<div style="font-size:11px;color:var(--cinza)">${meta}</div>`:''}</span><span>${fmt(it.quantidade)} ${it.unidade}</span>
               <span style="color:var(--verde);font-weight:600">${fmt(it.quantidade_recebida||0)}</span>
@@ -1023,6 +1052,7 @@ window.abrirEditarItemPedido = function(pedidoId, idx) {
           <div class="form-group"><label>Categoria/Grupo</label><input type="text" id="eip-categoria" value="${it.categoria||''}"></div>
           <div class="form-group"><label>Safra</label><input type="text" id="eip-safra" value="${it.safra||''}"></div>
         </div>
+        <div class="form-group"><label>Condição de Pagamento</label><input type="text" id="eip-cond" value="${(it.cond_pagamento||'').replace(/"/g,'&quot;')}" placeholder='Ex: Barter, 30 DDF, 2026-09-30'></div>
         <div class="form-row">
           <div class="form-group"><label>Quantidade (Pedido) *</label><input type="number" id="eip-qtd" value="${it.quantidade}" min="0" step="0.01"></div>
           <div class="form-group"><label>Unidade</label><select id="eip-unidade">${UNIDADES.map(u=>`<option ${u===it.unidade?'selected':''}>${u}</option>`).join('')}</select></div>
@@ -1050,12 +1080,16 @@ window.salvarEdicaoItemPedido = async function(pedidoId, idx) {
   const it = p.itens[idx];
   if (quantidade < (it.quantidade_recebida||0)) { toast(`A quantidade não pode ser menor que o já recebido (${fmt(it.quantidade_recebida)} ${it.unidade}).`,'erro'); return; }
   const preco_unit = parseFloat(document.getElementById('eip-preco').value)||0;
+  const cond = interpretarCondicaoPagamento(document.getElementById('eip-cond').value);
   const novosItens = [...p.itens];
   novosItens[idx] = {
     ...it, produto, categoria: document.getElementById('eip-categoria').value,
     safra: document.getElementById('eip-safra').value, quantidade,
     unidade: document.getElementById('eip-unidade').value, preco_unit,
-    total: quantidade * preco_unit
+    total: quantidade * preco_unit,
+    cond_pagamento: cond ? cond.texto : '',
+    cond_tipo: cond ? cond.tipo : '',
+    cond_dias: cond && cond.tipo==='ddf' ? cond.dias : 0
   };
   try {
     await salvarItensPedido(pedidoId, novosItens);
@@ -1096,6 +1130,7 @@ window.abrirAdicionarItemPedido = function(pedidoId) {
           <div class="form-group"><label>Categoria/Grupo</label><input type="text" id="aip-categoria"></div>
           <div class="form-group"><label>Safra</label><input type="text" id="aip-safra"></div>
         </div>
+        <div class="form-group"><label>Condição de Pagamento</label><input type="text" id="aip-cond" placeholder='Ex: Barter, 30 DDF, 2026-09-30'></div>
         <div class="form-row">
           <div class="form-group"><label>Quantidade *</label><input type="number" id="aip-qtd" min="0" step="0.01"></div>
           <div class="form-group"><label>Unidade</label><select id="aip-unidade">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
@@ -1120,10 +1155,14 @@ window.salvarNovoItemPedido = async function(pedidoId) {
   const quantidade = parseFloat(document.getElementById('aip-qtd').value)||0;
   if (!produto || quantidade<=0) { toast('Preencha produto e quantidade.','erro'); return; }
   const preco_unit = parseFloat(document.getElementById('aip-preco').value)||0;
+  const cond = interpretarCondicaoPagamento(document.getElementById('aip-cond').value);
   const novoItem = {
     produto, categoria: document.getElementById('aip-categoria').value, safra: document.getElementById('aip-safra').value,
     quantidade, quantidade_recebida: 0, unidade: document.getElementById('aip-unidade').value,
-    preco_unit, total: quantidade*preco_unit
+    preco_unit, total: quantidade*preco_unit,
+    cond_pagamento: cond ? cond.texto : '',
+    cond_tipo: cond ? cond.tipo : '',
+    cond_dias: cond && cond.tipo==='ddf' ? cond.dias : 0
   };
   const novosItens = [...p.itens, novoItem];
   try {
@@ -1176,6 +1215,7 @@ window.confirmarBaixa = async function(id) {
   let totalRecebido = 0;
   const novosItens = [...p.itens];
 
+  const novosContasLocais = [];
   itensPend.forEach((it, i) => {
     const qtdReceber = parseFloat(document.getElementById(`baixa-qtd-${i}`)?.value) || 0;
     if (qtdReceber <= 0) return;
@@ -1192,6 +1232,21 @@ window.confirmarBaixa = async function(id) {
     const eRef = doc(collection(db, 'estoque_ins_entradas'));
     batch.set(eRef, novaEntrada);
     entradasRaw.push({ id: eRef.id, ...novaEntrada });
+
+    // Condição "X DDF": gera conta a pagar com vencimento = recebimento + X dias.
+    // Faz isso só uma vez por item (na 1ª vez que ele é recebido), pra não duplicar em baixas parciais.
+    if (it.cond_tipo === 'ddf' && it.cond_dias > 0 && !it.conta_gerada) {
+      const venc = somarDias(dataReceb, it.cond_dias);
+      const conta = {
+        fornecedor: p.fornecedor, descricao: `${it.produto} — ${it.cond_pagamento} (receb. ${dataReceb})`,
+        valor_total: it.total || 0, vencimento: Timestamp.fromDate(new Date(venc+'T12:00:00')),
+        pedido_id: id, pago: false, criado_em: Timestamp.now()
+      };
+      const cRef = doc(collection(db, 'insumos_contas'));
+      batch.set(cRef, conta);
+      novosContasLocais.push({ id: cRef.id, ...conta });
+      if (idx >= 0) novosItens[idx] = { ...novosItens[idx], conta_gerada: true };
+    }
   });
 
   if (totalRecebido === 0) { toast('Informe a quantidade a receber.', 'erro'); btn.disabled=false; btn.textContent='Confirmar Recebimento'; return; }
@@ -1204,9 +1259,13 @@ window.confirmarBaixa = async function(id) {
     await batch.commit();
     const pi = pedidos.findIndex(x => x.id === id);
     if (pi >= 0) { pedidos[pi].itens = novosItens; pedidos[pi].status = novoStatus; }
+    if (novosContasLocais.length > 0) {
+      contas.push(...novosContasLocais);
+      contas.sort((a,b) => (a.vencimento?.toDate?a.vencimento.toDate():new Date(a.vencimento)) - (b.vencimento?.toDate?b.vencimento.toDate():new Date(b.vencimento)));
+    }
     recalcularEstoque();
     fecharModal('modal-baixa');
-    toast('Recebimento registrado no ACF Estoque!');
+    toast(`Recebimento registrado no ACF Estoque!${novosContasLocais.length>0?` ${novosContasLocais.length} conta(s) a pagar gerada(s).`:''}`);
     renderPedidos();
   } catch(e) { toast('Erro: ' + e.message, 'erro'); btn.disabled=false; btn.textContent='Confirmar Recebimento'; }
 };
@@ -2272,19 +2331,33 @@ window.enviarAoOperador = async function(id) {
   if (!a) return;
   if (!confirm(`Enviar "${a.produto}" (${a.talhao}) para o AgroOp?`)) return;
   try {
+    // Formato EXATO que o AgroOp espera (conferido no index.html dele):
+    // - fazenda: "Fazenda X" (uma das 3 chaves de TALHOES)
+    // - talhao: valor exato da lista dele (Rod 1, CF 2, Pal 3...)
+    // - status: 'pendente' MINÚSCULO (ele filtra por esse valor)
+    // - campos operador, vazao, iniciadoEm, finalizadoEm são esperados
     const nomeFazendaAgroOp = a.fazenda.startsWith('Fazenda ') ? a.fazenda : `Fazenda ${a.fazenda}`;
+    // gera um id no mesmo estilo do AgroOp e usa como ID do documento
+    const novoId = Date.now().toString(36) + Math.random().toString(36).slice(2,5);
     const aplicacao = {
-      data: a.data, fazenda: nomeFazendaAgroOp, talhao: a.talhao,
+      id: novoId,
+      fazenda: nomeFazendaAgroOp,
+      talhao: a.talhao,
+      data: a.data,
+      operador: '',
+      vazao: '',
+      obs: a.obs || '',
       produtos: [{ produto: a.produto, dose: String(a.dose||'') }],
-      obs: a.obs||'', status: 'Pendente',
-      criadoEm: new Date().toISOString()
+      status: 'pendente',
+      criadoEm: new Date().toISOString(),
+      iniciadoEm: null,
+      finalizadoEm: null
     };
-    const ref = await addDoc(collection(db,'aplicacoes'), aplicacao);
-    await updateDoc(doc(db,'aplicacoes',ref.id), { id: ref.id });
-    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'enviado_operador', agroop_id: ref.id });
-    a.status = 'enviado_operador'; a.agroop_id = ref.id;
+    await setDoc(doc(db,'aplicacoes',novoId), aplicacao);
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'enviado_operador', agroop_id: novoId });
+    a.status = 'enviado_operador'; a.agroop_id = novoId;
     aplicacoesAgroOp = null; // invalida cache
-    toast('Enviado ao AgroOp! O operador já pode ver no app dele.');
+    toast('Enviado ao AgroOp! Aparece como Pendente no app do operador.');
     renderAdubacao();
   } catch(e) { toast('Erro ao enviar: '+e.message,'erro'); }
 };
@@ -2310,7 +2383,7 @@ async function verificarConclusoesAgroOp() {
   let mudou = false;
   for (const a of pendentesEnvio) {
     const doc_agroop = aplicacoesAgroOp.find(x => x.id === a.agroop_id);
-    if (doc_agroop && (doc_agroop.finalizadoEm || doc_agroop.status === 'Finalizado')) {
+    if (doc_agroop && (doc_agroop.finalizadoEm || doc_agroop.status === 'finalizado')) {
       const dataConcl = doc_agroop.finalizadoEm ? doc_agroop.finalizadoEm.split('T')[0] : hoje();
       try {
         await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { status: 'concluido', data_conclusao: dataConcl });
@@ -2338,7 +2411,7 @@ async function renderAplicacoesCampo() {
       <tbody>
         ${lista.length===0?'<tr><td colspan="6" class="tabela-vazia">Nenhuma aplicação encontrada no AgroOp</td></tr>':
         lista.map(a => {
-          const status = a.finalizadoEm || a.status === 'Finalizado' ? '<span class="badge badge-verde">Finalizado</span>' : '<span class="badge badge-azul">Pendente/Em Execução</span>';
+          const status = a.finalizadoEm || a.status === 'finalizado' ? '<span class="badge badge-verde">Finalizado</span>' : '<span class="badge badge-azul">Pendente/Em Execução</span>';
           const prods = (a.produtos||[]).map(p => `${p.produto||p.nome||'?'} (${p.dose||'?'})`).join(', ') || '—';
           return `<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prods}</td><td>${a.operador||'—'}</td><td>${status}</td></tr>`;
         }).join('')}
