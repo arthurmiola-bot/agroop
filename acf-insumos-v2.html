@@ -336,6 +336,31 @@
   .aplic-btn-iniciar:hover { filter: brightness(1.05); }
   .aplic-btn-concluir { background: var(--aplic-verde); color: #fff; }
   .aplic-btn-concluir:hover { filter: brightness(1.05); }
+
+  /* ═══════ PAINEL POR TALHÃO ═══════ */
+  .talhao-card { background:#fff; border:1px solid #e6ebe4; border-radius:14px; margin-bottom:10px; overflow:hidden; }
+  .talhao-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:16px 18px; cursor:pointer; user-select:none; }
+  .talhao-nome { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; color:#1f2a24; }
+  .talhao-area { font-family:'DM Mono',monospace; font-size:12px; font-weight:500; color:#5b6b60; background:#f4f6f3; padding:1px 7px; border-radius:5px; margin-left:4px; }
+  .talhao-resumo { display:flex; gap:12px; flex-wrap:wrap; font-size:13px; color:#5b6b60; margin-top:6px; }
+  .talhao-badges { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .tb { font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; white-space:nowrap; }
+  .tb-plan { background:#eef3f8; color:#3a6b9c; }
+  .tb-lib  { background:#fbf1e3; color:#b9772a; }
+  .tb-exec { background:#fbf1e3; color:#b9772a; }
+  .tb-conc { background:#eaf3ee; color:#2f7a55; }
+  .talhao-seta { color:#9aa89f; font-size:14px; transition:transform .22s ease; margin-left:2px; }
+  .talhao-card.aberto .talhao-seta { transform:rotate(180deg); }
+  .talhao-detalhes { max-height:0; overflow:hidden; transition:max-height .3s ease; }
+  .talhao-card.aberto .talhao-detalhes { max-height:3000px; border-top:1px solid #e6ebe4; }
+  .talhao-secao { padding:12px 18px; border-bottom:1px solid #f0f3ee; }
+  .talhao-secao:last-child { border-bottom:none; }
+  .talhao-secao-titulo { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#8fa089; margin-bottom:8px; }
+  .talhao-evento { display:flex; align-items:center; gap:12px; padding:7px 0; border-bottom:1px solid #f6f8f4; }
+  .talhao-evento:last-child { border-bottom:none; }
+  .te-data { font-family:'DM Mono',monospace; font-size:12px; color:#9aa89f; white-space:nowrap; min-width:64px; }
+  .te-titulo { flex:1; font-size:14px; color:#1f2a24; display:flex; flex-direction:column; gap:1px; }
+  .te-info { font-size:12px; color:#8fa089; }
 </style>
 </head>
 <body>
@@ -2478,6 +2503,7 @@ function renderCaderno() {
       <button class="nav-btn ${cadernoSubaba==='pulverizacao'?'ativo':''}" onclick="mudarSubabaCaderno('pulverizacao')">💧 Pulverização</button>
       <button class="nav-btn ${cadernoSubaba==='solido'?'ativo':''}" onclick="mudarSubabaCaderno('solido')">🪨 Sólidos</button>
       <button class="nav-btn ${cadernoSubaba==='colheita'?'ativo':''}" onclick="mudarSubabaCaderno('colheita')">🌾 Colheita</button>
+      <button class="nav-btn ${cadernoSubaba==='talhoes'?'ativo':''}" onclick="mudarSubabaCaderno('talhoes')">📍 Talhões</button>
     </div>
     <div id="caderno-conteudo"></div>`;
   renderSubabaCaderno();
@@ -2491,6 +2517,7 @@ function renderSubabaCaderno() {
     case 'pulverizacao': renderAdubacao('pulverizacao'); break;
     case 'solido': renderAdubacao('solido'); break;
     case 'colheita': renderColheita(); break;
+    case 'talhoes': renderPainelTalhoes(); break;
   }
 }
 
@@ -2665,7 +2692,7 @@ function renderAdubacao(tipo) {
           ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando execução</span>`:''}
           ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja)">Em execução no campo</span>`:''}
           ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
-          ${a.status==='planejado'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}','${tipo}')">✏️</button>`:''}
+          <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}','${tipo}')" title="Editar (requer senha master)">✏️</button>
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
         </td></tr>`).join('')}
       </tbody>
@@ -2750,6 +2777,12 @@ window.abrirModalAdubacao = function(id, tipo) {
           </select></div>
         <div id="ad-modo-data-campos"></div>
         <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" value="${a?.obs||''}" placeholder="Opcional"></div>
+        ${a?`<div class="form-group"><label>Status (master)</label><select id="ad-status">
+          <option value="planejado" ${a.status==='planejado'?'selected':''}>Planejado</option>
+          <option value="enviado_operador" ${a.status==='enviado_operador'?'selected':''}>Liberado / Aguardando execução</option>
+          <option value="execucao" ${a.status==='execucao'?'selected':''}>Em execução</option>
+          <option value="concluido" ${a.status==='concluido'?'selected':''}>Concluído</option>
+        </select></div>`:''}
         <input type="hidden" id="ad-tipo" value="${tp}">
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-adubacao')">Cancelar</button>
@@ -2810,10 +2843,20 @@ window.salvarAdubacao = async function(id) {
   };
   try {
     if (id) {
+      // Master pode alterar o status. Ajusta campos ligados ao status.
+      const novoStatus = document.getElementById('ad-status')?.value;
+      if (novoStatus) {
+        reg.status = novoStatus;
+        const a0 = adubacoes.find(x=>x.id===id) || {};
+        if (novoStatus === 'concluido' && !a0.data_conclusao) reg.data_conclusao = hoje();
+        if (novoStatus === 'execucao' && !a0.iniciado_em) reg.iniciado_em = Timestamp.now();
+        // volta para planejado limpa timestamps de execução/conclusão
+        if (novoStatus === 'planejado') { reg.iniciado_em = null; reg.data_conclusao = ''; }
+      }
       await updateDoc(doc(db,'insumos_campo_adubacao',id), reg);
       const i = adubacoes.findIndex(x=>x.id===id);
       if (i>=0) adubacoes[i] = { ...adubacoes[i], ...reg };
-      toast('Planejamento atualizado!');
+      toast('Registro atualizado!');
     } else {
       reg.status = 'planejado'; reg.criado_em = Timestamp.now();
       const ref = await addDoc(collection(db,'insumos_campo_adubacao'), reg);
@@ -2876,6 +2919,127 @@ window.concluirDireto = async function(id) {
     toast('Registrado como concluído!');
     renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ PAINEL POR TALHÃO (com filtro de safra) ══════════════
+let painelTalhaoSafra = '';  // '' = todas as safras
+
+function renderPainelTalhoes() {
+  const el = document.getElementById('caderno-conteudo');
+  // Safras disponíveis (do cadastro + as que aparecem nos registros)
+  const safrasReg = new Set();
+  [...plantios, ...adubacoes, ...colheitas].forEach(r => { if (r.safra) safrasReg.add(r.safra); });
+  safras.forEach(s => safrasReg.add(s.nome));
+  const listaSafras = [...safrasReg].filter(Boolean).sort();
+
+  el.innerHTML = `
+    <div class="sec-header">
+      <div style="font-size:14px;color:var(--cinza)">Situação de cada talhão — plantio, aplicações e colheita</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-size:13px;color:var(--cinza)">Safra:</label>
+        <select id="painel-safra" onchange="mudarSafraPainel(this.value)" style="padding:8px 12px;border:1.5px solid var(--creme-escuro);border-radius:8px">
+          <option value="">Todas</option>
+          ${listaSafras.map(s=>`<option value="${s}" ${s===painelTalhaoSafra?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="painel-talhoes-lista"></div>`;
+  renderListaTalhoes();
+}
+
+window.mudarSafraPainel = function(v) { painelTalhaoSafra = v; renderListaTalhoes(); };
+
+function filtraSafra(r) { return !painelTalhaoSafra || r.safra === painelTalhaoSafra; }
+
+function renderListaTalhoes() {
+  const cont = document.getElementById('painel-talhoes-lista');
+  if (!cont) return;
+
+  // Monta a lista de talhões: usa o cadastro; se vazio, deriva dos registros
+  let unidades = talhoes.map(t => ({ nome: t.nome, fazenda: t.fazenda||'', area_ha: parseFloat(t.area_ha)||0 }));
+  if (unidades.length === 0) {
+    const chaves = new Set();
+    [...plantios, ...adubacoes, ...colheitas].forEach(r => { if (r.talhao) chaves.add(`${r.fazenda||''}||${r.talhao}`); });
+    unidades = [...chaves].map(k => { const [f,n] = k.split('||'); return { nome:n, fazenda:f, area_ha:0 }; });
+  }
+
+  // Para cada talhão, coleta os eventos filtrados pela safra
+  const cards = unidades.map((u, idx) => {
+    const mesmoTalhao = (r) => normalizar(r.talhao||'') === normalizar(u.nome) &&
+      (!u.fazenda || normalizar((r.fazenda||'').replace('Fazenda ','')) === normalizar(u.fazenda));
+    const pls = plantios.filter(r => mesmoTalhao(r) && filtraSafra(r));
+    const aps = adubacoes.filter(r => mesmoTalhao(r) && filtraSafra(r));
+    const cols = colheitas.filter(r => mesmoTalhao(r) && filtraSafra(r));
+    const totalEventos = pls.length + aps.length + cols.length;
+    if (totalEventos === 0) return ''; // não mostra talhão sem nada na safra filtrada
+
+    // Contadores de status das aplicações
+    const nPlan = aps.filter(a => a.status==='planejado').length;
+    const nLib = aps.filter(a => a.status==='enviado_operador').length;
+    const nExec = aps.filter(a => a.status==='execucao').length;
+    const nConc = aps.filter(a => a.status==='concluido').length;
+
+    const cardId = `talhao-card-${idx}`;
+    return `
+      <div class="talhao-card" id="${cardId}">
+        <div class="talhao-head" onclick="toggleTalhaoCard('${cardId}')">
+          <div>
+            <div class="talhao-nome">${u.fazenda?u.fazenda+' · ':''}${u.nome}${u.area_ha>0?` <span class="talhao-area">${fmt(u.area_ha)} ha</span>`:''}</div>
+            <div class="talhao-resumo">
+              ${pls.length?`<span>🌱 ${pls.length} plantio(s)</span>`:''}
+              ${aps.length?`<span>🧪 ${aps.length} aplic.</span>`:''}
+              ${cols.length?`<span>🌾 ${cols.length} colheita(s)</span>`:''}
+            </div>
+          </div>
+          <div class="talhao-badges">
+            ${nPlan?`<span class="tb tb-plan">${nPlan} plan.</span>`:''}
+            ${nLib?`<span class="tb tb-lib">${nLib} liberada(s)</span>`:''}
+            ${nExec?`<span class="tb tb-exec">${nExec} em exec.</span>`:''}
+            ${nConc?`<span class="tb tb-conc">${nConc} concl.</span>`:''}
+            <span class="talhao-seta">▾</span>
+          </div>
+        </div>
+        <div class="talhao-detalhes">
+          ${blocoEventoTalhao('🌱 Plantio', pls.map(p => ({
+            data: p.status==='concluido'?(p.data_conclusao||p.data):p.data,
+            titulo: `${p.cultura||'Plantio'}${p.cultivar?` (${p.cultivar})`:''}`,
+            info: [p.ciclo_dias?`ciclo ${fmt(p.ciclo_dias)}d`:'', p.data_prevista_colheita?`prev. colheita ${fmtDataBR(p.data_prevista_colheita)}`:''].filter(Boolean).join(' · '),
+            status: p.status
+          })))}
+          ${blocoEventoTalhao('🧪 Aplicações', aps.sort((a,b)=>(a.data||'').localeCompare(b.data||'')).map(a => ({
+            data: a.data,
+            titulo: `${a.produto||'—'}${a.dose?` — ${fmt(a.dose)} ${a.unidade||''}/ha`:''}`,
+            info: [tipoDaAdubacao(a)==='pulverizacao'?'💧 pulveriz.':'🪨 sólido', a.categoria||''].filter(Boolean).join(' · '),
+            status: a.status
+          })))}
+          ${blocoEventoTalhao('🌾 Colheita', cols.map(c => ({
+            data: c.status==='concluido'?(c.data_conclusao||c.data):c.data,
+            titulo: `${c.cultura||'Colheita'}`,
+            info: c.status==='concluido'?[c.produtividade?`${fmt(c.produtividade)} ${c.unidade_produtividade||'sc/ha'}`:'', c.umidade?`umid. ${fmt(c.umidade)}%`:''].filter(Boolean).join(' · '):'',
+            status: c.status
+          })))}
+        </div>
+      </div>`;
+  }).filter(Boolean).join('');
+
+  cont.innerHTML = cards || `<div style="text-align:center;padding:48px 16px;color:var(--cinza)"><div style="font-size:34px;opacity:.35;margin-bottom:8px">📍</div>Nenhum evento para a safra selecionada</div>`;
+}
+
+// Bloco de uma categoria de evento dentro do card do talhão
+function blocoEventoTalhao(titulo, eventos) {
+  if (!eventos.length) return '';
+  const linhas = eventos.map(e => `
+    <div class="talhao-evento">
+      <span class="te-data">${fmtDataBR(e.data)}</span>
+      <span class="te-titulo">${e.titulo}${e.info?`<span class="te-info">${e.info}</span>`:''}</span>
+      ${badgeStatusCampo(e.status)}
+    </div>`).join('');
+  return `<div class="talhao-secao"><div class="talhao-secao-titulo">${titulo}</div>${linhas}</div>`;
+}
+
+window.toggleTalhaoCard = function(cardId) {
+  const c = document.getElementById(cardId);
+  if (c) c.classList.toggle('aberto');
 };
 
 // ── COLHEITA ──
