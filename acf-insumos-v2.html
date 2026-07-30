@@ -2316,17 +2316,24 @@ function renderCadastros() {
       <div>
         <div class="sec-header">
           <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📅 Safras</div>
-          <button class="btn btn-primary btn-sm" onclick="abrirModalSafra()">+ Nova</button>
+          <div style="display:flex;gap:6px">
+            ${safrasDisponiveis().length>=2?`<button class="btn btn-secondary btn-sm" onclick="abrirUnificarSafras()">🔀 Unificar</button>`:''}
+            <button class="btn btn-primary btn-sm" onclick="abrirModalSafra()">+ Nova</button>
+          </div>
         </div>
         <div class="tabela-wrap"><table>
-          <thead><tr><th>Safra</th><th></th></tr></thead>
+          <thead><tr><th>Safra</th><th>Registros</th><th class="col-acoes">Ações</th></tr></thead>
           <tbody>
-            ${safras.length === 0 ? '<tr><td colspan="2" class="tabela-vazia">Nenhuma safra cadastrada</td></tr>' :
+            ${safras.length === 0 ? '<tr><td colspan="3" class="tabela-vazia">Nenhuma safra cadastrada</td></tr>' :
             safras.map(s => `<tr><td><strong>${s.nome}</strong></td>
-            <td style="text-align:right"><button class="btn btn-sm btn-secondary" onclick="excluirSafra('${s.id}')">✕</button></td></tr>`).join('')}
+            <td>${contarRegistrosSafra(s.nome)}</td>
+            <td class="col-acoes"><div class="acoes-wrap">
+              <button class="btn btn-sm btn-secondary" onclick="abrirRenomearSafra('${s.id}')" title="Renomear (atualiza todos os registros)">✏️</button>
+              <button class="btn btn-sm btn-secondary" onclick="excluirSafra('${s.id}')">✕</button>
+            </div></td></tr>`).join('')}
           </tbody>
         </table></div>
-        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 Ex: "Soja 25/26", "Milho Safrinha 26", "24/25".</p>
+        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 "Registros" = quantos plantios, aplicações e colheitas usam essa safra. Renomear ou unificar atualiza todos eles de uma vez.</p>
       </div>
     </div>
     <style>@media (max-width:700px){ #cadastros-grid { grid-template-columns:1fr !important; } }</style>`;
@@ -2485,10 +2492,130 @@ window.salvarSafra = async function() {
 
 window.excluirSafra = async function(id) {
   if(!exigirMaster())return;
-  if (!confirm('Excluir esta safra? (não afeta retiradas já registradas)')) return;
+  if (!confirm('Excluir esta safra? (não afeta registros já feitos)')) return;
   try {
     await deleteDoc(doc(db,'insumos_safras',id));
     safras.splice(safras.findIndex(x=>x.id===id),1);
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// Conta quantos registros (plantio + aplicação + colheita) usam uma safra
+function contarRegistrosSafra(nome) {
+  const n = normalizar(nome);
+  const c = [...plantios, ...adubacoes, ...colheitas].filter(r => normalizar(r.safra||'') === n).length;
+  return c;
+}
+
+// Aplica a troca de nome de safra em todas as coleções de registros
+async function reescreverSafraNosRegistros(nomeAntigo, nomeNovo) {
+  const na = normalizar(nomeAntigo);
+  const alvos = [
+    { arr: plantios, col: 'insumos_campo_plantio' },
+    { arr: adubacoes, col: 'insumos_campo_adubacao' },
+    { arr: colheitas, col: 'insumos_campo_colheita' }
+  ];
+  let batch = writeBatch(db), n = 0, total = 0;
+  for (const {arr, col} of alvos) {
+    for (const r of arr) {
+      if (normalizar(r.safra||'') === na) {
+        batch.update(doc(db, col, r.id), { safra: nomeNovo });
+        r.safra = nomeNovo; // atualiza local
+        n++; total++;
+        if (n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+      }
+    }
+  }
+  if (n > 0) await batch.commit();
+  return total;
+}
+
+window.abrirRenomearSafra = function(id) {
+  if(!exigirMaster())return;
+  const s = safras.find(x=>x.id===id);
+  if (!s) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-renomear-safra">
+      <div class="modal" style="max-width:420px">
+        <div class="modal-titulo">✏️ Renomear Safra</div>
+        <p style="font-size:13px;color:var(--cinza);margin-bottom:12px">Isso corrige o nome em <strong>${contarRegistrosSafra(s.nome)}</strong> registro(s) que usam "${s.nome}".</p>
+        <div class="form-group"><label>Novo nome *</label><input type="text" id="rs-nome" value="${s.nome.replace(/"/g,'&quot;')}"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-renomear-safra')">Cancelar</button>
+          <button class="btn btn-primary" onclick="renomearSafra('${id}')">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.renomearSafra = async function(id) {
+  const s = safras.find(x=>x.id===id);
+  if (!s) return;
+  const novo = document.getElementById('rs-nome').value.trim();
+  if (!novo) { toast('Informe o novo nome.','erro'); return; }
+  if (novo === s.nome) { fecharModal('modal-renomear-safra'); return; }
+  // Se já existe outra safra com esse nome, isso vira uma unificação
+  const jaExiste = safras.find(x => x.id!==id && normalizar(x.nome)===normalizar(novo));
+  try {
+    const nomeAntigo = s.nome;
+    const total = await reescreverSafraNosRegistros(nomeAntigo, novo);
+    await updateDoc(doc(db,'insumos_safras',id), { nome: novo });
+    s.nome = novo;
+    // se colidiu com outra safra existente, remove a duplicata do cadastro
+    if (jaExiste) {
+      await deleteDoc(doc(db,'insumos_safras',jaExiste.id));
+      safras.splice(safras.findIndex(x=>x.id===jaExiste.id),1);
+    }
+    safras.sort((a,b)=>a.nome.localeCompare(b.nome));
+    fecharModal('modal-renomear-safra');
+    toast(`Safra renomeada em ${total} registro(s).`);
+    renderCadastros();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.abrirUnificarSafras = function() {
+  if(!exigirMaster())return;
+  // Considera todas as safras que aparecem — cadastradas E as que só existem em registros
+  const todas = safrasDisponiveis();
+  if (todas.length < 2) { toast('É preciso ter ao menos 2 safras para unificar.','erro'); return; }
+  const opcoes = todas.map(nome=>`<option value="${nome.replace(/"/g,'&quot;')}">${nome} (${contarRegistrosSafra(nome)} reg.)</option>`).join('');
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-unificar-safra">
+      <div class="modal" style="max-width:460px">
+        <div class="modal-titulo">🔀 Unificar Safras</div>
+        <p style="font-size:13px;color:var(--cinza);margin-bottom:14px">Todos os registros da safra de <strong>origem</strong> passam para a safra de <strong>destino</strong>. A origem é removida do cadastro.</p>
+        <div class="form-group"><label>Origem (será unificada) *</label><select id="uni-origem">${opcoes}</select></div>
+        <div class="form-group"><label>Destino (safra que fica) *</label><select id="uni-destino">${opcoes}</select></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-unificar-safra')">Cancelar</button>
+          <button class="btn btn-primary" onclick="unificarSafras()">Unificar</button>
+        </div>
+      </div>
+    </div>`);
+  setTimeout(()=>{ const d=document.getElementById('uni-destino'); if(d && d.options.length>1) d.selectedIndex=1; },0);
+};
+
+window.unificarSafras = async function() {
+  const nomeOrigem = document.getElementById('uni-origem').value;
+  const nomeDestino = document.getElementById('uni-destino').value;
+  if (normalizar(nomeOrigem) === normalizar(nomeDestino)) { toast('Escolha safras diferentes.','erro'); return; }
+  if (!confirm(`Unificar "${nomeOrigem}" em "${nomeDestino}"? Todos os registros de "${nomeOrigem}" passarão para "${nomeDestino}".`)) return;
+  try {
+    const total = await reescreverSafraNosRegistros(nomeOrigem, nomeDestino);
+    // Remove a safra de origem do cadastro, se existir lá
+    const sOrigem = safras.find(s => normalizar(s.nome) === normalizar(nomeOrigem));
+    if (sOrigem) {
+      await deleteDoc(doc(db,'insumos_safras',sOrigem.id));
+      safras.splice(safras.findIndex(x=>x.id===sOrigem.id),1);
+    }
+    // Garante que o destino exista no cadastro
+    if (!safras.find(s => normalizar(s.nome) === normalizar(nomeDestino))) {
+      const ref = await addDoc(collection(db,'insumos_safras'), { nome: nomeDestino });
+      safras.push({ id: ref.id, nome: nomeDestino });
+      safras.sort((a,b)=>a.nome.localeCompare(b.nome));
+    }
+    fecharModal('modal-unificar-safra');
+    toast(`${total} registro(s) movidos para "${nomeDestino}". Safra "${nomeOrigem}" removida.`);
     renderCadastros();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
