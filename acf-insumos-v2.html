@@ -928,6 +928,60 @@ window.aplicIniciar = async function(id, emLote) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
+// ── BAIXA AUTOMÁTICA DE ESTOQUE ──
+// Ao concluir uma aplicação, gera a retirada correspondente (dose × área do talhão)
+// e vincula à aplicação (aplicacao_id) para não duplicar nem perder rastreio.
+async function baixarEstoquePorAplicacao(a) {
+  if (!a || a.estoque_baixado) return { ok: true }; // já baixado
+  const dose = parseFloat(a.dose) || 0;
+  if (dose <= 0) return { ok: false, motivo: 'sem dose' };
+  const areaHa = areaDoTalhao(a.fazenda, a.talhao);
+  if (areaHa <= 0) return { ok: false, motivo: 'talhão sem área cadastrada' };
+  const qtd = dose * areaHa;
+
+  // Casa o produto da aplicação com o estoque: match exato normalizado,
+  // senão tenta correspondência parcial (ex: "Gesso" ↔ "Gesso - CIF")
+  const alvo = normalizar(a.produto || '');
+  let est = estoque.find(e => normalizar(e.produto) === alvo);
+  if (!est) est = estoque.find(e => normalizar(e.produto).includes(alvo) || alvo.includes(normalizar(e.produto)));
+
+  const retirada = {
+    produto: est ? est.produto : (a.produto || ''),
+    unidade: est ? est.unidade : (a.unidade || ''),
+    quantidade: qtd,
+    fazenda: a.fazenda || '', talhao: a.talhao || '',
+    cultura: '', safra: a.safra || '',
+    obs: `Baixa automática — aplicação concluída (${fmt(dose)} ${a.unidade||''}/ha × ${fmt(areaHa)} ha)`,
+    custo_unitario: est ? (est.custo_medio||0) : 0,
+    custo_total: qtd * (est ? (est.custo_medio||0) : 0),
+    data: Timestamp.now(), operador_uid: usuarioAtual?.uid || '',
+    origem: 'aplicacao', aplicacao_id: a.id
+  };
+  try {
+    const ref = await addDoc(collection(db,'insumos_retiradas'), retirada);
+    retiradas.unshift({id: ref.id, ...retirada});
+    await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { estoque_baixado: true, retirada_id: ref.id });
+    a.estoque_baixado = true; a.retirada_id = ref.id;
+    recalcularEstoque();
+    return { ok: true, semCadastro: !est };
+  } catch(e) {
+    return { ok: false, motivo: e.message };
+  }
+}
+
+// Reverte a baixa (usado quando o master volta o status de "concluído")
+async function reverterBaixaAplicacao(a) {
+  if (!a || !a.estoque_baixado || !a.retirada_id) return;
+  try {
+    await deleteDoc(doc(db,'insumos_retiradas',a.retirada_id));
+    const i = retiradas.findIndex(r=>r.id===a.retirada_id);
+    if (i>=0) retiradas.splice(i,1);
+    await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { estoque_baixado: false, retirada_id: '' });
+    a.estoque_baixado = false; a.retirada_id = '';
+    recalcularEstoque();
+  } catch(e) { /* silencioso */ }
+}
+
 window.aplicConcluir = async function(id, emLote, obsOperador) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
@@ -939,7 +993,13 @@ window.aplicConcluir = async function(id, emLote, obsOperador) {
     await updateDoc(doc(db,'insumos_campo_adubacao',id), upd);
     a.status = 'concluido'; a.data_conclusao = data_conclusao;
     if (upd.obs_operador != null) a.obs_operador = upd.obs_operador;
-    if (!emLote) { toast('Aplicação concluída!'); renderModoAplicacoes(); }
+    // Baixa automática de estoque
+    const baixa = await baixarEstoquePorAplicacao(a);
+    if (!emLote) {
+      if (baixa.ok) toast('Aplicação concluída!' + (baixa.semCadastro ? ' (produto sem entrada no estoque — retirada registrada mesmo assim)' : ''));
+      else toast(`Aplicação concluída, mas estoque NÃO baixado: ${baixa.motivo}.`, 'erro');
+      renderModoAplicacoes();
+    }
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
@@ -2968,6 +3028,7 @@ function renderAdubacao(tipo) {
           ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza);align-self:center">Aguardando execução</span>`:''}
           ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja);align-self:center">Em execução no campo</span>`:''}
           ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
+          ${a.status==='concluido' && !a.estoque_baixado?`<button class="btn btn-sm btn-laranja" onclick="baixarEstoqueRetroativo('${a.id}')" title="Esta aplicação foi concluída sem baixar o estoque. Clique para baixar agora (dose × área).">📦 Baixar estoque</button>`:''}
           <button class="btn btn-sm btn-secondary" onclick="abrirModalAdubacao('${a.id}','${tipo}')" title="Editar (requer senha master)">✏️</button>
           <button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
         </div></td></tr>`).join('')}
@@ -3121,9 +3182,10 @@ window.salvarAdubacao = async function(id) {
     if (id) {
       // Master pode alterar o status. Ajusta campos ligados ao status.
       const novoStatus = document.getElementById('ad-status')?.value;
+      const a0 = adubacoes.find(x=>x.id===id) || {};
+      const statusAnterior = a0.status;
       if (novoStatus) {
         reg.status = novoStatus;
-        const a0 = adubacoes.find(x=>x.id===id) || {};
         if (novoStatus === 'concluido' && !a0.data_conclusao) reg.data_conclusao = hoje();
         if (novoStatus === 'execucao' && !a0.iniciado_em) reg.iniciado_em = Timestamp.now();
         // volta para planejado limpa timestamps de execução/conclusão
@@ -3132,7 +3194,18 @@ window.salvarAdubacao = async function(id) {
       await updateDoc(doc(db,'insumos_campo_adubacao',id), reg);
       const i = adubacoes.findIndex(x=>x.id===id);
       if (i>=0) adubacoes[i] = { ...adubacoes[i], ...reg };
-      toast('Registro atualizado!');
+      // Sincroniza a baixa de estoque com a mudança de status
+      const aAtual = adubacoes.find(x=>x.id===id);
+      if (novoStatus === 'concluido' && statusAnterior !== 'concluido') {
+        const baixa = await baixarEstoquePorAplicacao(aAtual);
+        if (baixa.ok) toast('Registro atualizado! Estoque baixado.');
+        else toast(`Atualizado, mas estoque NÃO baixado: ${baixa.motivo}.`, 'erro');
+      } else if (novoStatus && novoStatus !== 'concluido' && statusAnterior === 'concluido') {
+        await reverterBaixaAplicacao(aAtual);
+        toast('Registro atualizado! Baixa de estoque revertida.');
+      } else {
+        toast('Registro atualizado!');
+      }
     } else {
       reg.status = 'planejado'; reg.criado_em = Timestamp.now();
       const ref = await addDoc(collection(db,'insumos_campo_adubacao'), reg);
@@ -3185,6 +3258,20 @@ window.liberarParaCampo = async function(id) {
 };
 
 // Concluir sem passar pelo operador (ex: já foi feito, só registrando)
+// Baixa retroativa: para aplicações concluídas antes da baixa automática existir
+window.baixarEstoqueRetroativo = async function(id) {
+  const a = adubacoes.find(x=>x.id===id);
+  if (!a) return;
+  if (a.estoque_baixado) { toast('Estoque desta aplicação já foi baixado.'); return; }
+  const areaHa = areaDoTalhao(a.fazenda, a.talhao);
+  const qtd = (parseFloat(a.dose)||0) * areaHa;
+  if (!confirm(`Baixar do estoque ${fmt(qtd)} ${a.unidade||''} de "${a.produto}" (${fmt(a.dose)} ${a.unidade||''}/ha × ${fmt(areaHa)} ha em ${a.talhao})?`)) return;
+  const baixa = await baixarEstoquePorAplicacao(a);
+  if (baixa.ok) toast('Estoque baixado!' + (baixa.semCadastro ? ' (produto sem entrada no estoque — retirada registrada mesmo assim)' : ''));
+  else toast(`Não foi possível baixar: ${baixa.motivo}.`, 'erro');
+  renderSubabaCaderno();
+};
+
 window.concluirDireto = async function(id) {
   const data_conclusao = prompt('Data de conclusão (DD/MM/AAAA ou deixe vazio para hoje):','');
   const dataFinal = data_conclusao ? data_conclusao : hoje();
@@ -3192,7 +3279,10 @@ window.concluirDireto = async function(id) {
     await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'concluido', data_conclusao: dataFinal });
     const a = adubacoes.find(x=>x.id===id);
     if (a) { a.status='concluido'; a.data_conclusao=dataFinal; }
-    toast('Registrado como concluído!');
+    // Baixa automática de estoque
+    const baixa = a ? await baixarEstoquePorAplicacao(a) : { ok: false, motivo: 'registro não encontrado' };
+    if (baixa.ok) toast('Registrado como concluído! Estoque baixado.' + (baixa.semCadastro ? ' (produto sem entrada no estoque)' : ''));
+    else toast(`Concluído, mas estoque NÃO baixado: ${baixa.motivo}.`, 'erro');
     renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
