@@ -269,27 +269,38 @@
     transition: max-height .28s ease;
   }
   .aplic-card.aberto .aplic-card-detalhes {
-    max-height: 1200px; border-top: 1px solid var(--aplic-borda);
+    max-height: 1400px; border-top: 1px solid var(--aplic-borda);
   }
-  .aplic-produto {
-    display: flex; align-items: center; gap: 12px;
-    padding: 14px 18px;
+  .aplic-card-area {
+    font-size: 12px; color: var(--aplic-texto2);
+    background: var(--aplic-fundo); padding: 2px 9px; border-radius: 6px;
+  }
+  .aplic-card-area-alerta { color: var(--aplic-ambar); background: var(--aplic-ambar-suave); }
+  .aplic-tabela {
+    width: 100%; border-collapse: collapse; font-size: 14px;
+  }
+  .aplic-tabela th {
+    text-align: left; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+    color: var(--aplic-texto3); padding: 12px 18px 8px;
     border-bottom: 1px solid var(--aplic-borda);
   }
-  .aplic-produto:last-child { border-bottom: none; }
-  .aplic-produto-nome { font-weight: 600; font-size: 14px; color: var(--aplic-texto); }
-  .aplic-produto-dose { font-size: 13px; color: var(--aplic-texto2); margin-top: 2px; }
-  .aplic-produto-obs {
-    font-size: 13px; color: var(--aplic-texto2); margin-top: 6px;
-    padding: 7px 11px; background: var(--aplic-fundo); border-radius: 8px;
+  .aplic-tabela th:nth-child(2), .aplic-tabela td:nth-child(2) { text-align: right; white-space: nowrap; }
+  .aplic-tabela th:nth-child(3), .aplic-tabela td:nth-child(3) { text-align: right; white-space: nowrap; }
+  .aplic-tabela td { padding: 11px 18px; border-bottom: 1px solid var(--aplic-borda); }
+  .aplic-tabela tr:last-child td { border-bottom: none; }
+  .aplic-td-prod { font-weight: 600; color: var(--aplic-texto); }
+  .aplic-td-dose { color: var(--aplic-texto2); }
+  .aplic-td-total { font-weight: 700; color: var(--aplic-verde); }
+  .aplic-extra {
+    font-size: 13px; color: var(--aplic-texto2); line-height: 1.55;
+    padding: 10px 18px; background: var(--aplic-fundo);
+    border-top: 1px solid var(--aplic-borda);
   }
-  .aplic-produto-ts {
-    font-family: 'DM Mono', ui-monospace, monospace;
-    font-size: 11px; color: var(--aplic-texto3); margin-top: 6px;
-  }
+  .aplic-acao-wrap { padding: 14px 18px; display: flex; justify-content: flex-end; }
   .aplic-btn {
     border: none; border-radius: 10px; font-family: 'DM Sans', sans-serif;
-    font-weight: 600; font-size: 13px; padding: 10px 16px; cursor: pointer;
+    font-weight: 600; font-size: 14px; padding: 11px 20px; cursor: pointer;
     white-space: nowrap; transition: filter .15s ease, transform .1s ease;
   }
   .aplic-btn:active { transform: scale(.97); }
@@ -645,53 +656,120 @@ function cardAplicacao(g, idx) {
       ? `<span class="aplic-chip aplic-chip-ok">Concluída</span>`
       : `<span class="aplic-chip aplic-chip-pend">Pendente</span>`;
 
-  // Detalhes (escondido por padrão): lista de produtos + observações
-  const detalhes = g.itens.map(it => {
-    const dose = it.dose ? `${fmt(it.dose)} ${it.unidade||''}` : '—';
-    const ts = [];
-    if (it.iniciado_em) ts.push(`Início: ${fmtDataHora(it.iniciado_em)}`);
-    if (it.data_conclusao) ts.push(`Concluído: ${it.data_conclusao}`);
-    let btn = '';
-    if (it.status === 'planejado' || it.status === 'enviado_operador') {
-      btn = `<button class="aplic-btn aplic-btn-iniciar" onclick="event.stopPropagation();aplicIniciar('${it.id}')">▶ Iniciar</button>`;
-    } else if (it.status === 'execucao') {
-      btn = `<button class="aplic-btn aplic-btn-concluir" onclick="event.stopPropagation();aplicConcluir('${it.id}')">■ Concluir</button>`;
-    }
+  // Área do talhão (do cadastro) — usada para calcular o total por produto
+  const areaHa = areaDoTalhao(g.fazenda, g.talhao);
+
+  // Linhas da tabela: Produto | Dose (un/ha) | Total (un)
+  const linhas = g.itens.map(it => {
+    const un = it.unidade || '';
+    const dose = it.dose ? `${fmt(it.dose)} ${un}/ha` : '—';
+    const total = (it.dose && areaHa > 0) ? `${fmt(it.dose * areaHa)} ${un}` : '—';
     return `
-      <div class="aplic-produto">
-        <div style="flex:1">
-          <div class="aplic-produto-nome">${it.produto||'—'}</div>
-          <div class="aplic-produto-dose">Dose: ${dose}</div>
-          ${it.obs?`<div class="aplic-produto-obs">📝 ${it.obs}</div>`:''}
-          ${ts.length?`<div class="aplic-produto-ts">${ts.join(' · ')}</div>`:''}
-        </div>
-        ${btn}
-      </div>`;
+      <tr>
+        <td class="aplic-td-prod">${it.produto||'—'}</td>
+        <td class="aplic-td-dose">${dose}</td>
+        <td class="aplic-td-total">${total}</td>
+      </tr>`;
   }).join('');
 
+  // Observações (uma por produto, se houver) + timestamps
+  const extras = g.itens.map(it => {
+    const partes = [];
+    if (it.obs) partes.push(`📝 ${it.produto ? `<strong>${it.produto}:</strong> ` : ''}${it.obs}`);
+    if (it.iniciado_em) partes.push(`Início: ${fmtDataHora(it.iniciado_em)}`);
+    if (it.data_conclusao) partes.push(`Concluído: ${it.data_conclusao}`);
+    return partes.length ? `<div class="aplic-extra">${partes.join('<br>')}</div>` : '';
+  }).join('');
+
+  // Botão de ação da operação inteira (todos os produtos do card mudam juntos)
+  let botaoOperacao = '';
+  const temPendente = g.itens.some(it => it.status === 'planejado' || it.status === 'enviado_operador');
+  const temExecucao = g.itens.some(it => it.status === 'execucao');
+  if (temPendente) {
+    botaoOperacao = `<button class="aplic-btn aplic-btn-iniciar" onclick="event.stopPropagation();aplicIniciarGrupo('${cardId}')">▶ Iniciar aplicação</button>`;
+  } else if (temExecucao) {
+    botaoOperacao = `<button class="aplic-btn aplic-btn-concluir" onclick="event.stopPropagation();aplicConcluirGrupo('${cardId}')">■ Concluir aplicação</button>`;
+  }
+  // Guarda os ids dos itens do grupo para as ações em lote
+  const idsGrupo = g.itens.map(it => it.id).join(',');
+
+  const cabecalhoArea = areaHa > 0
+    ? `<span class="aplic-card-area">${fmt(areaHa)} ha</span>`
+    : `<span class="aplic-card-area aplic-card-area-alerta" title="Cadastre a área do talhão em Cadastros para calcular o total">área não cadastrada</span>`;
+
+  // Vazão (só pulverização): pega a primeira informada no grupo
+  const vazaoGrupo = (g.itens.find(it => it.vazao) || {}).vazao || '';
+  const resumoLinha = `${nProdutos} produto${nProdutos>1?'s':''}${vazaoGrupo?` · 💧 ${vazaoGrupo}`:''}`;
+
   return `
-    <div class="aplic-card ${g.status}" id="${cardId}">
+    <div class="aplic-card ${g.status}" id="${cardId}" data-ids="${idsGrupo}">
       <div class="aplic-card-head" onclick="toggleAplicCard('${cardId}')">
         <div style="flex:1;min-width:0">
           <div class="aplic-card-data">${g.data||'—'}</div>
           <div class="aplic-card-local">
             <span class="aplic-card-fazenda">${g.fazenda}</span>
             <span class="aplic-card-talhao">${g.talhao}</span>
+            ${cabecalhoArea}
           </div>
-          <div class="aplic-card-resumo">${nProdutos} produto${nProdutos>1?'s':''}</div>
+          <div class="aplic-card-resumo">${resumoLinha}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
           ${acaoTopo}
           <span class="aplic-card-seta">▾</span>
         </div>
       </div>
-      <div class="aplic-card-detalhes">${detalhes}</div>
+      <div class="aplic-card-detalhes">
+        <table class="aplic-tabela">
+          <thead><tr><th>Produto</th><th>Dose</th><th>Total no talhão</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+        ${extras}
+        ${botaoOperacao?`<div class="aplic-acao-wrap">${botaoOperacao}</div>`:''}
+      </div>
     </div>`;
+}
+
+// Busca a área (ha) de um talhão pelo cadastro, casando fazenda + nome do talhão
+function areaDoTalhao(fazenda, talhao) {
+  if (!talhao) return 0;
+  const t = talhoes.find(t =>
+    normalizar(t.nome) === normalizar(talhao) &&
+    (!fazenda || normalizar(t.fazenda||'') === normalizar((fazenda||'').replace('Fazenda ','')))
+  );
+  return t ? (parseFloat(t.area_ha) || 0) : 0;
 }
 
 window.toggleAplicCard = function(cardId) {
   const card = document.getElementById(cardId);
   if (card) card.classList.toggle('aberto');
+};
+
+// Ações em lote: inicia/conclui todos os produtos da operação (card) de uma vez
+window.aplicIniciarGrupo = async function(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const ids = (card.dataset.ids||'').split(',').filter(Boolean);
+  for (const id of ids) {
+    const a = adubacoes.find(x=>x.id===id);
+    if (a && (a.status==='planejado' || a.status==='enviado_operador')) {
+      await aplicIniciar(id, true);
+    }
+  }
+  renderModoAplicacoes();
+};
+
+window.aplicConcluirGrupo = async function(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  if (!confirm('Concluir todos os produtos desta aplicação?')) return;
+  const ids = (card.dataset.ids||'').split(',').filter(Boolean);
+  for (const id of ids) {
+    const a = adubacoes.find(x=>x.id===id);
+    if (a && a.status==='execucao') {
+      await aplicConcluir(id, true);
+    }
+  }
+  renderModoAplicacoes();
 };
 
 function fmtDataHora(ts) {
@@ -700,27 +778,25 @@ function fmtDataHora(ts) {
   return d.toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 }
 
-window.aplicIniciar = async function(id) {
+window.aplicIniciar = async function(id, emLote) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
   try {
     await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'execucao', iniciado_em: Timestamp.now() });
     a.status = 'execucao'; a.iniciado_em = Timestamp.now();
-    toast('Aplicação iniciada!');
-    renderModoAplicacoes();
+    if (!emLote) { toast('Aplicação iniciada!'); renderModoAplicacoes(); }
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-window.aplicConcluir = async function(id) {
+window.aplicConcluir = async function(id, emLote) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
-  if (!confirm(`Concluir a aplicação de "${a.produto}" em ${a.talhao}?`)) return;
+  if (!emLote && !confirm(`Concluir a aplicação de "${a.produto}" em ${a.talhao}?`)) return;
   try {
     const data_conclusao = hoje();
     await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'concluido', data_conclusao });
     a.status = 'concluido'; a.data_conclusao = data_conclusao;
-    toast('Aplicação concluída!');
-    renderModoAplicacoes();
+    if (!emLote) { toast('Aplicação concluída!'); renderModoAplicacoes(); }
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
@@ -2325,7 +2401,8 @@ function renderCaderno() {
     </div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
-      <button class="nav-btn ${cadernoSubaba==='adubacao'?'ativo':''}" onclick="mudarSubabaCaderno('adubacao')">🧪 Defensivos, Corretivos e Adubação</button>
+      <button class="nav-btn ${cadernoSubaba==='pulverizacao'?'ativo':''}" onclick="mudarSubabaCaderno('pulverizacao')">💧 Pulverização</button>
+      <button class="nav-btn ${cadernoSubaba==='solido'?'ativo':''}" onclick="mudarSubabaCaderno('solido')">🪨 Sólidos</button>
       <button class="nav-btn ${cadernoSubaba==='colheita'?'ativo':''}" onclick="mudarSubabaCaderno('colheita')">🌾 Colheita</button>
     </div>
     <div id="caderno-conteudo"></div>`;
@@ -2337,7 +2414,8 @@ window.mudarSubabaCaderno = function(sub) { cadernoSubaba = sub; renderCaderno()
 function renderSubabaCaderno() {
   switch(cadernoSubaba) {
     case 'plantio': renderPlantio(); break;
-    case 'adubacao': renderAdubacao(); break;
+    case 'pulverizacao': renderAdubacao('pulverizacao'); break;
+    case 'solido': renderAdubacao('solido'); break;
     case 'colheita': renderColheita(); break;
   }
 }
@@ -2481,32 +2559,39 @@ window.confirmarConcluirPlantio = async function(id) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-// ── DEFENSIVOS, CORRETIVOS E ADUBAÇÃO ──
-function renderAdubacao() {
+// ── APLICAÇÕES: PULVERIZAÇÃO (líquidos, com vazão) e SÓLIDOS (corretivos/adubação) ──
+// tipo: 'pulverizacao' | 'solido'. Registros antigos sem tipo contam como 'solido'.
+function tipoDaAdubacao(a) { return a.tipo_aplicacao === 'pulverizacao' ? 'pulverizacao' : 'solido'; }
+
+function renderAdubacao(tipo) {
+  tipo = tipo || 'solido';
   const el = document.getElementById('caderno-conteudo');
+  const lista = adubacoes.filter(a => tipoDaAdubacao(a) === tipo);
+  const ehPulv = tipo === 'pulverizacao';
+  const rotulo = ehPulv ? 'Pulverização' : 'Sólidos';
   el.innerHTML = `
-    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${adubacoes.length} registro(s)</div>
+    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s) — ${rotulo}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" onclick="baixarModelo('adubacao')">📋 Baixar Modelo</button>
+        <button class="btn btn-secondary btn-sm" onclick="baixarModelo('${tipo}')">📋 Baixar Modelo</button>
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-adubacao').click()">📤 Importar Excel</button>
-        <input type="file" id="import-adubacao" accept=".xlsx,.xls" style="display:none" onchange="importarPlanilha(this,'adubacao')">
-        <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('adubacao')">📥 Exportar Excel</button>
-        <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Novo Planejamento</button>
+        <input type="file" id="import-adubacao" accept=".xlsx,.xls" style="display:none" onchange="importarPlanilha(this,'${tipo}')">
+        <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('${tipo}')">📥 Exportar Excel</button>
+        <button class="btn btn-primary" onclick="abrirModalAdubacao(null,'${tipo}')">+ Novo Planejamento</button>
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Categoria</th><th>Produto</th><th>Dose</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Categoria</th><th>Produto</th><th>Dose</th>${ehPulv?'<th>Vazão</th>':''}<th>Status</th><th></th></tr></thead>
       <tbody>
-        ${adubacoes.length===0?'<tr><td colspan="8" class="tabela-vazia">Nenhum registro</td></tr>':
-        adubacoes.map(a=>`<tr><td>${a.data||'—'}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
-        <td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td><td>${badgeStatusCampo(a.status)}</td>
+        ${lista.length===0?`<tr><td colspan="${ehPulv?9:8}" class="tabela-vazia">Nenhum registro</td></tr>`:
+        lista.map(a=>`<tr><td>${a.data||'—'}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
+        <td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td style="white-space:nowrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
           ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando execução</span>`:''}
           ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja)">Em execução no campo</span>`:''}
           ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
-          ${a.status==='planejado'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}')">✏️</button>`:''}
+          ${a.status==='planejado'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}','${tipo}')">✏️</button>`:''}
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
         </td></tr>`).join('')}
       </tbody>
@@ -2554,27 +2639,35 @@ window.atualizarOpcoesModoData = function() {
   cont.innerHTML = renderModoDataCampos({});
 };
 
-window.abrirModalAdubacao = function(id) {
+window.abrirModalAdubacao = function(id, tipo) {
   if(id && !exigirMaster())return;
   const a = id ? adubacoes.find(x=>x.id===id) : null;
+  // tipo vem da aba; se editando, respeita o tipo já gravado no registro
+  const tp = a ? tipoDaAdubacao(a) : (tipo === 'pulverizacao' ? 'pulverizacao' : 'solido');
+  const ehPulv = tp === 'pulverizacao';
   const modoInicial = a?.modo_data || 'fixa';
+  const categorias = ehPulv
+    ? ['Herbicida','Fungicida','Inseticida','Adjuvante','Fertilizante foliar','Outro']
+    : ['Corretivo','Adubação','Outro'];
+  const titulo = ehPulv ? '💧 Pulverização' : '🪨 Sólidos (Corretivo / Adubação)';
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-adubacao">
       <div class="modal">
-        <div class="modal-titulo">🧪 ${a?'Editar':'Novo'} Planejamento — Defensivo / Corretivo / Adubação</div>
+        <div class="modal-titulo">${titulo} — ${a?'Editar':'Novo'} Planejamento</div>
         <div class="form-row">
           <div class="form-group"><label>Fazenda *</label><select id="ad-fazenda" onchange="atualizarTalhoesCampo('ad')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option ${f===a?.fazenda?'selected':''}>${f}</option>`).join('')}</select></div>
           <div class="form-group"><label>Talhão *</label><select id="ad-talhao" onchange="atualizarOpcoesModoData()"><option value="">Selecione a fazenda...</option></select></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===a?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Categoria</label><select id="ad-categoria">${['Defensivo','Corretivo','Adubação'].map(c=>`<option ${c===a?.categoria?'selected':''}>${c}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Categoria</label><select id="ad-categoria">${categorias.map(c=>`<option ${c===a?.categoria?'selected':''}>${c}</option>`).join('')}</select></div>
         </div>
-        <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" value="${a?.produto||''}" placeholder="Ex: MAP, Ureia, Calcário" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
+        <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" value="${a?.produto||''}" placeholder="${ehPulv?'Ex: Glifosato, Mancozeb':'Ex: Calcário, Gesso, MAP'}" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
         <div class="form-row">
-          <div class="form-group"><label>Dose</label><input type="number" id="ad-dose" value="${a?.dose||''}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Dose (por ha)</label><input type="number" id="ad-dose" value="${a?.dose||''}" min="0" step="0.01"></div>
           <div class="form-group"><label>Unidade</label><select id="ad-unidade">${UNIDADES.map(u=>`<option ${u===a?.unidade?'selected':''}>${u}</option>`).join('')}</select></div>
         </div>
+        ${ehPulv?`<div class="form-group"><label>Vazão (calda por ha)</label><input type="text" id="ad-vazao" value="${a?.vazao||''}" placeholder="Ex: 100 L/ha"></div>`:''}
         <div class="form-group"><label>Como definir a data? *</label>
           <select id="ad-modo-data" onchange="atualizarModoDataAdubacao()">
             <option value="fixa" ${modoInicial==='fixa'?'selected':''}>Data fixa</option>
@@ -2583,6 +2676,7 @@ window.abrirModalAdubacao = function(id) {
           </select></div>
         <div id="ad-modo-data-campos"></div>
         <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" value="${a?.obs||''}" placeholder="Opcional"></div>
+        <input type="hidden" id="ad-tipo" value="${tp}">
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-adubacao')">Cancelar</button>
           <button class="btn btn-primary" onclick="salvarAdubacao(${a?`'${id}'`:'null'})">Salvar</button>
@@ -2630,12 +2724,15 @@ window.salvarAdubacao = async function(id) {
     dataFinal = somarDias(aRef.data, dias_apos);
   }
 
+  const tipo_aplicacao = document.getElementById('ad-tipo')?.value || 'solido';
   const reg = {
     data: dataFinal, fazenda, talhao,
     safra: document.getElementById('ad-safra').value, categoria: document.getElementById('ad-categoria').value,
     produto, dose: parseFloat(document.getElementById('ad-dose').value)||0,
     unidade: document.getElementById('ad-unidade').value, obs: document.getElementById('ad-obs').value,
-    modo_data, ref_plantio_id, ref_aplicacao_id, dias_apos
+    modo_data, ref_plantio_id, ref_aplicacao_id, dias_apos,
+    tipo_aplicacao,
+    vazao: tipo_aplicacao === 'pulverizacao' ? (document.getElementById('ad-vazao')?.value.trim() || '') : ''
   };
   try {
     if (id) {
@@ -2650,7 +2747,7 @@ window.salvarAdubacao = async function(id) {
       toast('Planejamento salvo!');
     }
     fecharModal('modal-adubacao');
-    renderAdubacao();
+    renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
@@ -2674,7 +2771,7 @@ window.recalcularDataAdubacao = async function(id) {
     await updateDoc(doc(db,'insumos_campo_adubacao',id), { data: novaData });
     a.data = novaData;
     toast('Data recalculada para '+novaData);
-    renderAdubacao();
+    renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
@@ -2690,7 +2787,7 @@ window.liberarParaCampo = async function(id) {
     await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'enviado_operador' });
     a.status = 'enviado_operador';
     toast('Liberado! Já aparece no modo Aplicações para o operador executar.');
-    renderAdubacao();
+    renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
@@ -2703,7 +2800,7 @@ window.concluirDireto = async function(id) {
     const a = adubacoes.find(x=>x.id===id);
     if (a) { a.status='concluido'; a.data_conclusao=dataFinal; }
     toast('Registrado como concluído!');
-    renderAdubacao();
+    renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
@@ -2932,19 +3029,37 @@ const MODELOS_CADERNO = {
       'Status': p.status||'', 'Data Conclusão': p.data_conclusao||'', 'Observação': p.obs||''
     })
   },
-  adubacao: { colecao: 'insumos_campo_adubacao', lista: () => adubacoes,
-    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Defensivo/Corretivo/Adubação)','Produto','Dose','Unidade','Observação'],
-    linhaExemplo: ['2026-10-01','Rodeio','Rod 1','Soja 26/27','Defensivo','Glifosato','3','L','Exemplo'],
+  solido: { colecao: 'insumos_campo_adubacao', lista: () => adubacoes.filter(a => tipoDaAdubacao(a)==='solido'),
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Corretivo/Adubação)','Produto','Dose','Unidade','Observação'],
+    linhaExemplo: ['2026-08-20','Rodeio','Rod 1','Soja 26/27','Corretivo','Calcário','2','Ton','Exemplo'],
     doExcel: (row) => ({
       data: row['Data (AAAA-MM-DD)']||row['Data']||'', fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
-      safra: row['Safra']||'', categoria: row['Categoria (Defensivo/Corretivo/Adubação)']||row['Categoria']||'Defensivo',
+      safra: row['Safra']||'', categoria: row['Categoria (Corretivo/Adubação)']||row['Categoria']||'Corretivo',
       produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
-      obs: row['Observação']||'', status: 'planejado', criado_em: Timestamp.now()
+      obs: row['Observação']||'', tipo_aplicacao: 'solido', vazao: '', status: 'planejado', criado_em: Timestamp.now()
     }),
     obrigatorios: ['fazenda','talhao','produto'],
     paraExportar: (a) => ({
       'Data': a.data||'', 'Fazenda': a.fazenda||'', 'Talhão': a.talhao||'', 'Safra': a.safra||'', 'Categoria': a.categoria||'',
       'Produto': a.produto||'', 'Dose': a.dose||0, 'Unidade': a.unidade||'',
+      'Regra de Data': a.modo_data==='plantio'?`${a.dias_apos||0} dias após o plantio`:a.modo_data==='aplicacao'?`${a.dias_apos||0} dias após outra aplicação`:'Data fixa',
+      'Status': a.status||'', 'Data Conclusão': a.data_conclusao||'', 'Observação': a.obs||''
+    })
+  },
+  pulverizacao: { colecao: 'insumos_campo_adubacao', lista: () => adubacoes.filter(a => tipoDaAdubacao(a)==='pulverizacao'),
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Herbicida/Fungicida/Inseticida)','Produto','Dose','Unidade','Vazão','Observação'],
+    linhaExemplo: ['2026-10-01','Rodeio','Rod 1','Soja 26/27','Herbicida','Glifosato','3','L','100 L/ha','Exemplo'],
+    doExcel: (row) => ({
+      data: row['Data (AAAA-MM-DD)']||row['Data']||'', fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
+      safra: row['Safra']||'', categoria: row['Categoria (Herbicida/Fungicida/Inseticida)']||row['Categoria']||'Herbicida',
+      produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
+      vazao: (row['Vazão']||row['Vazao']||'').toString().trim(),
+      obs: row['Observação']||'', tipo_aplicacao: 'pulverizacao', status: 'planejado', criado_em: Timestamp.now()
+    }),
+    obrigatorios: ['fazenda','talhao','produto'],
+    paraExportar: (a) => ({
+      'Data': a.data||'', 'Fazenda': a.fazenda||'', 'Talhão': a.talhao||'', 'Safra': a.safra||'', 'Categoria': a.categoria||'',
+      'Produto': a.produto||'', 'Dose': a.dose||0, 'Unidade': a.unidade||'', 'Vazão': a.vazao||'',
       'Regra de Data': a.modo_data==='plantio'?`${a.dias_apos||0} dias após o plantio`:a.modo_data==='aplicacao'?`${a.dias_apos||0} dias após outra aplicação`:'Data fixa',
       'Status': a.status||'', 'Data Conclusão': a.data_conclusao||'', 'Observação': a.obs||''
     })
@@ -3003,7 +3118,7 @@ window.importarPlanilha = function(input, tipo) {
       if (importados === 0) { toast('Nenhuma linha válida encontrada — confira as colunas obrigatórias.','erro'); input.value=''; return; }
       await batch.commit();
       if (tipo==='plantio') plantios.unshift(...novosLocais);
-      if (tipo==='adubacao') adubacoes.unshift(...novosLocais);
+      if (tipo==='solido' || tipo==='pulverizacao') adubacoes.unshift(...novosLocais);
       if (tipo==='colheita') colheitas.unshift(...novosLocais);
       toast(`${importados} registro(s) importado(s)${ignorados>0?`, ${ignorados} ignorado(s) por falta de dados obrigatórios`:''}.`);
       renderSubabaCaderno();
@@ -3031,15 +3146,15 @@ window.exportarCaderno = function(tipo) {
 window.exportarCadernoCompleto = function() {
   try {
     const wb = XLSX.utils.book_new();
-    ['plantio','adubacao','colheita'].forEach(tipo => {
+    [['plantio','Plantio'],['pulverizacao','Pulverizacao'],['solido','Solidos'],['colheita','Colheita']].forEach(([tipo,aba]) => {
       const m = MODELOS_CADERNO[tipo];
       const lista = m.lista();
       const linhas = lista.length > 0 ? lista.map(m.paraExportar) : [{}];
       const ws = XLSX.utils.json_to_sheet(linhas);
-      XLSX.utils.book_append_sheet(wb, ws, tipo);
+      XLSX.utils.book_append_sheet(wb, ws, aba);
     });
     XLSX.writeFile(wb, `ACF_Caderno_de_Campo_${hoje()}.xlsx`);
-    toast('Excel gerado com as 3 abas!');
+    toast('Excel gerado com todas as abas!');
   } catch(e) { toast('Erro ao exportar: '+e.message,'erro'); }
 };
 
