@@ -1268,6 +1268,10 @@ function renderPedidos() {
         <option value="parcial">Parcial</option>
         <option value="entregue_total">Entregue</option>
       </select>
+      <select id="filtro-safra-pedido" onchange="filtrarPedidos()">
+        <option value="">Todas as safras</option>
+        ${safrasDisponiveis().map(s=>`<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('')}
+      </select>
       <input type="text" id="filtro-fornecedor" oninput="filtrarPedidos()" placeholder="Buscar fornecedor...">
     </div>
     <div id="lista-pedidos"></div>`;
@@ -1276,27 +1280,30 @@ function renderPedidos() {
 
 window.filtrarPedidos = function() {
   const statusF = document.getElementById('filtro-status-pedido')?.value || '';
+  const safraF = document.getElementById('filtro-safra-pedido')?.value || '';
   const fornF = (document.getElementById('filtro-fornecedor')?.value || '').toLowerCase();
   const lista = pedidos.filter(p => (!statusF || p.status === statusF) && (!fornF || p.fornecedor.toLowerCase().includes(fornF)));
   const el = document.getElementById('lista-pedidos');
   if (!el) return;
-  if (lista.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum pedido encontrado</div></div>`; return; }
 
-  // Achata pedidos -> um item por linha, ordenado por fornecedor (agrupa visualmente)
+  // Achata pedidos -> um item por linha (filtra por safra no nível do item), ordenado por fornecedor
   const linhas = [];
   lista.forEach(p => {
     (p.itens||[]).forEach(it => {
+      if (safraF && normalizar(it.safra||'') !== normalizar(safraF)) return;
       const saldo = (it.quantidade||0) - (it.quantidade_recebida||0);
       const statusItem = saldo<=0 ? 'entregue_total' : (it.quantidade_recebida||0)>0 ? 'parcial' : 'pendente';
       linhas.push({ pedidoId: p.id, pedidoStatus: p.status, fornecedor: p.fornecedor, produto: it.produto,
-        unidade: it.unidade, volumeCompra: it.quantidade||0, volumeRecebido: it.quantidade_recebida||0, saldo, statusItem });
+        unidade: it.unidade, volumeCompra: it.quantidade||0, volumeRecebido: it.quantidade_recebida||0, saldo, statusItem,
+        precoUnit: it.preco_unit||0 });
     });
   });
+  if (linhas.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum pedido encontrado</div></div>`; return; }
   linhas.sort((a,b) => a.fornecedor.localeCompare(b.fornecedor) || a.produto.localeCompare(b.produto));
 
   el.innerHTML = `
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Fornecedor</th><th>Produto</th><th>Volume Compra</th><th>Volume Recebido</th><th>Saldo</th><th>Status</th><th>Ações</th></tr></thead>
+      <thead><tr><th>Fornecedor</th><th>Produto</th><th>Compra</th><th>Recebido</th><th>Saldo</th><th>Valor/un</th><th>Status</th><th>Ações</th></tr></thead>
       <tbody>
         ${linhas.map(l => `
           <tr>
@@ -1305,6 +1312,7 @@ window.filtrarPedidos = function() {
             <td>${fmt(l.volumeCompra)} ${l.unidade}</td>
             <td>${fmt(l.volumeRecebido)} ${l.unidade}</td>
             <td style="font-weight:700;color:${l.saldo>0?'var(--laranja)':'var(--verde)'}">${fmt(l.saldo)} ${l.unidade}</td>
+            <td>${l.precoUnit>0?'R$ '+fmt(l.precoUnit):'—'}</td>
             <td>${badgeStatus(l.statusItem)}</td>
             <td style="white-space:nowrap">
               <button class="btn btn-sm btn-secondary" onclick="verPedido('${l.pedidoId}')">Ver</button>
