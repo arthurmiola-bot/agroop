@@ -255,6 +255,34 @@
     font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px;
   }
   .aplic-card-resumo { font-size: 13px; color: var(--aplic-texto2); margin-top: 6px; }
+  .aplic-tipo {
+    display: inline-block; font-size: 12px; font-weight: 600;
+    padding: 3px 10px; border-radius: 7px; margin-top: 6px;
+  }
+  .aplic-tipo-pulv { background: #e7f0f9; color: #2f6299; }
+  .aplic-tipo-solido { background: #f4ecdf; color: #8a6524; }
+  .aplic-obs-op {
+    padding: 14px 18px; border-top: 1px solid var(--aplic-borda);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .aplic-obs-op label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--aplic-texto3);
+  }
+  .aplic-obs-op textarea {
+    width: 100%; min-height: 62px; resize: vertical;
+    border: 1px solid var(--aplic-borda); border-radius: 10px;
+    padding: 10px 12px; font-family: inherit; font-size: 14px;
+    color: var(--aplic-texto); background: var(--aplic-fundo);
+  }
+  .aplic-obs-op textarea:focus { outline: none; border-color: var(--aplic-verde); }
+  .aplic-btn-obs {
+    align-self: flex-start; border: 1px solid var(--aplic-verde);
+    background: #fff; color: var(--aplic-verde);
+    border-radius: 9px; font-weight: 600; font-size: 13px;
+    padding: 8px 14px; cursor: pointer; transition: background .15s;
+  }
+  .aplic-btn-obs:hover { background: var(--aplic-verde-suave); }
   .aplic-card-seta { color: var(--aplic-texto3); font-size: 14px; transition: transform .22s ease; }
   .aplic-card.aberto .aplic-card-seta { transform: rotate(180deg); }
   .aplic-chip {
@@ -656,7 +684,6 @@ function renderSubabaAplic() {
 // Card compacto e clean; expande ao clicar mostrando produtos e observações
 function cardAplicacao(g, idx) {
   const cardId = `aplic-card-${idx}`;
-  const nProdutos = g.itens.length;
   const acaoTopo = g.status === 'execucao'
     ? `<span class="aplic-chip aplic-chip-exec">Em execução</span>`
     : g.status === 'concluido'
@@ -679,7 +706,7 @@ function cardAplicacao(g, idx) {
       </tr>`;
   }).join('');
 
-  // Observações (uma por produto, se houver) + timestamps
+  // Observações do planejamento (uma por produto, se houver) + timestamps
   const extras = g.itens.map(it => {
     const partes = [];
     if (it.obs) partes.push(`📝 ${it.produto ? `<strong>${it.produto}:</strong> ` : ''}${it.obs}`);
@@ -687,6 +714,11 @@ function cardAplicacao(g, idx) {
     if (it.data_conclusao) partes.push(`Concluído: ${it.data_conclusao}`);
     return partes.length ? `<div class="aplic-extra">${partes.join('<br>')}</div>` : '';
   }).join('');
+
+  // Observação do operador (mostrada quando concluída ou já preenchida)
+  const obsOp = g.itens.map(it => it.obs_operador).find(Boolean) || '';
+  const extraObsOp = (obsOp && g.status === 'concluido')
+    ? `<div class="aplic-extra">🧑‍🌾 <strong>Operador:</strong> ${obsOp.replace(/</g,'&lt;')}</div>` : '';
 
   // Botão de ação da operação inteira (todos os produtos do card mudam juntos)
   let botaoOperacao = '';
@@ -704,9 +736,23 @@ function cardAplicacao(g, idx) {
     ? `<span class="aplic-card-area">${fmt(areaHa)} ha</span>`
     : `<span class="aplic-card-area aplic-card-area-alerta" title="Cadastre a área do talhão em Cadastros para calcular o total">área não cadastrada</span>`;
 
-  // Vazão (só pulverização): pega a primeira informada no grupo
+  // Tipo da operação (selo colorido no lugar de "X produtos")
+  const ehPulv = g.itens.some(it => tipoDaAdubacao(it) === 'pulverizacao');
   const vazaoGrupo = (g.itens.find(it => it.vazao) || {}).vazao || '';
-  const resumoLinha = `${nProdutos} produto${nProdutos>1?'s':''}${vazaoGrupo?` · 💧 ${vazaoGrupo}`:''}`;
+  const seloTipo = ehPulv
+    ? `<span class="aplic-tipo aplic-tipo-pulv">💧 Pulverização${vazaoGrupo?` · ${vazaoGrupo}`:''}</span>`
+    : `<span class="aplic-tipo aplic-tipo-solido">🪨 Sólidos</span>`;
+
+  // Campo de observação do operador (sempre visível quando em execução).
+  // Salva no primeiro item do grupo (obs_operador).
+  const primeiroId = g.itens[0]?.id || '';
+  const obsOperadorAtual = g.itens.map(it => it.obs_operador).find(Boolean) || '';
+  const blocoObsOperador = temExecucao ? `
+    <div class="aplic-obs-op">
+      <label>Observação do operador</label>
+      <textarea id="obsop-${cardId}" onclick="event.stopPropagation()" placeholder="Ex: condições do tempo, ajustes feitos...">${obsOperadorAtual.replace(/</g,'&lt;')}</textarea>
+      <button class="aplic-btn-obs" onclick="event.stopPropagation();salvarObsOperador('${primeiroId}','${cardId}')">Salvar observação</button>
+    </div>` : '';
 
   return `
     <div class="aplic-card ${g.status}" id="${cardId}" data-ids="${idsGrupo}">
@@ -718,7 +764,7 @@ function cardAplicacao(g, idx) {
             <span class="aplic-card-talhao">${g.talhao}</span>
             ${cabecalhoArea}
           </div>
-          <div class="aplic-card-resumo">${resumoLinha}</div>
+          <div class="aplic-card-resumo">${seloTipo}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
           ${acaoTopo}
@@ -731,10 +777,25 @@ function cardAplicacao(g, idx) {
           <tbody>${linhas}</tbody>
         </table>
         ${extras}
+        ${extraObsOp}
+        ${blocoObsOperador}
         ${botaoOperacao?`<div class="aplic-acao-wrap">${botaoOperacao}</div>`:''}
       </div>
     </div>`;
 }
+
+// Salva a observação do operador no registro (campo obs_operador)
+window.salvarObsOperador = async function(id, cardId) {
+  const el = document.getElementById(`obsop-${cardId}`);
+  if (!el) return;
+  const texto = el.value.trim();
+  try {
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { obs_operador: texto });
+    const a = adubacoes.find(x=>x.id===id);
+    if (a) a.obs_operador = texto;
+    toast('Observação salva!');
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
 
 // Busca a área (ha) de um talhão pelo cadastro, casando fazenda + nome do talhão
 function areaDoTalhao(fazenda, talhao) {
@@ -768,12 +829,15 @@ window.aplicIniciarGrupo = async function(cardId) {
 window.aplicConcluirGrupo = async function(cardId) {
   const card = document.getElementById(cardId);
   if (!card) return;
+  // Pega a observação que o operador tenha digitado no card (campo sempre visível)
+  const elObs = document.getElementById(`obsop-${cardId}`);
+  const obsOperador = elObs ? elObs.value.trim() : '';
   if (!confirm('Concluir todos os produtos desta aplicação?')) return;
   const ids = (card.dataset.ids||'').split(',').filter(Boolean);
   for (const id of ids) {
     const a = adubacoes.find(x=>x.id===id);
     if (a && a.status==='execucao') {
-      await aplicConcluir(id, true);
+      await aplicConcluir(id, true, obsOperador);
     }
   }
   renderModoAplicacoes();
@@ -795,14 +859,17 @@ window.aplicIniciar = async function(id, emLote) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-window.aplicConcluir = async function(id, emLote) {
+window.aplicConcluir = async function(id, emLote, obsOperador) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
   if (!emLote && !confirm(`Concluir a aplicação de "${a.produto}" em ${a.talhao}?`)) return;
   try {
     const data_conclusao = hoje();
-    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'concluido', data_conclusao });
+    const upd = { status:'concluido', data_conclusao };
+    if (obsOperador != null && obsOperador !== '') upd.obs_operador = obsOperador;
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), upd);
     a.status = 'concluido'; a.data_conclusao = data_conclusao;
+    if (upd.obs_operador != null) a.obs_operador = upd.obs_operador;
     if (!emLote) { toast('Aplicação concluída!'); renderModoAplicacoes(); }
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
