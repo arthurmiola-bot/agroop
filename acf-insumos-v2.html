@@ -220,10 +220,32 @@
   <div class="login-card" style="text-align:center">
     <img src="data:image/png;base64,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" alt="" style="width:64px;height:64px;border-radius:16px;margin-bottom:12px">
     <div class="login-logo">ACF Gestão</div>
-    <div class="login-sub">Conectando...</div>
-    <div style="margin-top:18px;display:flex;justify-content:center">
+    <div class="login-sub" id="login-sub">Selecione o modo de acesso</div>
+
+    <div id="modo-conectando" style="margin-top:18px;display:flex;justify-content:center">
       <div class="spinner"></div>
     </div>
+
+    <div id="modo-escolha" style="display:none;margin-top:22px;display:none;flex-direction:column;gap:12px">
+      <button class="btn-login" onclick="escolherModo('gestao')" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:16px">
+        <span style="font-size:22px">📊</span>
+        <div style="text-align:left"><div style="font-weight:700">Gestão</div><div style="font-size:12px;opacity:.75;font-weight:400">Pedidos, estoque, contas, relatórios</div></div>
+      </button>
+      <button class="btn-login" onclick="escolherModo('aplicacoes')" style="background:var(--branco);color:var(--verde);border:2px solid var(--verde);display:flex;align-items:center;justify-content:center;gap:10px;padding:16px">
+        <span style="font-size:22px">🚜</span>
+        <div style="text-align:left"><div style="font-weight:700">Aplicações</div><div style="font-size:12px;opacity:.75;font-weight:400">Executar aplicações no campo</div></div>
+      </button>
+    </div>
+
+    <div id="modo-senha" style="display:none;margin-top:22px;flex-direction:column;gap:12px">
+      <div style="font-size:13px;color:var(--cinza)">Digite a senha do modo Gestão</div>
+      <input type="password" id="senha-gestao-input" inputmode="numeric" placeholder="Senha" style="text-align:center;font-size:18px;letter-spacing:4px;padding:12px;border:1.5px solid var(--creme-escuro);border-radius:10px" onkeydown="if(event.key==='Enter')confirmarSenhaGestao()">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" style="flex:1" onclick="voltarEscolhaModo()">Voltar</button>
+        <button class="btn btn-primary" style="flex:1" onclick="confirmarSenhaGestao()">Entrar</button>
+      </div>
+    </div>
+
     <div class="login-erro" id="login-erro"></div>
   </div>
 </div>
@@ -290,7 +312,7 @@ let plantios = [], adubacoes = [], colheitas = [];
 let compendio = null;     // cache de nomes de estoque_ins_produtos (carrega sob demanda)
 let compendioDetalhado = null; // cache com todos os campos do compêndio
 let entradasRaw = [];     // entradas reais da coleção estoque_ins_entradas (ACF Estoque)
-let aplicacoesAgroOp = null; // cache das aplicações do AgroOp
+let aplicacoesAgroOp = null; // (legado) cache não mais usado após integração interna
 const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton'];
 function nomesFazendas() { return fazendas.map(f=>f.nome); }
 
@@ -355,33 +377,225 @@ function toast(msg, tipo='ok') {
 }
 function normalizar(s) { return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 
-// ── AUTH (login automático — app é só para gestão, sem modo funcionário) ──
+// ── AUTH / MODOS ──
+// Modo Gestão: senha 1441 na entrada. Dentro dele, senha MASTER 284284 destrava
+// edição/exclusão uma vez por sessão. Modo Aplicações: entrada livre (operador no campo).
+const SENHA_GESTAO = '1441';
+const SENHA_MASTER = '284284';
+let modoAtual = null;          // 'gestao' | 'aplicacoes'
+let masterDestravado = false;  // true depois de digitar a senha MASTER na sessão
+
 window.sair = async function() {
-  await signOut(auth);
+  modoAtual = null;
+  masterDestravado = false;
+  location.reload();
+};
+
+// Chamado pelos botões da tela de entrada
+window.escolherModo = function(modo) {
+  document.getElementById('login-erro').textContent = '';
+  if (modo === 'aplicacoes') {
+    modoAtual = 'aplicacoes';
+    iniciarSessao();
+  } else {
+    // pede senha do modo gestão
+    document.getElementById('modo-escolha').style.display = 'none';
+    document.getElementById('modo-senha').style.display = 'flex';
+    document.getElementById('login-sub').textContent = 'Modo Gestão';
+    setTimeout(()=>document.getElementById('senha-gestao-input')?.focus(), 100);
+  }
+};
+
+window.voltarEscolhaModo = function() {
+  document.getElementById('senha-gestao-input').value = '';
+  document.getElementById('login-erro').textContent = '';
+  document.getElementById('modo-senha').style.display = 'none';
+  document.getElementById('modo-escolha').style.display = 'flex';
+  document.getElementById('login-sub').textContent = 'Selecione o modo de acesso';
+};
+
+window.confirmarSenhaGestao = function() {
+  const val = document.getElementById('senha-gestao-input').value.trim();
+  if (val !== SENHA_GESTAO) {
+    document.getElementById('login-erro').textContent = 'Senha incorreta.';
+    document.getElementById('senha-gestao-input').value = '';
+    return;
+  }
+  document.getElementById('login-erro').textContent = '';
+  modoAtual = 'gestao';
+  iniciarSessao();
+};
+
+// Pede a senha MASTER quando for editar/excluir no modo Gestão.
+// Retorna true se destravado (ou já estava). Uso: if(!exigirMaster())return;
+window.exigirMaster = function() {
+  if (modoAtual !== 'gestao') return true; // aplicações não usa
+  if (masterDestravado) return true;
+  const val = prompt('Senha MASTER para editar/excluir:');
+  if (val === null) return false; // cancelou
+  if (val.trim() === SENHA_MASTER) {
+    masterDestravado = true;
+    toast('Edição/exclusão liberada nesta sessão.');
+    return true;
+  }
+  toast('Senha MASTER incorreta.', 'erro');
+  return false;
 };
 
 function iniciarSessao() {
   usuarioAtual = auth.currentUser;
-  document.getElementById('header-nome').textContent = 'Gestor';
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').classList.add('ativo');
-  carregarDados().then(() => mostrarAba('dashboard'));
+  if (modoAtual === 'aplicacoes') {
+    document.getElementById('header-nome').textContent = 'Aplicações';
+    document.getElementById('nav-gestor').style.display = 'none';
+    carregarDados().then(() => renderModoAplicacoes());
+  } else {
+    document.getElementById('header-nome').textContent = 'Gestão';
+    document.getElementById('nav-gestor').style.display = 'flex';
+    carregarDados().then(() => mostrarAba('dashboard'));
+  }
+}
+
+function mostrarTelaLogin() {
+  document.getElementById('modo-conectando').style.display = 'none';
+  document.getElementById('modo-escolha').style.display = 'flex';
+  document.getElementById('login-sub').textContent = 'Selecione o modo de acesso';
 }
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {
-    iniciarSessao();
+    usuarioAtual = user;
+    // não entra direto: espera escolha de modo
+    if (!modoAtual) mostrarTelaLogin();
   } else {
     usuarioAtual = null;
     document.getElementById('login-screen').style.display = 'flex';
     document.getElementById('app').classList.remove('ativo');
+    document.getElementById('modo-conectando').style.display = 'flex';
+    document.getElementById('modo-escolha').style.display = 'none';
     try {
       await signInAnonymously(auth);
     } catch(e) {
+      document.getElementById('modo-conectando').style.display = 'none';
       document.getElementById('login-erro').textContent = 'Não foi possível conectar. Verifique a internet e recarregue a página.';
     }
   }
 });
+
+// ══════════════ MODO APLICAÇÕES (substitui o AgroOp) ══════════════
+// Operador no campo: vê o que foi planejado (insumos_campo_adubacao), inicia e conclui.
+// Usa os MESMOS cadastros de fazenda/talhão do modo Gestão — sem conflito.
+let aplicSubaba = 'pendentes';
+
+window.renderModoAplicacoes = function() {
+  const el = document.getElementById('main-content');
+  const cont = {
+    pendentes: adubacoes.filter(a => a.status==='planejado' || a.status==='enviado_operador').length,
+    execucao: adubacoes.filter(a => a.status==='execucao').length,
+    concluidas: adubacoes.filter(a => a.status==='concluido').length
+  };
+  el.innerHTML = `
+    <div class="sec-titulo" style="margin-bottom:16px">🚜 Aplicações no Campo</div>
+    <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
+      <button class="nav-btn ${aplicSubaba==='pendentes'?'ativo':''}" onclick="mudarSubabaAplic('pendentes')">🌱 Pendentes (${cont.pendentes})</button>
+      <button class="nav-btn ${aplicSubaba==='execucao'?'ativo':''}" onclick="mudarSubabaAplic('execucao')">🚧 Em Execução (${cont.execucao})</button>
+      <button class="nav-btn ${aplicSubaba==='concluidas'?'ativo':''}" onclick="mudarSubabaAplic('concluidas')">✅ Concluídas (${cont.concluidas})</button>
+    </div>
+    <div id="aplic-conteudo"></div>`;
+  renderSubabaAplic();
+};
+
+window.mudarSubabaAplic = function(sub) {
+  aplicSubaba = sub;
+  renderModoAplicacoes();
+};
+
+function renderSubabaAplic() {
+  const el = document.getElementById('aplic-conteudo');
+  let lista, vazio;
+  if (aplicSubaba === 'pendentes') {
+    lista = adubacoes.filter(a => a.status==='planejado' || a.status==='enviado_operador');
+    vazio = 'Nenhuma aplicação pendente';
+  } else if (aplicSubaba === 'execucao') {
+    lista = adubacoes.filter(a => a.status==='execucao');
+    vazio = 'Nenhuma aplicação em execução';
+  } else {
+    lista = adubacoes.filter(a => a.status==='concluido').slice().reverse();
+    vazio = 'Nenhuma aplicação concluída';
+  }
+  if (lista.length === 0) {
+    el.innerHTML = `<div style="text-align:center;padding:48px 16px;color:var(--cinza)"><div style="font-size:34px;opacity:.4;margin-bottom:8px">🌾</div>${vazio}</div>`;
+    return;
+  }
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${lista.map(a => cardAplicacao(a)).join('')}</div>`;
+}
+
+function cardAplicacao(a) {
+  const doseTxt = a.dose ? `${fmt(a.dose)} ${a.unidade||''}` : '';
+  const meta = [a.categoria, a.safra].filter(Boolean).join(' · ');
+  let acao = '';
+  if (a.status === 'planejado' || a.status === 'enviado_operador') {
+    acao = `<button class="btn btn-laranja" onclick="aplicIniciar('${a.id}')">▶ Iniciar</button>`;
+  } else if (a.status === 'execucao') {
+    acao = `<button class="btn btn-primary" onclick="aplicConcluir('${a.id}')">■ Concluir</button>`;
+  }
+  const ts = [];
+  if (a.iniciado_em) ts.push(`<span style="color:var(--laranja)">▶ Início: ${fmtDataHora(a.iniciado_em)}</span>`);
+  if (a.data_conclusao) ts.push(`<span style="color:var(--verde)">■ Fim: ${a.data_conclusao}</span>`);
+  return `
+    <div class="card" style="padding:16px 18px;display:flex;justify-content:space-between;gap:14px;align-items:flex-start;${a.status==='execucao'?'border-left:3px solid var(--laranja)':a.status==='concluido'?'border-left:3px solid var(--verde)':''}">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <strong style="font-size:15px">${a.fazenda||'—'}</strong>
+          <span style="background:var(--verde-menta);color:var(--verde-escuro,#1a3a2a);font-size:12px;font-weight:600;padding:2px 8px;border-radius:5px">${a.talhao||'—'}</span>
+          ${badgeStatusAplic(a.status)}
+        </div>
+        <div style="font-size:14px;margin-bottom:4px"><strong>${a.produto||'—'}</strong>${doseTxt?` — ${doseTxt}`:''}</div>
+        ${meta?`<div style="font-size:12px;color:var(--cinza)">${meta}</div>`:''}
+        <div style="font-size:12px;color:var(--cinza);margin-top:4px">Data planejada: ${a.data||'—'}</div>
+        ${a.obs?`<div style="font-size:12px;color:var(--cinza);margin-top:4px;padding:6px 10px;background:var(--creme);border-radius:6px">${a.obs}</div>`:''}
+        ${ts.length?`<div style="font-size:11px;font-family:monospace;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${ts.join('')}</div>`:''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">${acao}</div>
+    </div>`;
+}
+
+function badgeStatusAplic(status) {
+  if (status === 'concluido') return '<span class="badge badge-verde">Concluída</span>';
+  if (status === 'execucao') return '<span class="badge badge-laranja">Em execução</span>';
+  return '<span class="badge badge-azul">Pendente</span>';
+}
+
+function fmtDataHora(ts) {
+  if (!ts) return '—';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
+window.aplicIniciar = async function(id) {
+  const a = adubacoes.find(x=>x.id===id);
+  if (!a) return;
+  try {
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'execucao', iniciado_em: Timestamp.now() });
+    a.status = 'execucao'; a.iniciado_em = Timestamp.now();
+    toast('Aplicação iniciada!');
+    renderModoAplicacoes();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.aplicConcluir = async function(id) {
+  const a = adubacoes.find(x=>x.id===id);
+  if (!a) return;
+  if (!confirm(`Concluir a aplicação de "${a.produto}" em ${a.talhao}?`)) return;
+  try {
+    const data_conclusao = hoje();
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'concluido', data_conclusao });
+    a.status = 'concluido'; a.data_conclusao = data_conclusao;
+    toast('Aplicação concluída!');
+    renderModoAplicacoes();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
 
 // ── DADOS ──
 async function carregarDados() {
@@ -460,7 +674,7 @@ async function carregarCompendio() {
   return compendio;
 }
 
-// Carrega aplicações do AgroOp para previsão de cobertura
+// (legado) função mantida por segurança; a cobertura agora usa 'adubacoes' internas
 async function carregarAplicacoes() {
   if (aplicacoesAgroOp) return aplicacoesAgroOp;
   try {
@@ -529,7 +743,7 @@ function renderDashboard() {
     <div style="background:linear-gradient(135deg,#1a3a2a,#2d6a4f);border-radius:var(--radius);padding:20px 24px;margin-bottom:24px;color:white;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
         <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🔮 Previsão de Cobertura de Estoque</div>
-        <div style="font-size:13px;opacity:0.85;margin-top:4px">Cruze os planejamentos do AgroOp com seu estoque e pedidos</div>
+        <div style="font-size:13px;opacity:0.85;margin-top:4px">Cruze os planejamentos de aplicação com seu estoque e pedidos</div>
       </div>
       <button class="btn" style="background:white;color:var(--verde);font-weight:600" onclick="mostrarAba('cobertura')">Ver Previsão →</button>
     </div>
@@ -550,13 +764,15 @@ function renderDashboard() {
 
 // ══════════════ PREVISÃO DE COBERTURA ══════════════
 async function renderCobertura() {
-  document.getElementById('main-content').innerHTML = `<div class="loading"><div class="spinner"></div> Cruzando dados do AgroOp...</div>`;
-  aplicacoesAgroOp = null; // força recarga para pegar planejamentos novos
-  await carregarAplicacoes();
+  document.getElementById('main-content').innerHTML = `<div class="loading"><div class="spinner"></div> Cruzando planejamento e estoque...</div>`;
 
-  // Aplicações planejadas = não finalizadas OU com data futura
-  const hojeStr = hoje();
-  const planejadas = aplicacoesAgroOp.filter(a => !a.finalizadoEm || (a.data && a.data >= hojeStr));
+  // Aplicações planejadas = todas que ainda não foram concluídas (planejado, liberado, em execução)
+  const planejadasBrutas = adubacoes.filter(a => a.status !== 'concluido');
+  // Converte para o formato {talhao, fazenda, produtos:[{produto,dose}]} usado abaixo
+  const planejadas = planejadasBrutas.map(a => ({
+    talhao: a.talhao, fazenda: a.fazenda,
+    produtos: [{ produto: a.produto, dose: a.dose }]
+  }));
 
   // Necessidade por produto: dose × área
   const necessidade = {}; // chave normalizada -> {produto, total, semArea: n}
@@ -613,7 +829,7 @@ async function renderCobertura() {
       <button class="btn btn-secondary btn-sm" onclick="mostrarAba('cobertura')">↻ Atualizar</button>
     </div>
     <p style="font-size:13px;color:var(--cinza);margin-bottom:16px">
-      Baseado em <strong>${planejadas.length}</strong> aplicações planejadas no AgroOp (não finalizadas ou futuras),
+      Baseado em <strong>${planejadas.length}</strong> aplicações planejadas (não concluídas),
       comparando necessidade (dose × área) com estoque atual + pedidos a receber.
     </p>
     ${faltando > 0 ? `
@@ -625,13 +841,13 @@ async function renderCobertura() {
     </div>` : ''}
     ${semArea > 0 ? `
     <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px">
-      ⚠️ ${semArea} produto(s) têm aplicações sem área definida (nem no AgroOp, nem no cadastro de talhões) — a necessidade pode estar subestimada.
+      ⚠️ ${semArea} produto(s) têm aplicações sem área definida (talhão sem área no cadastro) — a necessidade pode estar subestimada.
       Cadastre os talhões com área em <strong>⚙️ Cadastros</strong>.
     </div>` : ''}
 
     ${chaves.length === 0 ? `
-    <div class="tabela-wrap"><div class="tabela-vazia">Nenhuma aplicação planejada encontrada no AgroOp.<br>
-    Crie um planejamento no AgroOp e ele aparecerá aqui automaticamente.</div></div>` : `
+    <div class="tabela-wrap"><div class="tabela-vazia">Nenhuma aplicação planejada encontrada.<br>
+    Crie um planejamento em 📓 Caderno de Campo → Defensivos/Corretivos/Adubação.</div></div>` : `
     <div class="tabela-wrap" style="border-radius:var(--radius);overflow:hidden">
       <div class="cob-row header">
         <span>Produto</span><span>Necessário</span><span>Em Estoque</span><span>A Receber</span><span>Saldo</span>
@@ -1040,6 +1256,7 @@ async function salvarItensPedido(pedidoId, novosItens) {
 }
 
 window.abrirEditarItemPedido = function(pedidoId, idx) {
+  if(!exigirMaster())return;
   const p = pedidos.find(x=>x.id===pedidoId);
   if (!p) return;
   const it = p.itens[idx];
@@ -1102,6 +1319,7 @@ window.salvarEdicaoItemPedido = async function(pedidoId, idx) {
 };
 
 window.removerItemPedido = async function(pedidoId, idx) {
+  if(!exigirMaster())return;
   const p = pedidos.find(x=>x.id===pedidoId);
   if (!p) return;
   const it = p.itens[idx];
@@ -1121,6 +1339,7 @@ window.removerItemPedido = async function(pedidoId, idx) {
 };
 
 window.abrirAdicionarItemPedido = function(pedidoId) {
+  if(!exigirMaster())return;
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-add-item-pedido">
       <div class="modal" style="max-width:480px">
@@ -1350,6 +1569,7 @@ window.abrirLotesProduto = function(produtoNome) {
 };
 
 window.abrirEditarLote = function(loteId) {
+  if(!exigirMaster())return;
   const l = entradasRaw.find(e => e.id === loteId);
   if (!l) return;
   const dataStr = l.dt?.toDate ? l.dt.toDate().toISOString().split('T')[0] : hoje();
@@ -1400,6 +1620,7 @@ window.salvarEdicaoLote = async function(loteId) {
 };
 
 window.removerLote = async function(loteId, produtoNome) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir este lote de entrada? O saldo do produto vai diminuir e o custo médio será recalculado.')) return;
   try {
     await deleteDoc(doc(db,'estoque_ins_entradas',loteId));
@@ -1722,6 +1943,7 @@ window.marcarPago = async function(id) {
 };
 
 window.excluirConta = async function(id) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir esta conta?')) return;
   try {
     await deleteDoc(doc(db,'insumos_contas',id));
@@ -1834,6 +2056,7 @@ window.salvarFazenda = async function() {
 };
 
 window.excluirFazenda = async function(id) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir esta fazenda?')) return;
   try {
     await deleteDoc(doc(db,'insumos_fazendas',id));
@@ -1872,6 +2095,7 @@ window.salvarCultura = async function() {
 };
 
 window.excluirCultura = async function(id) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir esta cultura?')) return;
   try {
     await deleteDoc(doc(db,'insumos_culturas',id));
@@ -1916,6 +2140,7 @@ window.salvarTalhao = async function() {
 };
 
 window.excluirTalhao = async function(id) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir este talhão? (não afeta retiradas já registradas)')) return;
   try {
     await deleteDoc(doc(db,'insumos_talhoes',id));
@@ -1953,6 +2178,7 @@ window.salvarSafra = async function() {
 };
 
 window.excluirSafra = async function(id) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir esta safra? (não afeta retiradas já registradas)')) return;
   try {
     await deleteDoc(doc(db,'insumos_safras',id));
@@ -1973,7 +2199,6 @@ function renderCaderno() {
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
       <button class="nav-btn ${cadernoSubaba==='adubacao'?'ativo':''}" onclick="mudarSubabaCaderno('adubacao')">🧪 Defensivos, Corretivos e Adubação</button>
-      <button class="nav-btn ${cadernoSubaba==='aplicacoes'?'ativo':''}" onclick="mudarSubabaCaderno('aplicacoes')">🚁 Aplicações (AgroOp)</button>
       <button class="nav-btn ${cadernoSubaba==='colheita'?'ativo':''}" onclick="mudarSubabaCaderno('colheita')">🌾 Colheita</button>
     </div>
     <div id="caderno-conteudo"></div>`;
@@ -1986,7 +2211,6 @@ function renderSubabaCaderno() {
   switch(cadernoSubaba) {
     case 'plantio': renderPlantio(); break;
     case 'adubacao': renderAdubacao(); break;
-    case 'aplicacoes': renderAplicacoesCampo(); break;
     case 'colheita': renderColheita(); break;
   }
 }
@@ -2026,6 +2250,7 @@ function badgeStatusCampo(status) {
 }
 
 window.abrirModalPlantio = function(id) {
+  if(id && !exigirMaster())return;
   const p = id ? plantios.find(x=>x.id===id) : null;
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-plantio">
@@ -2129,9 +2354,8 @@ window.confirmarConcluirPlantio = async function(id) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-// ── DEFENSIVOS, CORRETIVOS E ADUBAÇÃO (integrado ao AgroOp) ──
+// ── DEFENSIVOS, CORRETIVOS E ADUBAÇÃO ──
 function renderAdubacao() {
-  verificarConclusoesAgroOp().then(mudou => { if (mudou) renderAdubacao(); });
   const el = document.getElementById('caderno-conteudo');
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${adubacoes.length} registro(s)</div>
@@ -2142,7 +2366,7 @@ function renderAdubacao() {
         <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('adubacao')">📥 Exportar Excel</button>
         <button class="btn btn-primary" onclick="abrirModalAdubacao()">+ Novo Planejamento</button>
       </div></div>
-    <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Enviar ao Operador"</strong>, o planejamento aparece automaticamente no AgroOp. Quando o operador concluir lá, o status aqui atualiza sozinho pra <strong>Concluído</strong>. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular se a referência mudar.</p>
+    <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
     <div class="tabela-wrap"><table>
       <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Categoria</th><th>Produto</th><th>Dose</th><th>Status</th><th></th></tr></thead>
       <tbody>
@@ -2150,9 +2374,10 @@ function renderAdubacao() {
         adubacoes.map(a=>`<tr><td>${a.data||'—'}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
         <td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td><td>${badgeStatusCampo(a.status)}</td>
         <td style="white-space:nowrap">
-          ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="enviarAoOperador('${a.id}')">🚁 Enviar</button>
-          <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')">✅</button>`:''}
-          ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando AgroOp</span>`:''}
+          ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
+          <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
+          ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza)">Aguardando execução</span>`:''}
+          ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja)">Em execução no campo</span>`:''}
           ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
           ${a.status==='planejado'?`<button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalAdubacao('${a.id}')">✏️</button>`:''}
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
@@ -2203,6 +2428,7 @@ window.atualizarOpcoesModoData = function() {
 };
 
 window.abrirModalAdubacao = function(id) {
+  if(id && !exigirMaster())return;
   const a = id ? adubacoes.find(x=>x.id===id) : null;
   const modoInicial = a?.modo_data || 'fixa';
   document.body.insertAdjacentHTML('beforeend', `
@@ -2325,41 +2551,20 @@ window.recalcularDataAdubacao = async function(id) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
-// Envia o planejamento para o AgroOp (cria doc na coleção "aplicacoes")
-window.enviarAoOperador = async function(id) {
+// (substituída por liberarParaCampo — execução agora é interna)
+// Libera a aplicação para execução no modo Aplicações (deste mesmo app).
+// Não depende mais do AgroOp — muda o status para 'enviado_operador',
+// que é o estado "pendente de execução" que o modo Aplicações mostra.
+window.liberarParaCampo = async function(id) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
-  if (!confirm(`Enviar "${a.produto}" (${a.talhao}) para o AgroOp?`)) return;
+  if (!confirm(`Liberar "${a.produto}" (${a.talhao}) para execução no campo?`)) return;
   try {
-    // Formato EXATO que o AgroOp espera (conferido no index.html dele):
-    // - fazenda: "Fazenda X" (uma das 3 chaves de TALHOES)
-    // - talhao: valor exato da lista dele (Rod 1, CF 2, Pal 3...)
-    // - status: 'pendente' MINÚSCULO (ele filtra por esse valor)
-    // - campos operador, vazao, iniciadoEm, finalizadoEm são esperados
-    const nomeFazendaAgroOp = a.fazenda.startsWith('Fazenda ') ? a.fazenda : `Fazenda ${a.fazenda}`;
-    // gera um id no mesmo estilo do AgroOp e usa como ID do documento
-    const novoId = Date.now().toString(36) + Math.random().toString(36).slice(2,5);
-    const aplicacao = {
-      id: novoId,
-      fazenda: nomeFazendaAgroOp,
-      talhao: a.talhao,
-      data: a.data,
-      operador: '',
-      vazao: '',
-      obs: a.obs || '',
-      produtos: [{ produto: a.produto, dose: String(a.dose||'') }],
-      status: 'pendente',
-      criadoEm: new Date().toISOString(),
-      iniciadoEm: null,
-      finalizadoEm: null
-    };
-    await setDoc(doc(db,'aplicacoes',novoId), aplicacao);
-    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'enviado_operador', agroop_id: novoId });
-    a.status = 'enviado_operador'; a.agroop_id = novoId;
-    aplicacoesAgroOp = null; // invalida cache
-    toast('Enviado ao AgroOp! Aparece como Pendente no app do operador.');
+    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status: 'enviado_operador' });
+    a.status = 'enviado_operador';
+    toast('Liberado! Já aparece no modo Aplicações para o operador executar.');
     renderAdubacao();
-  } catch(e) { toast('Erro ao enviar: '+e.message,'erro'); }
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
 // Concluir sem passar pelo operador (ex: já foi feito, só registrando)
@@ -2374,51 +2579,6 @@ window.concluirDireto = async function(id) {
     renderAdubacao();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
-
-// Verifica no AgroOp se algum item "enviado_operador" já foi finalizado, e sincroniza o status
-async function verificarConclusoesAgroOp() {
-  const pendentesEnvio = adubacoes.filter(a => a.status === 'enviado_operador' && a.agroop_id);
-  if (pendentesEnvio.length === 0) return false;
-  await carregarAplicacoes();
-  let mudou = false;
-  for (const a of pendentesEnvio) {
-    const doc_agroop = aplicacoesAgroOp.find(x => x.id === a.agroop_id);
-    if (doc_agroop && (doc_agroop.finalizadoEm || doc_agroop.status === 'finalizado')) {
-      const dataConcl = doc_agroop.finalizadoEm ? doc_agroop.finalizadoEm.split('T')[0] : hoje();
-      try {
-        await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { status: 'concluido', data_conclusao: dataConcl });
-        a.status = 'concluido'; a.data_conclusao = dataConcl;
-        mudou = true;
-      } catch(e) { /* silencioso */ }
-    }
-  }
-  return mudou;
-}
-
-// ── APLICAÇÕES (lidas do AgroOp, somente leitura) ──
-window.renderAplicacoesCampo = renderAplicacoesCampo;
-async function renderAplicacoesCampo() {
-  const el = document.getElementById('caderno-conteudo');
-  el.innerHTML = `<div class="loading"><div class="spinner"></div> Buscando aplicações do AgroOp...</div>`;
-  aplicacoesAgroOp = null;
-  await carregarAplicacoes();
-  const lista = [...aplicacoesAgroOp].sort((a,b) => (b.data||'').localeCompare(a.data||''));
-  el.innerHTML = `
-    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} aplicação(ões) — puxadas automaticamente do AgroOp</div>
-      <button class="btn btn-secondary btn-sm" onclick="renderAplicacoesCampo()">↻ Atualizar</button></div>
-    <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Produtos e Doses</th><th>Operador</th><th>Status</th></tr></thead>
-      <tbody>
-        ${lista.length===0?'<tr><td colspan="6" class="tabela-vazia">Nenhuma aplicação encontrada no AgroOp</td></tr>':
-        lista.map(a => {
-          const status = a.finalizadoEm || a.status === 'finalizado' ? '<span class="badge badge-verde">Finalizado</span>' : '<span class="badge badge-azul">Pendente/Em Execução</span>';
-          const prods = (a.produtos||[]).map(p => `${p.produto||p.nome||'?'} (${p.dose||'?'})`).join(', ') || '—';
-          return `<tr><td>${a.data||'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prods}</td><td>${a.operador||'—'}</td><td>${status}</td></tr>`;
-        }).join('')}
-      </tbody>
-    </table></div>
-    <p style="font-size:12px;color:var(--cinza);margin-top:12px">💡 Planejamentos enviados pelo Caderno de Campo (🧪 aba anterior) também aparecem aqui assim que criados. Cada produto usado já é considerado na 🔮 Previsão de Cobertura.</p>`;
-}
 
 // ── COLHEITA ──
 function renderColheita() {
@@ -2535,6 +2695,7 @@ window.confirmarConcluirColheita = async function(id) {
 
 // Edição completa de um registro de colheita (planejamento + resultado, se já concluído)
 window.abrirEditarColheita = function(id) {
+  if(!exigirMaster())return;
   const c = colheitas.find(x=>x.id===id);
   if (!c) return;
   document.body.insertAdjacentHTML('beforeend', `
@@ -2608,6 +2769,7 @@ window.atualizarTalhoesCampo = function(prefixo) {
 };
 
 window.excluirRegistroCampo = async function(colecao, id, tipo) {
+  if(!exigirMaster())return;
   if (!confirm('Excluir este registro?')) return;
   try {
     await deleteDoc(doc(db, colecao, id));
