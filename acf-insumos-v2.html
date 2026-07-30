@@ -340,6 +340,10 @@
   /* Coluna de ações alinhada à direita nas tabelas do caderno */
   th.col-acoes, td.col-acoes { text-align: right; white-space: nowrap; }
   .acoes-wrap { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+  /* Cabeçalhos ordenáveis */
+  th.th-ord { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.th-ord:hover { background: rgba(255,255,255,0.08); }
+  .th-seta { font-size: 10px; opacity: .9; }
 
   /* ═══════ PAINEL POR TALHÃO ═══════ */
   .talhao-card { background:#fff; border:1px solid #e6ebe4; border-radius:14px; margin-bottom:10px; overflow:hidden; }
@@ -477,6 +481,43 @@ function fmtData(ts) {
   return d.toLocaleDateString('pt-BR');
 }
 function hoje() { return new Date().toISOString().split('T')[0]; }
+
+// ── ORDENAÇÃO DE TABELAS DO CADERNO ──
+// Guarda o critério de cada tabela: { campo, dir } (dir: 1 asc, -1 desc)
+const ordenacaoCaderno = {
+  plantio:   { campo: 'data', dir: 1 },
+  pulverizacao: { campo: 'data', dir: 1 },
+  solido:    { campo: 'data', dir: 1 },
+  colheita:  { campo: 'data', dir: 1 }
+};
+
+// Ordena uma lista conforme o critério da tabela. getVal(item, campo) retorna o valor comparável.
+function ordenarLista(lista, tabela, getVal) {
+  const o = ordenacaoCaderno[tabela];
+  if (!o || !o.campo) return lista;
+  return [...lista].sort((a, b) => {
+    let va = getVal(a, o.campo), vb = getVal(b, o.campo);
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    // números comparam como número; resto como texto
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * o.dir;
+    return String(va).localeCompare(String(vb), 'pt', {numeric:true}) * o.dir;
+  });
+}
+
+// Clique no cabeçalho: alterna asc/desc e re-renderiza
+window.ordenarCaderno = function(tabela, campo) {
+  const o = ordenacaoCaderno[tabela];
+  if (o.campo === campo) o.dir *= -1; else { o.campo = campo; o.dir = 1; }
+  renderSubabaCaderno();
+};
+
+// Monta um <th> clicável com seta indicando a ordenação atual
+function thOrd(tabela, campo, rotulo, extraClass) {
+  const o = ordenacaoCaderno[tabela];
+  const seta = o.campo === campo ? (o.dir === 1 ? ' ▲' : ' ▼') : '';
+  return `<th class="th-ord${extraClass?' '+extraClass:''}" onclick="ordenarCaderno('${tabela}','${campo}')">${rotulo}<span class="th-seta">${seta}</span></th>`;
+}
 // Converte uma data "AAAA-MM-DD" para exibição "DD-MM-AA". Deixa passar o que não casar.
 function fmtDataBR(dataStr) {
   if (!dataStr) return '—';
@@ -2692,10 +2733,25 @@ function renderPlantio() {
         <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button>
       </div></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Ciclo</th><th>Previsão Colheita</th><th>Status</th><th class="col-acoes">Ações</th></tr></thead>
+      <thead><tr>
+        ${thOrd('plantio','data','Data Planejada')}
+        ${thOrd('plantio','data_conclusao','Data Execução')}
+        ${thOrd('plantio','fazenda','Fazenda')}
+        ${thOrd('plantio','talhao','Talhão')}
+        ${thOrd('plantio','cultura','Cultura')}
+        ${thOrd('plantio','safra','Safra')}
+        ${thOrd('plantio','cultivar','Cultivar')}
+        ${thOrd('plantio','ciclo_dias','Ciclo')}
+        ${thOrd('plantio','data_prevista_colheita','Previsão Colheita')}
+        ${thOrd('plantio','status','Status')}
+        <th class="col-acoes">Ações</th>
+      </tr></thead>
       <tbody>
-        ${lista.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
-        lista.map(p=>`<tr><td>${p.status==='concluido'?fmtDataBR(p.data_conclusao||p.data):fmtDataBR(p.data)}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+        ${lista.length===0?'<tr><td colspan="11" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
+        ordenarLista(lista,'plantio',(p,c)=>{
+          if(c==='ciclo_dias') return parseFloat(p.ciclo_dias)||0;
+          return p[c]||'';
+        }).map(p=>`<tr><td>${fmtDataBR(p.data)}</td><td>${p.data_conclusao?fmtDataBR(p.data_conclusao):'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
         <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.ciclo_dias?fmt(p.ciclo_dias)+'d':'—'}</td>
         <td>${fmtDataBR(p.data_prevista_colheita)}</td><td>${badgeStatusCampo(p.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
@@ -2839,10 +2895,24 @@ function renderAdubacao(tipo) {
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Produto</th><th>Categoria</th><th>Dose</th>${ehPulv?'<th>Vazão</th>':''}<th>Status</th><th class="col-acoes">Ações</th></tr></thead>
+      <thead><tr>
+        ${thOrd(tipo,'data','Data Planejada')}
+        ${thOrd(tipo,'data_conclusao','Data Execução')}
+        ${thOrd(tipo,'fazenda','Fazenda')}
+        ${thOrd(tipo,'talhao','Talhão')}
+        ${thOrd(tipo,'produto','Produto')}
+        ${thOrd(tipo,'categoria','Categoria')}
+        ${thOrd(tipo,'dose','Dose')}
+        ${ehPulv?thOrd(tipo,'vazao','Vazão'):''}
+        ${thOrd(tipo,'status','Status')}
+        <th class="col-acoes">Ações</th>
+      </tr></thead>
       <tbody>
-        ${lista.length===0?`<tr><td colspan="${ehPulv?9:8}" class="tabela-vazia">Nenhum registro</td></tr>`:
-        lista.map(a=>`<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.produto||'—'}</td><td>${a.categoria||'—'}</td>
+        ${lista.length===0?`<tr><td colspan="${ehPulv?10:9}" class="tabela-vazia">Nenhum registro</td></tr>`:
+        ordenarLista(lista,tipo,(a,c)=>{
+          if(c==='dose') return parseFloat(a.dose)||0;
+          return a[c]||'';
+        }).map(a=>`<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.produto||'—'}</td><td>${a.categoria||'—'}</td>
         <td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
@@ -3197,10 +3267,27 @@ function renderColheita() {
         <button class="btn btn-primary" onclick="abrirModalColheita()">+ Novo Planejamento</button>
       </div></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Status</th><th>Produtiv.</th><th>Umidade</th><th>PMS</th><th class="col-acoes">Ações</th></tr></thead>
+      <thead><tr>
+        ${thOrd('colheita','data','Data Planejada')}
+        ${thOrd('colheita','data_conclusao','Data Execução')}
+        ${thOrd('colheita','fazenda','Fazenda')}
+        ${thOrd('colheita','talhao','Talhão')}
+        ${thOrd('colheita','cultura','Cultura')}
+        ${thOrd('colheita','safra','Safra')}
+        ${thOrd('colheita','status','Status')}
+        ${thOrd('colheita','produtividade','Produtiv.')}
+        ${thOrd('colheita','umidade','Umidade')}
+        ${thOrd('colheita','pms','PMS')}
+        <th class="col-acoes">Ações</th>
+      </tr></thead>
       <tbody>
-        ${lista.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum registro</td></tr>':
-        lista.map(c=>`<tr><td>${c.status==='concluido'?fmtDataBR(c.data_conclusao||c.data):fmtDataBR(c.data)}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        ${lista.length===0?'<tr><td colspan="11" class="tabela-vazia">Nenhum registro</td></tr>':
+        ordenarLista(lista,'colheita',(c,campo)=>{
+          if(campo==='produtividade') return parseFloat(c.produtividade)||0;
+          if(campo==='umidade') return parseFloat(c.umidade)||0;
+          if(campo==='pms') return parseFloat(c.pms)||0;
+          return c[campo]||'';
+        }).map(c=>`<tr><td>${fmtDataBR(c.data)}</td><td>${c.data_conclusao?fmtDataBR(c.data_conclusao):'—'}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
         <td>${badgeStatusCampo(c.status)}</td>
         <td>${c.produtividade?fmt(c.produtividade)+' '+(c.unidade_produtividade||'sc/ha'):'—'}</td>
         <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
