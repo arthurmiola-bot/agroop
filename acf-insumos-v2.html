@@ -420,6 +420,13 @@ function fmtData(ts) {
   return d.toLocaleDateString('pt-BR');
 }
 function hoje() { return new Date().toISOString().split('T')[0]; }
+// Converte uma data "AAAA-MM-DD" para exibição "DD-MM-AA". Deixa passar o que não casar.
+function fmtDataBR(dataStr) {
+  if (!dataStr) return '—';
+  const m = String(dataStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return dataStr;
+  return `${m[3]}-${m[2]}-${m[1].slice(2)}`;
+}
 function somarDias(dataStr, dias) {
   if (!dataStr) return '';
   const d = new Date(dataStr + 'T12:00:00');
@@ -705,7 +712,7 @@ function cardAplicacao(g, idx) {
     <div class="aplic-card ${g.status}" id="${cardId}" data-ids="${idsGrupo}">
       <div class="aplic-card-head" onclick="toggleAplicCard('${cardId}')">
         <div style="flex:1;min-width:0">
-          <div class="aplic-card-data">${g.data||'—'}</div>
+          <div class="aplic-card-data">${fmtDataBR(g.data)}</div>
           <div class="aplic-card-local">
             <span class="aplic-card-fazenda">${g.fazenda}</span>
             <span class="aplic-card-talhao">${g.talhao}</span>
@@ -2436,9 +2443,9 @@ function renderPlantio() {
       <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Cultivar</th><th>Ciclo</th><th>Previsão Colheita</th><th>Status</th><th></th></tr></thead>
       <tbody>
         ${plantios.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
-        plantios.map(p=>`<tr><td>${p.status==='concluido'?(p.data_conclusao||p.data||'—'):(p.data||'—')}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+        plantios.map(p=>`<tr><td>${p.status==='concluido'?fmtDataBR(p.data_conclusao||p.data):fmtDataBR(p.data)}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
         <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.ciclo_dias?fmt(p.ciclo_dias)+'d':'—'}</td>
-        <td>${p.data_prevista_colheita||'—'}</td><td>${badgeStatusCampo(p.status)}</td>
+        <td>${fmtDataBR(p.data_prevista_colheita)}</td><td>${badgeStatusCampo(p.status)}</td>
         <td style="white-space:nowrap">
           ${p.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirPlantio('${p.id}')">✅ Concluir</button>`:''}
           <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="abrirModalPlantio('${p.id}')">✏️</button>
@@ -2580,11 +2587,11 @@ function renderAdubacao(tipo) {
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Categoria</th><th>Produto</th><th>Dose</th>${ehPulv?'<th>Vazão</th>':''}<th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Produto</th><th>Categoria</th><th>Dose</th>${ehPulv?'<th>Vazão</th>':''}<th>Status</th><th></th></tr></thead>
       <tbody>
         ${lista.length===0?`<tr><td colspan="${ehPulv?9:8}" class="tabela-vazia">Nenhum registro</td></tr>`:
-        lista.map(a=>`<tr><td>${a.data||'—'}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.categoria||'—'}</td>
-        <td>${a.produto||'—'}</td><td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
+        lista.map(a=>`<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.produto||'—'}</td><td>${a.categoria||'—'}</td>
+        <td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td style="white-space:nowrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" style="margin-left:6px" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
@@ -2820,7 +2827,7 @@ function renderColheita() {
       <thead><tr><th>Data</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Status</th><th>Produtiv.</th><th>Umidade</th><th>PMS</th><th></th></tr></thead>
       <tbody>
         ${colheitas.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhum registro</td></tr>':
-        colheitas.map(c=>`<tr><td>${c.status==='concluido'?(c.data_conclusao||c.data||'—'):(c.data||'—')}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        colheitas.map(c=>`<tr><td>${c.status==='concluido'?fmtDataBR(c.data_conclusao||c.data):fmtDataBR(c.data)}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
         <td>${badgeStatusCampo(c.status)}</td>
         <td>${c.produtividade?fmt(c.produtividade)+' '+(c.unidade_produtividade||'sc/ha'):'—'}</td>
         <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
