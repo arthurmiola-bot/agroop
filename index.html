@@ -916,18 +916,13 @@ function renderSubabaAplic() {
     return;
   }
 
-  // Agrupa por data + fazenda + talhão (uma "operação" pode ter vários produtos)
-  const grupos = {};
-  lista.forEach(a => {
-    const k = `${a.data||''}||${normalizar(a.fazenda||'')}||${normalizar(a.talhao||'')}`;
-    if (!grupos[k]) grupos[k] = { data: a.data||'', fazenda: a.fazenda||'—', talhao: a.talhao||'—', status: a.status, itens: [] };
-    grupos[k].itens.push(a);
-    // status do grupo: execucao > pendente > concluido (prioridade visual)
-    if (a.status === 'execucao') grupos[k].status = 'execucao';
-  });
-
-  // Ordena por data → fazenda → talhão
-  const ordenados = Object.values(grupos).sort((a,b) => {
+  // Cada registro é seu próprio card (sem agrupamento por data/talhão).
+  // Agora que cada registro já pode ter múltiplos produtos dentro, agrupar
+  // registros diferentes causaria mistura de aplicações separadas.
+  const ordenados = lista.map(a => ({
+    data: a.data||'', fazenda: a.fazenda||'—', talhao: a.talhao||'—',
+    status: a.status, itens: [a]
+  })).sort((a,b) => {
     if ((a.data||'') !== (b.data||'')) return (a.data||'').localeCompare(b.data||'');
     if (normalizar(a.fazenda) !== normalizar(b.fazenda)) return a.fazenda.localeCompare(b.fazenda);
     return a.talhao.localeCompare(b.talhao);
