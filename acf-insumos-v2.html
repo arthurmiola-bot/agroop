@@ -1926,12 +1926,16 @@ window.verPedido = function(id) {
     <div class="modal-overlay ativo" id="modal-ver-pedido">
       <div class="modal">
         <div class="modal-titulo">📋 Pedido — ${p.fornecedor}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;font-size:13px">
           <div><strong>Data:</strong> ${p.data_pedido||'—'}</div>
           <div><strong>Fazenda:</strong> ${p.fazenda||'—'}</div>
           <div><strong>Previsão:</strong> ${p.previsao_entrega||'—'}</div>
           <div><strong>Status:</strong> ${badgeStatus(p.status)}</div>
           ${p.obs ? `<div style="grid-column:1/-1"><strong>Obs:</strong> ${p.obs}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-secondary" onclick="abrirEditarDadosPedido('${id}')">✏️ Editar dados do pedido</button>
+          <button class="btn btn-sm btn-secondary" style="color:var(--vermelho)" onclick="excluirPedido('${id}')">🗑 Excluir pedido</button>
         </div>
         <div class="itens-pedido">
           <div class="baixa-item-row header-row" style="grid-template-columns:2fr 1fr 1fr 1fr auto"><span>Produto</span><span>Pedido</span><span>Recebido</span><span>Pendente</span><span></span></div>
@@ -1955,6 +1959,70 @@ window.verPedido = function(id) {
         </div>
       </div>
     </div>`);
+};
+
+// Editar os dados gerais do pedido: fornecedor, fazenda, datas, observação
+window.abrirEditarDadosPedido = function(id) {
+  if(!exigirMaster())return;
+  const p = pedidos.find(x=>x.id===id);
+  if (!p) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-editar-dados-pedido">
+      <div class="modal" style="max-width:520px">
+        <div class="modal-titulo">✏️ Editar Dados do Pedido</div>
+        <div class="form-row">
+          <div class="form-group"><label>Fornecedor *</label><input type="text" id="edp-fornecedor" value="${(p.fornecedor||'').replace(/"/g,'&quot;')}"></div>
+          <div class="form-group"><label>Fazenda</label>
+            <select id="edp-fazenda"><option value="">Todas</option>${nomesFazendas().map(f=>`<option ${f===p.fazenda?'selected':''}>${f}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Data do Pedido</label><input type="date" id="edp-data" value="${p.data_pedido||''}"></div>
+          <div class="form-group"><label>Previsão de Entrega</label><input type="date" id="edp-entrega" value="${p.previsao_entrega||''}"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="edp-obs" value="${(p.obs||'').replace(/"/g,'&quot;')}" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-editar-dados-pedido')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarDadosPedido('${id}')">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarDadosPedido = async function(id) {
+  const p = pedidos.find(x=>x.id===id);
+  if (!p) return;
+  const fornecedor = document.getElementById('edp-fornecedor').value.trim();
+  if (!fornecedor) { toast('Informe o fornecedor.','erro'); return; }
+  const dados = {
+    fornecedor,
+    fazenda: document.getElementById('edp-fazenda').value,
+    data_pedido: document.getElementById('edp-data').value,
+    previsao_entrega: document.getElementById('edp-entrega').value,
+    obs: document.getElementById('edp-obs').value
+  };
+  try {
+    await updateDoc(doc(db,'insumos_pedidos',id), dados);
+    Object.assign(p, dados);
+    fecharModal('modal-editar-dados-pedido');
+    fecharModal('modal-ver-pedido');
+    toast('Dados do pedido atualizados!');
+    filtrarPedidos();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirPedido = async function(id) {
+  if(!exigirMaster())return;
+  const p = pedidos.find(x=>x.id===id);
+  if (!p) return;
+  if (!confirm(`Excluir o pedido de "${p.fornecedor}" com ${(p.itens||[]).length} item(ns)? Esta ação não pode ser desfeita.`)) return;
+  try {
+    await deleteDoc(doc(db,'insumos_pedidos',id));
+    const i = pedidos.findIndex(x=>x.id===id);
+    if (i>=0) pedidos.splice(i,1);
+    fecharModal('modal-ver-pedido');
+    toast('Pedido excluído.');
+    filtrarPedidos();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
 // Recalcula valor_total e status de um pedido a partir dos itens, grava e atualiza a lista local
