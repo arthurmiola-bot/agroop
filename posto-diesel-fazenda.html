@@ -7,7 +7,19 @@
   <meta name="theme-color" content="#2a7a2a"/>
   <meta name="apple-mobile-web-app-title" content="Posto Diesel"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="manifest" href="posto-diesel-manifest.json"/>
+  <script>
+    // Registra o Service Worker para funcionar offline e instalar como app
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function(){
+        navigator.serviceWorker.register("posto-diesel-sw.js").catch(function(err){
+          console.log("SW registro falhou:", err);
+        });
+      });
+    }
+  </script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -1487,6 +1499,7 @@ function Adj(props){
   var _pinOk=useState(false), adjPinOk=_pinOk[0], setAdjPinOk=_pinOk[1];
   var _em=useState(null), em=_em[0], setEm=_em[1];
   var _ef=useState({}), ef=_ef[0], setEf=_ef[1];
+  var _delConfirm=useState(null), delConfirm=_delConfirm[0], setDelConfirm=_delConfirm[1];
 
   // Cadastro de fazendas
   var _fmodal=useState(null), fmodal=_fmodal[0], setFmodal=_fmodal[1];
@@ -1559,6 +1572,17 @@ function Adj(props){
       if(xFarm) updFarm(xFarm.id,{tankStock:xFarm.tankStock+x.liters});
     }
     toast("Removido e estoque restaurado");setEm(null);
+  }
+  // Abre o modal de edicao de um abastecimento
+  function openEditFuel(x){
+    setEf(Object.assign({},x));
+    setEm(x);
+  }
+  // Confirmacao de exclusao direta na tabela
+  function askDelete(x){ setDelConfirm(x); }
+  function confirmDelete(){
+    if(delConfirm){ delE(delConfirm.id); }
+    setDelConfirm(null);
   }
 
   // Cadastro/edicao de fazendas
@@ -1727,20 +1751,24 @@ function Adj(props){
             <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,marginBottom:16}}>EDITAR ABASTECIMENTOS</div>
             <div style={{overflowX:"auto"}}>
               <table>
-                <thead><tr><th>Data</th><th>Fazenda</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th></th></tr></thead>
+                <thead><tr><th>Data</th><th>Fazenda</th><th>Maquina</th><th>Operador</th><th>Litros</th><th>Acoes</th></tr></thead>
                 <tbody>{data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).map(function(x){
                   var op=null, mc=null, xFarm=getFarm(data,x.farmId);
-                  for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
-                  for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc=data.machines[i];break;}}
+                  for(var oi=0;oi<data.operators.length;oi++){if(data.operators[oi].id===x.operatorId){op=data.operators[oi];break;}}
+                  for(var mi=0;mi<data.machines.length;mi++){if(data.machines[mi].id===x.machineId){mc=data.machines[mi];break;}}
                   return (
                     <tr key={x.id}>
                       <td style={{fontSize:13}}>{fmtDateTime(x.date)}</td>
                       <td style={{fontSize:12,color:MUT}}>{xFarm?xFarm.name:"-"}</td>
                       <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</td>
                       <td>{op?op.name:"-"}</td>
-                      <td>{fmtN(x.meter)} {mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
                       <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
-                      <td><Btn onClick={function(){setEm(x);setEf(Object.assign({},x));}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn></td>
+                      <td>
+                        <div style={{display:"flex",gap:6}}>
+                          <Btn onClick={function(){openEditFuel(x);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
+                          <Btn onClick={function(){askDelete(x);}} color={RED} style={{padding:"4px 11px",fontSize:13}}>Excluir</Btn>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}</tbody>
@@ -1788,6 +1816,23 @@ function Adj(props){
             <div style={{flex:1}}/>
             <Btn onClick={function(){setEm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
             <Btn onClick={saveE} color={GN}>Salvar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {delConfirm&&(
+        <Modal title="Excluir Abastecimento" onClose={function(){setDelConfirm(null);}}>
+          <div style={{marginBottom:18}}>
+            <div style={{fontSize:15,marginBottom:14}}>Tem certeza que deseja excluir este abastecimento? O estoque sera devolvido a fazenda.</div>
+            <div style={{background:"#f7faf7",borderRadius:10,padding:"12px 14px",border:"1px solid "+BDR}}>
+              <Rw label="Data" value={fmtDateTime(delConfirm.date)}/>
+              <Rw label="Litros" value={delConfirm.liters+" L"}/>
+              <Rw label="Fazenda" value={function(){var fa=getFarm(data,delConfirm.farmId);return fa?fa.name:"-";}()}/>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn full={true} onClick={function(){setDelConfirm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn full={true} onClick={confirmDelete} color={RED}>SIM, EXCLUIR</Btn>
           </div>
         </Modal>
       )}
