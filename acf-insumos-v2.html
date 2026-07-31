@@ -1406,22 +1406,34 @@ function renderDashboard() {
 
 // ══════════════ PREVISÃO DE COBERTURA ══════════════
 window.renderCobertura = renderCobertura;
+let coberturaJanela = 0; // 0 = tudo; ou 3, 7, 10, 15 dias
+window.mudarJanelaCobertura = function(dias) { coberturaJanela = parseInt(dias)||0; renderCobertura(); };
+
 async function renderCobertura() {
   const alvo = () => document.getElementById('estoque-conteudo') || document.getElementById('main-content');
   alvo().innerHTML = `<div class="loading"><div class="spinner"></div> Cruzando planejamento e estoque...</div>`;
 
-  // Aplicações planejadas = todas que ainda não foram concluídas (planejado, liberado, em execução)
-  const planejadasBrutas = adubacoes.filter(a => a.status !== 'concluido');
-  // Converte para o formato {talhao, fazenda, produtos:[{produto,dose}]} usado abaixo
+  const hojeStr = hoje();
+  const limite = coberturaJanela > 0 ? somarDias(hojeStr, coberturaJanela) : null;
+
+  // Aplicações que entram no cálculo: não concluídas E (atrasadas OU dentro da janela).
+  // Atrasadas (data < hoje) sempre entram. Se janela = "Tudo", entram todas as não concluídas.
+  const planejadasBrutas = adubacoes.filter(a => {
+    if (a.status === 'concluido') return false;
+    if (!limite) return true;                    // "Tudo"
+    if (!a.data) return true;                     // sem data: mantém para não sumir
+    if (a.data < hojeStr) return true;            // atrasada: sempre entra
+    return a.data <= limite;                      // dentro da janela
+  });
+
   const planejadas = planejadasBrutas.map(a => ({
     talhao: a.talhao, fazenda: a.fazenda,
     produtos: produtosDaAplicacao(a).map(p => ({ produto: p.produto, dose: p.dose }))
   }));
 
   // Necessidade por produto: dose × área
-  const necessidade = {}; // chave normalizada -> {produto, total, semArea: n}
+  const necessidade = {};
   planejadas.forEach(a => {
-    // tenta achar área: campo direto ou via talhão cadastrado
     let areaHa = parseFloat(a.area || a.areaHa || a.area_ha || a.hectares) || 0;
     if (!areaHa && a.talhao) {
       const t = talhoes.find(t => normalizar(t.nome) === normalizar(a.talhao) && (!a.fazenda || normalizar(t.fazenda||'') === normalizar((a.fazenda||'').replace('Fazenda ',''))));
@@ -1433,16 +1445,12 @@ async function renderCobertura() {
       const k = normalizar(nome);
       if (!necessidade[k]) necessidade[k] = { produto: nome, total: 0, aplicacoesSemArea: 0, dosesSemArea: [] };
       const dose = parseFloat(String(p.dose).replace(',','.')) || 0;
-      if (areaHa > 0) {
-        necessidade[k].total += dose * areaHa;
-      } else {
-        necessidade[k].aplicacoesSemArea++;
-        necessidade[k].dosesSemArea.push(dose);
-      }
+      if (areaHa > 0) necessidade[k].total += dose * areaHa;
+      else { necessidade[k].aplicacoesSemArea++; necessidade[k].dosesSemArea.push(dose); }
     });
   });
 
-  // Pendente nos pedidos
+  // Pendente nos pedidos (a receber)
   const pendentePedidos = {};
   pedidos.filter(p => p.status !== 'entregue_total' && p.status !== 'cancelado').forEach(p => {
     (p.itens||[]).forEach(it => {
@@ -1452,7 +1460,7 @@ async function renderCobertura() {
     });
   });
 
-  // Montar linhas
+  // Montar linhas com dois saldos: só estoque, e estoque + pedidos
   const chaves = Object.keys(necessidade);
   let rows = chaves.map(k => {
     const n = necessidade[k];
@@ -1460,54 +1468,67 @@ async function renderCobertura() {
     const emEstoque = est ? (est.quantidade||0) : 0;
     const unidade = est ? est.unidade : '';
     const aChegar = pendentePedidos[k] || 0;
-    const saldo = emEstoque - n.total; // saldo = estoque atual − necessário (não conta pedidos a receber)
-    return { ...n, emEstoque, aChegar, saldo, unidade, k };
-  }).sort((a,b) => a.saldo - b.saldo);
+    const saldoEstoque = emEstoque - n.total;             // só o que tenho hoje
+    const saldoComPedidos = emEstoque + aChegar - n.total; // contando o que vai chegar
+    return { ...n, emEstoque, aChegar, saldoEstoque, saldoComPedidos, unidade, k };
+  }).sort((a,b) => a.saldoEstoque - b.saldoEstoque);
 
-  const faltando = rows.filter(r => r.saldo < 0).length;
+  const faltando = rows.filter(r => r.saldoEstoque < 0).length;           // falta no estoque físico
+  const faltandoMesmoComPedidos = rows.filter(r => r.saldoComPedidos < 0).length; // falta até com pedidos
   const semArea = rows.filter(r => r.aplicacoesSemArea > 0).length;
+
+  const nQ = planejadasBrutas.length;
+  const rotuloJanela = coberturaJanela > 0 ? `próximos ${coberturaJanela} dias + atrasadas` : 'todas as aplicações não concluídas';
+
+  const botaoJanela = (dias, rotulo) =>
+    `<button class="btn btn-sm ${coberturaJanela===dias?'btn-primary':'btn-secondary'}" onclick="mudarJanelaCobertura(${dias})">${rotulo}</button>`;
 
   alvo().innerHTML = `
     <div class="sec-header">
       <div class="sec-titulo">🔮 Previsão de Cobertura de Estoque</div>
       <button class="btn btn-secondary btn-sm" onclick="renderCobertura()">↻ Atualizar</button>
     </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+      <span style="font-size:13px;color:var(--cinza);margin-right:4px">Janela:</span>
+      ${botaoJanela(3,'3 dias')}
+      ${botaoJanela(7,'7 dias')}
+      ${botaoJanela(10,'10 dias')}
+      ${botaoJanela(15,'15 dias')}
+      ${botaoJanela(0,'Tudo')}
+    </div>
     <p style="font-size:13px;color:var(--cinza);margin-bottom:16px">
-      Baseado em <strong>${planejadas.length}</strong> aplicações planejadas (não concluídas),
-      comparando a necessidade (dose × área) com o estoque atual. A coluna "A receber" mostra os pedidos em aberto (não entram no saldo).
+      Necessidade de <strong>${nQ}</strong> aplicação(ões) — ${rotuloJanela}.
+      <strong>Saldo (estoque)</strong> = estoque − necessário. <strong>Saldo (c/ pedidos)</strong> = estoque + a receber − necessário.
     </p>
     ${faltando > 0 ? `
     <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px">
-      🔴 <strong>${faltando} produto(s) sem cobertura suficiente</strong> — considere fazer pedido de compra.
+      🔴 <strong>${faltando} produto(s) sem cobertura no estoque</strong> para esta janela${faltandoMesmoComPedidos>0?` — <strong>${faltandoMesmoComPedidos}</strong> continua(m) faltando mesmo com os pedidos a receber.`:' — mas os pedidos a receber cobrem.'}
     </div>` : chaves.length > 0 ? `
     <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px">
-      ✅ <strong>Todos os produtos planejados têm cobertura!</strong>
+      ✅ <strong>Todos os produtos têm cobertura no estoque para esta janela!</strong>
     </div>` : ''}
     ${semArea > 0 ? `
     <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px">
-      ⚠️ ${semArea} produto(s) têm aplicações sem área definida (talhão sem área no cadastro) — a necessidade pode estar subestimada.
-      Cadastre os talhões com área em <strong>⚙️ Cadastros</strong>.
+      ⚠️ ${semArea} produto(s) têm aplicações sem área definida — a necessidade pode estar subestimada. Cadastre a área dos talhões em <strong>⚙️ Cadastros</strong>.
     </div>` : ''}
 
     ${chaves.length === 0 ? `
-    <div class="tabela-wrap"><div class="tabela-vazia">Nenhuma aplicação planejada encontrada.<br>
-    Crie um planejamento em 📓 Caderno de Campo → Defensivos/Corretivos/Adubação.</div></div>` : `
-    <div class="tabela-wrap" style="border-radius:var(--radius);overflow:hidden">
-      <div class="cob-row header">
-        <span>Produto</span><span>Necessário</span><span>Em Estoque</span><span>A Receber</span><span>Saldo</span>
-      </div>
+    <div class="tabela-wrap"><div class="tabela-vazia">Nenhuma aplicação ${coberturaJanela>0?'nesta janela':'planejada'}.<br>
+    ${coberturaJanela>0?'Tente uma janela maior ou "Tudo".':'Crie um planejamento em 📓 Caderno de Campo.'}</div></div>` : `
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Produto</th><th>Necessário</th><th>Em Estoque</th><th>A Receber</th><th>Saldo (estoque)</th><th>Saldo (c/ pedidos)</th></tr></thead>
+      <tbody>
       ${rows.map(r => `
-        <div class="cob-row" style="${r.saldo<0?'background:#fef2f2':''}">
-          <span><strong>${r.produto}</strong>${r.aplicacoesSemArea>0?` <span class="badge badge-amarelo" title="aplicações sem área">⚠ s/área</span>`:''}</span>
-          <span>${fmt(r.total)} ${r.unidade}</span>
-          <span>${fmt(r.emEstoque)}</span>
-          <span style="color:var(--azul)">${r.aChegar>0?'+'+fmt(r.aChegar):'—'}</span>
-          <span style="font-weight:700;color:${r.saldo<0?'var(--vermelho)':'var(--verde)'}">
-            ${r.saldo<0?'🔴 Faltam '+fmt(Math.abs(r.saldo)):'✅ +'+fmt(r.saldo)}
-          </span>
-        </div>
-      `).join('')}
-    </div>
+        <tr style="${r.saldoEstoque<0?'background:#fef2f2':''}">
+          <td><strong>${r.produto}</strong>${r.aplicacoesSemArea>0?` <span class="badge badge-amarelo" title="aplicações sem área">⚠ s/área</span>`:''}</td>
+          <td>${fmt(r.total)} ${r.unidade}</td>
+          <td>${fmt(r.emEstoque)}</td>
+          <td style="color:var(--azul)">${r.aChegar>0?'+'+fmt(r.aChegar):'—'}</td>
+          <td style="font-weight:700;color:${r.saldoEstoque<0?'var(--vermelho)':'var(--verde)'}">${r.saldoEstoque<0?'🔴 Faltam '+fmt(Math.abs(r.saldoEstoque)):'✅ +'+fmt(r.saldoEstoque)}</td>
+          <td style="font-weight:700;color:${r.saldoComPedidos<0?'var(--vermelho)':'var(--verde)'}">${r.saldoComPedidos<0?'🔴 Faltam '+fmt(Math.abs(r.saldoComPedidos)):'✅ +'+fmt(r.saldoComPedidos)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
     <div style="margin-top:16px">
       <button class="btn btn-primary" onclick="exportarCobertura()">📥 Exportar Excel</button>
     </div>`}
@@ -1517,9 +1538,10 @@ async function renderCobertura() {
 
 window.exportarCobertura = function() {
   const rows = window._coberturaRows || [];
-  exportarExcel('Previsao_Cobertura',
-    ['Produto','Necessário','Unidade','Em Estoque','A Receber (pedidos)','Saldo'],
-    rows.map(r => [r.produto, r.total, r.unidade, r.emEstoque, r.aChegar, r.saldo])
+  const suf = coberturaJanela > 0 ? `_${coberturaJanela}dias` : '_tudo';
+  exportarExcel('Previsao_Cobertura'+suf,
+    ['Produto','Necessário','Unidade','Em Estoque','A Receber (pedidos)','Saldo (estoque)','Saldo (c/ pedidos)'],
+    rows.map(r => [r.produto, r.total, r.unidade, r.emEstoque, r.aChegar, r.saldoEstoque, r.saldoComPedidos])
   );
 };
 
