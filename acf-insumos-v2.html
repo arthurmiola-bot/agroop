@@ -1460,7 +1460,7 @@ async function renderCobertura() {
     const emEstoque = est ? (est.quantidade||0) : 0;
     const unidade = est ? est.unidade : '';
     const aChegar = pendentePedidos[k] || 0;
-    const saldo = emEstoque + aChegar - n.total;
+    const saldo = emEstoque - n.total; // saldo = estoque atual − necessário (não conta pedidos a receber)
     return { ...n, emEstoque, aChegar, saldo, unidade, k };
   }).sort((a,b) => a.saldo - b.saldo);
 
@@ -1474,7 +1474,7 @@ async function renderCobertura() {
     </div>
     <p style="font-size:13px;color:var(--cinza);margin-bottom:16px">
       Baseado em <strong>${planejadas.length}</strong> aplicações planejadas (não concluídas),
-      comparando necessidade (dose × área) com estoque atual + pedidos a receber.
+      comparando a necessidade (dose × área) com o estoque atual. A coluna "A receber" mostra os pedidos em aberto (não entram no saldo).
     </p>
     ${faltando > 0 ? `
     <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px">
