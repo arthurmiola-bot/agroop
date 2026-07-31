@@ -254,7 +254,32 @@
     background: var(--aplic-verde-suave); color: var(--aplic-verde);
     font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 6px;
   }
-  .aplic-card-resumo { font-size: 13px; color: var(--aplic-texto2); margin-top: 6px; }
+  .aplic-card-resumo { font-size: 14px; color: var(--aplic-texto2); margin-top: 10px; }
+  /* Fundo por tipo de aplicação (fácil identificação para o operador) */
+  .aplic-card.tipo-solido { background: #f2f2f3; }
+  .aplic-card.tipo-pulv { background: #e9f2fb; }
+  /* Cabeçalho com rótulos claros e letras grandes */
+  .aplic-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .aplic-info-label {
+    display: block; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .05em;
+    color: var(--aplic-texto3); margin-bottom: 2px;
+  }
+  .aplic-info-valor {
+    display: block; font-size: 20px; font-weight: 700;
+    color: var(--aplic-texto); line-height: 1.2; word-break: break-word;
+  }
+  /* Bloco de cálculo por tanque (pulverização) */
+  .aplic-tanque { border-top: 1px solid var(--aplic-borda); padding-top: 4px; }
+  .aplic-tanque-titulo {
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 15px;
+    padding: 12px 18px 4px; color: var(--aplic-texto);
+  }
+  .aplic-tanque-resumo {
+    padding: 6px 18px 10px; font-size: 14px; color: var(--aplic-texto2);
+    display: flex; flex-direction: column; gap: 4px; line-height: 1.5;
+  }
+  .aplic-tanque-resumo strong { color: var(--aplic-texto); }
   .aplic-tipo {
     display: inline-block; font-size: 12px; font-weight: 600;
     padding: 3px 10px; border-radius: 7px; margin-top: 6px;
@@ -315,7 +340,7 @@
   }
   .aplic-tabela th:nth-child(2), .aplic-tabela td:nth-child(2) { text-align: right; white-space: nowrap; }
   .aplic-tabela th:nth-child(3), .aplic-tabela td:nth-child(3) { text-align: right; white-space: nowrap; }
-  .aplic-tabela td { padding: 11px 18px; border-bottom: 1px solid var(--aplic-borda); }
+  .aplic-tabela td { padding: 13px 18px; border-bottom: 1px solid var(--aplic-borda); font-size: 16px; }
   .aplic-tabela tr:last-child td { border-bottom: none; }
   .aplic-td-prod { font-weight: 600; color: var(--aplic-texto); }
   .aplic-td-dose { color: var(--aplic-texto2); }
@@ -916,18 +941,13 @@ function renderSubabaAplic() {
     return;
   }
 
-  // Agrupa por data + fazenda + talhão (uma "operação" pode ter vários produtos)
-  const grupos = {};
-  lista.forEach(a => {
-    const k = `${a.data||''}||${normalizar(a.fazenda||'')}||${normalizar(a.talhao||'')}`;
-    if (!grupos[k]) grupos[k] = { data: a.data||'', fazenda: a.fazenda||'—', talhao: a.talhao||'—', status: a.status, itens: [] };
-    grupos[k].itens.push(a);
-    // status do grupo: execucao > pendente > concluido (prioridade visual)
-    if (a.status === 'execucao') grupos[k].status = 'execucao';
-  });
-
-  // Ordena por data → fazenda → talhão
-  const ordenados = Object.values(grupos).sort((a,b) => {
+  // Cada registro é seu próprio card (sem agrupamento por data/talhão).
+  // Agora que cada registro já pode ter múltiplos produtos dentro, agrupar
+  // registros diferentes causaria mistura de aplicações separadas.
+  const ordenados = lista.map(a => ({
+    data: a.data||'', fazenda: a.fazenda||'—', talhao: a.talhao||'—',
+    status: a.status, itens: [a]
+  })).sort((a,b) => {
     if ((a.data||'') !== (b.data||'')) return (a.data||'').localeCompare(b.data||'');
     if (normalizar(a.fazenda) !== normalizar(b.fazenda)) return a.fazenda.localeCompare(b.fazenda);
     return a.talhao.localeCompare(b.talhao);
@@ -994,12 +1014,60 @@ function cardAplicacao(g, idx) {
     ? `<span class="aplic-card-area">${fmt(areaHa)} ha</span>`
     : `<span class="aplic-card-area aplic-card-area-alerta" title="Cadastre a área do talhão em Cadastros para calcular o total">área não cadastrada</span>`;
 
-  // Tipo da operação (selo colorido no lugar de "X produtos")
+  // Tipo da operação (selo colorido + cor de fundo do card)
   const ehPulv = g.itens.some(it => tipoDaAdubacao(it) === 'pulverizacao');
   const vazaoGrupo = (g.itens.find(it => it.vazao) || {}).vazao || '';
   const seloTipo = ehPulv
     ? `<span class="aplic-tipo aplic-tipo-pulv">💧 Pulverização${vazaoGrupo?` · ${vazaoGrupo}`:''}</span>`
     : `<span class="aplic-tipo aplic-tipo-solido">🪨 Sólidos</span>`;
+
+  // ── CÁLCULO POR TANQUE (só pulverização, tanque de 3.100 L) ──
+  // Área coberta por tanque = capacidade ÷ vazão (L/ha).
+  // Volume de cada produto por tanque = dose × área coberta.
+  // Último tanque: área que sobra depois dos tanques cheios, com volumes proporcionais.
+  const TANQUE_L = 3100;
+  const vazaoNum = parseFloat(((String(vazaoGrupo).match(/\d+[.,]?\d*/)||[''])[0]).replace(',','.')) || 0;
+  let blocoTanque = '';
+  if (ehPulv && vazaoNum > 0) {
+    const areaPorTanque = TANQUE_L / vazaoNum;
+    const prods = g.itens.flatMap(it => produtosDaAplicacao(it)).filter(p => p.produto);
+    let infoTanques = '', colUltimo = '', linhasUltimo = false, restoHa = 0, nCheios = 0;
+    if (areaHa > 0) {
+      nCheios = Math.floor(areaHa / areaPorTanque + 1e-9);
+      restoHa = areaHa - nCheios * areaPorTanque;
+      if (restoHa < 0.005) { restoHa = 0; }
+      linhasUltimo = restoHa > 0;
+      infoTanques = `
+        <div class="aplic-tanque-resumo">
+          <div>🛢 Cada tanque cheio (${fmt(TANQUE_L)} L) cobre <strong>${fmt(areaPorTanque)} ha</strong></div>
+          <div>➡️ Neste talhão: <strong>${nCheios} tanque(s) cheio(s)</strong>${linhasUltimo?` + <strong>último tanque de ${fmt(restoHa)} ha</strong> (${fmt(restoHa*vazaoNum)} L de calda)`:' (fecha exato, sem sobra)'}</div>
+        </div>`;
+    } else {
+      infoTanques = `
+        <div class="aplic-tanque-resumo">
+          <div>🛢 Cada tanque cheio (${fmt(TANQUE_L)} L) cobre <strong>${fmt(areaPorTanque)} ha</strong></div>
+          <div style="color:var(--aplic-ambar)">⚠️ Sem área do talhão cadastrada — não dá pra calcular o último tanque.</div>
+        </div>`;
+    }
+    const linhasTanque = prods.map(p => {
+      const porTanque = p.dose * areaPorTanque;
+      const noUltimo = linhasUltimo ? p.dose * restoHa : 0;
+      return `<tr>
+        <td class="aplic-td-prod">${p.produto}</td>
+        <td class="aplic-td-total">${fmt(porTanque)} ${p.unidade||''}</td>
+        ${linhasUltimo?`<td class="aplic-td-total">${fmt(noUltimo)} ${p.unidade||''}</td>`:''}
+      </tr>`;
+    }).join('');
+    blocoTanque = `
+      <div class="aplic-tanque">
+        <div class="aplic-tanque-titulo">🛢 Volume por tanque</div>
+        ${infoTanques}
+        <table class="aplic-tabela">
+          <thead><tr><th>Produto</th><th>Por tanque cheio</th>${linhasUltimo?`<th>Último tanque (${fmt(restoHa)} ha)</th>`:''}</tr></thead>
+          <tbody>${linhasTanque}</tbody>
+        </table>
+      </div>`;
+  }
 
   // Campo de observação do operador (sempre visível quando em execução).
   // Salva no primeiro item do grupo (obs_operador).
@@ -1013,14 +1081,26 @@ function cardAplicacao(g, idx) {
     </div>` : '';
 
   return `
-    <div class="aplic-card ${g.status}" id="${cardId}" data-ids="${idsGrupo}">
+    <div class="aplic-card ${g.status} ${ehPulv?'tipo-pulv':'tipo-solido'}" id="${cardId}" data-ids="${idsGrupo}">
       <div class="aplic-card-head" onclick="toggleAplicCard('${cardId}')">
         <div style="flex:1;min-width:0">
-          <div class="aplic-card-data">${fmtDataBR(g.data)}</div>
-          <div class="aplic-card-local">
-            <span class="aplic-card-fazenda">${g.fazenda}</span>
-            <span class="aplic-card-talhao">${g.talhao}</span>
-            ${cabecalhoArea}
+          <div class="aplic-info-grid">
+            <div class="aplic-info">
+              <span class="aplic-info-label">📅 Data planejada</span>
+              <span class="aplic-info-valor">${fmtDataBR(g.data)}</span>
+            </div>
+            <div class="aplic-info">
+              <span class="aplic-info-label">🏡 Fazenda</span>
+              <span class="aplic-info-valor">${g.fazenda}</span>
+            </div>
+            <div class="aplic-info">
+              <span class="aplic-info-label">📍 Talhão</span>
+              <span class="aplic-info-valor">${g.talhao}</span>
+            </div>
+            <div class="aplic-info">
+              <span class="aplic-info-label">📐 Área</span>
+              <span class="aplic-info-valor">${areaHa>0?fmt(areaHa)+' ha':'<span style="font-size:14px;color:var(--aplic-ambar)">não cadastrada</span>'}</span>
+            </div>
           </div>
           <div class="aplic-card-resumo">${seloTipo}</div>
         </div>
@@ -1034,6 +1114,7 @@ function cardAplicacao(g, idx) {
           <thead><tr><th>Produto</th><th>Dose</th><th>Total no talhão</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table>
+        ${blocoTanque}
         ${extras}
         ${extraObsOp}
         ${blocoObsOperador}
