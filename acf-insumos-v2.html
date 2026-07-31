@@ -491,7 +491,7 @@ function salvarCacheAplicacoes() {
   try {
     localStorage.setItem(OFFLINE_CACHE_KEY, JSON.stringify(adubacoes.map(a => ({
       id:a.id, fazenda:a.fazenda, talhao:a.talhao, produto:a.produto, dose:a.dose,
-      unidade:a.unidade, categoria:a.categoria, safra:a.safra, data:a.data, status:a.status,
+      unidade:a.unidade, produtos:a.produtos, categoria:a.categoria, safra:a.safra, data:a.data, status:a.status,
       obs:a.obs, obs_operador:a.obs_operador, tipo_aplicacao:a.tipo_aplicacao, vazao:a.vazao,
       data_conclusao:a.data_conclusao
     }))));
@@ -935,17 +935,19 @@ function cardAplicacao(g, idx) {
   // Área do talhão (do cadastro) — usada para calcular o total por produto
   const areaHa = areaDoTalhao(g.fazenda, g.talhao);
 
-  // Linhas da tabela: Produto | Dose (un/ha) | Total (un)
+  // Linhas da tabela: Produto | Dose (un/ha) | Total (un) — expande múltiplos produtos por item
   const linhas = g.itens.map(it => {
-    const un = it.unidade || '';
-    const dose = it.dose ? `${fmt(it.dose)} ${un}/ha` : '—';
-    const total = (it.dose && areaHa > 0) ? `${fmt(it.dose * areaHa)} ${un}` : '—';
-    return `
+    return produtosDaAplicacao(it).map(p => {
+      const un = p.unidade || '';
+      const dose = p.dose ? `${fmt(p.dose)} ${un}/ha` : '—';
+      const total = (p.dose && areaHa > 0) ? `${fmt(p.dose * areaHa)} ${un}` : '—';
+      return `
       <tr>
-        <td class="aplic-td-prod">${it.produto||'—'}</td>
+        <td class="aplic-td-prod">${p.produto||'—'}</td>
         <td class="aplic-td-dose">${dose}</td>
         <td class="aplic-td-total">${total}</td>
       </tr>`;
+    }).join('');
   }).join('');
 
   // Observações do planejamento (uma por produto, se houver) + timestamps
@@ -1125,37 +1127,42 @@ window.aplicIniciar = async function(id, emLote) {
 // e vincula à aplicação (aplicacao_id) para não duplicar nem perder rastreio.
 async function baixarEstoquePorAplicacao(a) {
   if (!a || a.estoque_baixado) return { ok: true }; // já baixado
-  const dose = parseFloat(a.dose) || 0;
-  if (dose <= 0) return { ok: false, motivo: 'sem dose' };
   const areaHa = areaDoTalhao(a.fazenda, a.talhao);
   if (areaHa <= 0) return { ok: false, motivo: 'talhão sem área cadastrada' };
-  const qtd = dose * areaHa;
+  const prods = produtosDaAplicacao(a).filter(p => (parseFloat(p.dose)||0) > 0);
+  if (prods.length === 0) return { ok: false, motivo: 'sem dose' };
 
-  // Casa o produto da aplicação com o estoque: match exato normalizado,
-  // senão tenta correspondência parcial (ex: "Gesso" ↔ "Gesso - CIF")
-  const alvo = normalizar(a.produto || '');
-  let est = estoque.find(e => normalizar(e.produto) === alvo);
-  if (!est) est = estoque.find(e => normalizar(e.produto).includes(alvo) || alvo.includes(normalizar(e.produto)));
-
-  const retirada = {
-    produto: est ? est.produto : (a.produto || ''),
-    unidade: est ? est.unidade : (a.unidade || ''),
-    quantidade: qtd,
-    fazenda: a.fazenda || '', talhao: a.talhao || '',
-    cultura: '', safra: a.safra || '',
-    obs: `Baixa automática — aplicação concluída (${fmt(dose)} ${a.unidade||''}/ha × ${fmt(areaHa)} ha)`,
-    custo_unitario: est ? (est.custo_medio||0) : 0,
-    custo_total: qtd * (est ? (est.custo_medio||0) : 0),
-    data: Timestamp.now(), operador_uid: usuarioAtual?.uid || '',
-    origem: 'aplicacao', aplicacao_id: a.id
-  };
+  const retirada_ids = [];
+  let algumSemCadastro = false;
   try {
-    const ref = await addDoc(collection(db,'insumos_retiradas'), retirada);
-    retiradas.unshift({id: ref.id, ...retirada});
-    await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { estoque_baixado: true, retirada_id: ref.id });
-    a.estoque_baixado = true; a.retirada_id = ref.id;
+    for (const p of prods) {
+      const dose = parseFloat(p.dose) || 0;
+      const qtd = dose * areaHa;
+      // Casa o produto com o estoque (match exato ou parcial)
+      const alvo = normalizar(p.produto || '');
+      let est = estoque.find(e => normalizar(e.produto) === alvo);
+      if (!est) est = estoque.find(e => normalizar(e.produto).includes(alvo) || alvo.includes(normalizar(e.produto)));
+      if (!est) algumSemCadastro = true;
+      const retirada = {
+        produto: est ? est.produto : (p.produto || ''),
+        unidade: est ? est.unidade : (p.unidade || ''),
+        quantidade: qtd,
+        fazenda: a.fazenda || '', talhao: a.talhao || '',
+        cultura: '', safra: a.safra || '',
+        obs: `Baixa automática — aplicação concluída (${fmt(dose)} ${p.unidade||''}/ha × ${fmt(areaHa)} ha)`,
+        custo_unitario: est ? (est.custo_medio||0) : 0,
+        custo_total: qtd * (est ? (est.custo_medio||0) : 0),
+        data: Timestamp.now(), operador_uid: usuarioAtual?.uid || '',
+        origem: 'aplicacao', aplicacao_id: a.id
+      };
+      const ref = await addDoc(collection(db,'insumos_retiradas'), retirada);
+      retiradas.unshift({id: ref.id, ...retirada});
+      retirada_ids.push(ref.id);
+    }
+    await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { estoque_baixado: true, retirada_ids });
+    a.estoque_baixado = true; a.retirada_ids = retirada_ids;
     recalcularEstoque();
-    return { ok: true, semCadastro: !est };
+    return { ok: true, semCadastro: algumSemCadastro };
   } catch(e) {
     return { ok: false, motivo: e.message };
   }
@@ -1163,13 +1170,17 @@ async function baixarEstoquePorAplicacao(a) {
 
 // Reverte a baixa (usado quando o master volta o status de "concluído")
 async function reverterBaixaAplicacao(a) {
-  if (!a || !a.estoque_baixado || !a.retirada_id) return;
+  if (!a || !a.estoque_baixado) return;
+  // suporta formato novo (retirada_ids[]) e antigo (retirada_id)
+  const ids = Array.isArray(a.retirada_ids) ? a.retirada_ids : (a.retirada_id ? [a.retirada_id] : []);
   try {
-    await deleteDoc(doc(db,'insumos_retiradas',a.retirada_id));
-    const i = retiradas.findIndex(r=>r.id===a.retirada_id);
-    if (i>=0) retiradas.splice(i,1);
-    await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { estoque_baixado: false, retirada_id: '' });
-    a.estoque_baixado = false; a.retirada_id = '';
+    for (const rid of ids) {
+      await deleteDoc(doc(db,'insumos_retiradas',rid));
+      const i = retiradas.findIndex(r=>r.id===rid);
+      if (i>=0) retiradas.splice(i,1);
+    }
+    await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { estoque_baixado: false, retirada_ids: [], retirada_id: '' });
+    a.estoque_baixado = false; a.retirada_ids = []; a.retirada_id = '';
     recalcularEstoque();
   } catch(e) { /* silencioso */ }
 }
@@ -1314,7 +1325,7 @@ function renderDashboard() {
   // Junta todas as operações do caderno num formato comum
   const ops = [];
   plantios.forEach(p => ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${p.cultivar?` (${p.cultivar})`:''}` }));
-  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc:`${a.produto||'—'}${a.dose?` — ${fmt(a.dose)} ${a.unidade||''}/ha`:''}` }));
+  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a) }));
   colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
 
   // Contadores por status
@@ -1404,7 +1415,7 @@ async function renderCobertura() {
   // Converte para o formato {talhao, fazenda, produtos:[{produto,dose}]} usado abaixo
   const planejadas = planejadasBrutas.map(a => ({
     talhao: a.talhao, fazenda: a.fazenda,
-    produtos: [{ produto: a.produto, dose: a.dose }]
+    produtos: produtosDaAplicacao(a).map(p => ({ produto: p.produto, dose: p.dose }))
   }));
 
   // Necessidade por produto: dose × área
@@ -3228,6 +3239,24 @@ window.confirmarConcluirPlantio = async function(id) {
 // tipo: 'pulverizacao' | 'solido'. Registros antigos sem tipo contam como 'solido'.
 function tipoDaAdubacao(a) { return a.tipo_aplicacao === 'pulverizacao' ? 'pulverizacao' : 'solido'; }
 
+// Lê os produtos de uma aplicação de forma retrocompatível:
+// - formato novo: a.produtos = [{produto, dose, unidade}, ...]
+// - formato antigo: a.produto / a.dose / a.unidade (produto único)
+function produtosDaAplicacao(a) {
+  if (Array.isArray(a.produtos) && a.produtos.length > 0) {
+    return a.produtos.map(p => ({ produto: p.produto||'', dose: parseFloat(p.dose)||0, unidade: p.unidade||'' }));
+  }
+  if (a.produto) return [{ produto: a.produto, dose: parseFloat(a.dose)||0, unidade: a.unidade||'' }];
+  return [];
+}
+// Texto resumido dos produtos (para tabelas): "Produto A, Produto B (+1)"
+function resumoProdutos(a) {
+  const lista = produtosDaAplicacao(a);
+  if (lista.length === 0) return '—';
+  if (lista.length === 1) return lista[0].produto || '—';
+  return `${lista[0].produto} +${lista.length-1}`;
+}
+
 function renderAdubacao(tipo) {
   tipo = tipo || 'solido';
   const el = document.getElementById('caderno-conteudo');
@@ -3262,8 +3291,14 @@ function renderAdubacao(tipo) {
         ordenarLista(lista,tipo,(a,c)=>{
           if(c==='dose') return parseFloat(a.dose)||0;
           return a[c]||'';
-        }).map(a=>`<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${a.produto||'—'}</td><td>${a.categoria||'—'}</td>
-        <td>${a.dose?fmt(a.dose)+' '+(a.unidade||''):'—'}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
+        }).map(a=>{
+          const prods = produtosDaAplicacao(a);
+          const prodCell = prods.length<=1 ? (prods[0]?.produto||'—') : prods.map(p=>p.produto).join('<br>');
+          const doseCell = prods.length<=1
+            ? (prods[0]&&prods[0].dose?fmt(prods[0].dose)+' '+(prods[0].unidade||''):'—')
+            : prods.map(p=>fmt(p.dose)+' '+(p.unidade||'')).join('<br>');
+          return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td><td>${a.categoria||'—'}</td>
+        <td>${doseCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
@@ -3273,7 +3308,7 @@ function renderAdubacao(tipo) {
           ${a.status==='concluido' && !a.estoque_baixado?`<button class="btn btn-sm btn-laranja" onclick="baixarEstoqueRetroativo('${a.id}')" title="Esta aplicação foi concluída sem baixar o estoque. Clique para baixar agora (dose × área).">📦 Baixar estoque</button>`:''}
           <button class="btn btn-sm btn-secondary" onclick="abrirModalAdubacao('${a.id}','${tipo}')" title="Editar (requer senha master)">✏️</button>
           <button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_adubacao','${a.id}','adubacao')">✕</button>
-        </div></td></tr>`).join('')}
+        </div></td></tr>`;}).join('')}
       </tbody>
     </table></div>`;
 }
@@ -3342,10 +3377,10 @@ window.abrirModalAdubacao = function(id, tipo) {
           <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===a?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
           <div class="form-group"><label>Categoria</label><select id="ad-categoria">${categorias.map(c=>`<option ${c===a?.categoria?'selected':''}>${c}</option>`).join('')}</select></div>
         </div>
-        <div class="form-group"><label>Produto *</label><input type="text" id="ad-produto" value="${a?.produto||''}" placeholder="${ehPulv?'Ex: Glifosato, Mancozeb':'Ex: Calcário, Gesso, MAP'}" list="compendio-datalist-3"><datalist id="compendio-datalist-3"></datalist></div>
-        <div class="form-row">
-          <div class="form-group"><label>Dose (por ha)</label><input type="number" id="ad-dose" value="${a?.dose||''}" min="0" step="0.01"></div>
-          <div class="form-group"><label>Unidade</label><select id="ad-unidade">${UNIDADES.map(u=>`<option ${u===a?.unidade?'selected':''}>${u}</option>`).join('')}</select></div>
+        <div class="form-group">
+          <label>Produtos *</label>
+          <div id="ad-produtos-lista"></div>
+          <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaProduto()">+ Adicionar produto</button>
         </div>
         ${ehPulv?`<div class="form-group"><label>Vazão (calda por ha)</label><input type="text" id="ad-vazao" value="${a?.vazao||''}" placeholder="Ex: 100 L/ha"></div>`:''}
         <div class="form-group"><label>Como definir a data? *</label>
@@ -3370,9 +3405,15 @@ window.abrirModalAdubacao = function(id, tipo) {
       </div>
     </div>`);
   carregarCompendio().then(lista => {
-    const dl = document.getElementById('compendio-datalist-3');
-    if (dl) dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+    window._compendioProdutos = lista;
+    document.querySelectorAll('.ad-prod-datalist').forEach(dl => {
+      dl.innerHTML = lista.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+    });
   });
+  // Inicializa as linhas de produto (formato novo ou antigo)
+  const produtosIniciais = a ? produtosDaAplicacao(a) : [];
+  window._adProdutos = produtosIniciais.length ? produtosIniciais : [{produto:'',dose:'',unidade:UNIDADES[0]}];
+  renderLinhasProduto();
   if (a?.fazenda) {
     atualizarTalhoesCampo('ad');
     setTimeout(()=>{
@@ -3385,11 +3426,64 @@ window.abrirModalAdubacao = function(id, tipo) {
   }
 };
 
+// Renderiza as linhas de produto a partir de window._adProdutos, preservando o que foi digitado
+function renderLinhasProduto() {
+  const cont = document.getElementById('ad-produtos-lista');
+  if (!cont) return;
+  const lista = window._adProdutos || [];
+  cont.innerHTML = lista.map((p, i) => `
+    <div class="ad-prod-linha" style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <input type="text" class="ad-prod-nome" data-i="${i}" value="${(p.produto||'').replace(/"/g,'&quot;')}" placeholder="Produto" list="ad-prod-dl-${i}" style="flex:2">
+      <datalist id="ad-prod-dl-${i}" class="ad-prod-datalist"></datalist>
+      <input type="number" class="ad-prod-dose" data-i="${i}" value="${p.dose||''}" placeholder="Dose/ha" min="0" step="0.01" style="flex:1;min-width:70px">
+      <select class="ad-prod-unidade" data-i="${i}" style="flex:1;min-width:60px">${UNIDADES.map(u=>`<option ${u===p.unidade?'selected':''}>${u}</option>`).join('')}</select>
+      ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaProduto(${i})" title="Remover">✕</button>`:''}
+    </div>`).join('');
+  // preenche datalists do compêndio se já carregado
+  if (window._compendioProdutos) {
+    cont.querySelectorAll('.ad-prod-datalist').forEach(dl => {
+      dl.innerHTML = window._compendioProdutos.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+    });
+  }
+}
+
+// Lê o que está nos inputs de volta para window._adProdutos (para não perder ao adicionar/remover)
+function coletarLinhasProduto() {
+  const cont = document.getElementById('ad-produtos-lista');
+  if (!cont) return;
+  const linhas = [];
+  cont.querySelectorAll('.ad-prod-linha').forEach(div => {
+    linhas.push({
+      produto: div.querySelector('.ad-prod-nome').value.trim(),
+      dose: div.querySelector('.ad-prod-dose').value,
+      unidade: div.querySelector('.ad-prod-unidade').value
+    });
+  });
+  window._adProdutos = linhas;
+}
+
+window.adicionarLinhaProduto = function() {
+  coletarLinhasProduto();
+  window._adProdutos.push({produto:'',dose:'',unidade:UNIDADES[0]});
+  renderLinhasProduto();
+};
+
+window.removerLinhaProduto = function(i) {
+  coletarLinhasProduto();
+  window._adProdutos.splice(i,1);
+  if (window._adProdutos.length === 0) window._adProdutos.push({produto:'',dose:'',unidade:UNIDADES[0]});
+  renderLinhasProduto();
+};
+
 window.salvarAdubacao = async function(id) {
   const fazenda = document.getElementById('ad-fazenda').value;
   const talhao = document.getElementById('ad-talhao').value;
-  const produto = document.getElementById('ad-produto').value.trim();
-  if (!fazenda || !talhao || !produto) { toast('Preencha fazenda, talhão e produto.','erro'); return; }
+  // Coleta a lista de produtos e valida
+  coletarLinhasProduto();
+  const produtos = (window._adProdutos||[])
+    .map(p => ({ produto: (p.produto||'').trim(), dose: parseFloat(p.dose)||0, unidade: p.unidade||'' }))
+    .filter(p => p.produto);
+  if (!fazenda || !talhao || produtos.length === 0) { toast('Preencha fazenda, talhão e ao menos um produto.','erro'); return; }
 
   const modo_data = document.getElementById('ad-modo-data').value;
   let dataFinal = '', ref_plantio_id = '', ref_aplicacao_id = '', dias_apos = 0;
@@ -3414,8 +3508,10 @@ window.salvarAdubacao = async function(id) {
   const reg = {
     data: dataFinal, fazenda, talhao,
     safra: document.getElementById('ad-safra').value, categoria: document.getElementById('ad-categoria').value,
-    produto, dose: parseFloat(document.getElementById('ad-dose').value)||0,
-    unidade: document.getElementById('ad-unidade').value, obs: document.getElementById('ad-obs').value,
+    // Formato novo: lista de produtos. Mantém produto/dose/unidade do 1º p/ compatibilidade.
+    produtos,
+    produto: produtos[0].produto, dose: produtos[0].dose, unidade: produtos[0].unidade,
+    obs: document.getElementById('ad-obs').value,
     modo_data, ref_plantio_id, ref_aplicacao_id, dias_apos,
     tipo_aplicacao,
     vazao: tipo_aplicacao === 'pulverizacao' ? (document.getElementById('ad-vazao')?.value.trim() || '') : ''
@@ -3599,7 +3695,7 @@ function renderListaTalhoes() {
           })))}
           ${blocoEventoTalhao('🧪 Aplicações', aps.sort((a,b)=>(a.data||'').localeCompare(b.data||'')).map(a => ({
             data: a.data,
-            titulo: `${a.produto||'—'}${a.dose?` — ${fmt(a.dose)} ${a.unidade||''}/ha`:''}`,
+            titulo: (()=>{ const ps=produtosDaAplicacao(a); return ps.length<=1 ? `${ps[0]?.produto||'—'}${ps[0]&&ps[0].dose?` — ${fmt(ps[0].dose)} ${ps[0].unidade||''}/ha`:''}` : ps.map(p=>p.produto).join(', '); })(),
             info: [tipoDaAdubacao(a)==='pulverizacao'?'💧 pulveriz.':'🪨 sólido', a.categoria||''].filter(Boolean).join(' · '),
             status: a.status
           })))}
