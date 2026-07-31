@@ -345,6 +345,12 @@
   th.th-ord:hover { background: rgba(255,255,255,0.08); }
   .th-seta { font-size: 10px; opacity: .9; }
 
+  /* Indicador de status offline/sincronização (modo Aplicações) */
+  .offline-ind { align-items:center; gap:8px; padding:10px 14px; border-radius:10px; font-size:13px; font-weight:600; margin-bottom:14px; }
+  .offline-ind.off  { background:#fdecea; color:#c0392b; border:1px solid #f5c6c0; }
+  .offline-ind.pend { background:#fbf1e3; color:#b9772a; border:1px solid #f0dcbf; }
+  .offline-ind.sync { background:#eef3f8; color:#3a6b9c; border:1px solid #cfe0f0; }
+  .offline-ind.ok   { background:#eaf3ee; color:#2f7a55; border:1px solid #b7dcc6; }
   /* ═══════ PAINEL POR TALHÃO ═══════ */
   .talhao-card { background:#fff; border:1px solid #e6ebe4; border-radius:14px; margin-bottom:10px; overflow:hidden; }
   .talhao-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:16px 18px; cursor:pointer; user-select:none; }
@@ -471,6 +477,140 @@ let entradasRaw = [];     // entradas reais da coleção estoque_ins_entradas (A
 let aplicacoesAgroOp = null; // (legado) cache não mais usado após integração interna
 const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton'];
 function nomesFazendas() { return fazendas.map(f=>f.nome); }
+
+// ══════════════ OFFLINE (modo Aplicações) ══════════════
+// Guarda a lista de aplicações no aparelho e enfileira ações (iniciar/concluir)
+// feitas sem internet, com o horário REAL da ação. Sobe tudo quando a rede volta.
+const OFFLINE_CACHE_KEY = 'acf_aplic_cache';   // snapshot das adubações p/ ver offline
+const OFFLINE_FILA_KEY  = 'acf_aplic_fila';    // ações pendentes de envio
+const OFFLINE_TALHOES_KEY = 'acf_talhoes_cache'; // áreas dos talhões (p/ calcular total offline)
+
+function estaOnline() { return navigator.onLine; }
+
+function salvarCacheAplicacoes() {
+  try {
+    localStorage.setItem(OFFLINE_CACHE_KEY, JSON.stringify(adubacoes.map(a => ({
+      id:a.id, fazenda:a.fazenda, talhao:a.talhao, produto:a.produto, dose:a.dose,
+      unidade:a.unidade, categoria:a.categoria, safra:a.safra, data:a.data, status:a.status,
+      obs:a.obs, obs_operador:a.obs_operador, tipo_aplicacao:a.tipo_aplicacao, vazao:a.vazao,
+      data_conclusao:a.data_conclusao
+    }))));
+    localStorage.setItem(OFFLINE_TALHOES_KEY, JSON.stringify(talhoes.map(t => ({
+      nome:t.nome, fazenda:t.fazenda, area_ha:t.area_ha
+    }))));
+  } catch(e) { /* localStorage cheio/indisponível — segue sem cache */ }
+}
+
+function carregarCacheAplicacoes() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_CACHE_KEY);
+    if (raw) adubacoes = JSON.parse(raw);
+    const rawT = localStorage.getItem(OFFLINE_TALHOES_KEY);
+    if (rawT && talhoes.length === 0) talhoes = JSON.parse(rawT);
+    return !!raw;
+  } catch(e) { return false; }
+}
+
+function lerFila() {
+  try { return JSON.parse(localStorage.getItem(OFFLINE_FILA_KEY) || '[]'); }
+  catch(e) { return []; }
+}
+function salvarFila(fila) {
+  try { localStorage.setItem(OFFLINE_FILA_KEY, JSON.stringify(fila)); } catch(e) {}
+}
+function enfileirarAcao(acao) {
+  const fila = lerFila();
+  fila.push(acao);
+  salvarFila(fila);
+  atualizarIndicadorOffline();
+}
+function contarPendentes() { return lerFila().length; }
+
+// Aplica a ação no estado local (para refletir na tela imediatamente, on/offline)
+function aplicarAcaoLocal(acao) {
+  const a = adubacoes.find(x=>x.id===acao.id);
+  if (!a) return;
+  if (acao.tipo === 'iniciar') {
+    a.status = 'execucao'; a.iniciado_em = acao.ts;
+  } else if (acao.tipo === 'concluir') {
+    a.status = 'concluido'; a.data_conclusao = acao.data_conclusao;
+    if (acao.obs_operador) a.obs_operador = acao.obs_operador;
+  } else if (acao.tipo === 'obs') {
+    a.obs_operador = acao.obs_operador;
+  }
+}
+
+// Envia uma ação para o Firestore (usada no flush da fila)
+async function enviarAcao(acao) {
+  if (acao.tipo === 'iniciar') {
+    await updateDoc(doc(db,'insumos_campo_adubacao',acao.id), {
+      status:'execucao', iniciado_em: Timestamp.fromMillis(acao.ts)
+    });
+  } else if (acao.tipo === 'concluir') {
+    const upd = { status:'concluido', data_conclusao: acao.data_conclusao };
+    if (acao.obs_operador) upd.obs_operador = acao.obs_operador;
+    if (acao.iniciado_em_ts) upd.iniciado_em = Timestamp.fromMillis(acao.iniciado_em_ts);
+    await updateDoc(doc(db,'insumos_campo_adubacao',acao.id), upd);
+    // baixa de estoque ao concluir (se a regra permitir)
+    const a = adubacoes.find(x=>x.id===acao.id);
+    if (a) { try { await baixarEstoquePorAplicacao(a); } catch(e){} }
+  } else if (acao.tipo === 'obs') {
+    await updateDoc(doc(db,'insumos_campo_adubacao',acao.id), { obs_operador: acao.obs_operador });
+  }
+}
+
+let sincronizando = false;
+window.sincronizarFila = sincronizarFila;
+async function sincronizarFila(silencioso) {
+  if (sincronizando) return;
+  if (!estaOnline()) return;
+  const fila = lerFila();
+  if (fila.length === 0) return;
+  sincronizando = true;
+  atualizarIndicadorOffline('Sincronizando...');
+  const restantes = [];
+  let enviadas = 0;
+  for (const acao of fila) {
+    try { await enviarAcao(acao); enviadas++; }
+    catch(e) { restantes.push(acao); } // falhou: mantém na fila p/ tentar depois
+  }
+  salvarFila(restantes);
+  sincronizando = false;
+  atualizarIndicadorOffline();
+  if (enviadas > 0 && !silencioso) toast(`${enviadas} ação(ões) sincronizada(s) com o servidor.`);
+  if (modoAtual === 'aplicacoes') renderModoAplicacoes();
+}
+
+function atualizarIndicadorOffline(textoForcado) {
+  const el = document.getElementById('offline-indicador');
+  if (!el) return;
+  const pend = contarPendentes();
+  const online = estaOnline();
+  if (textoForcado) {
+    el.className = 'offline-ind sync';
+    el.innerHTML = `🔄 ${textoForcado}`;
+    el.style.display = 'flex';
+    return;
+  }
+  if (!online) {
+    el.className = 'offline-ind off';
+    el.innerHTML = `📴 Offline${pend>0?` · ${pend} pendente(s)`:''}`;
+    el.style.display = 'flex';
+  } else if (pend > 0) {
+    el.className = 'offline-ind pend';
+    el.innerHTML = `🔄 ${pend} pendente(s) — <span style="text-decoration:underline;cursor:pointer" onclick="sincronizarFila()">sincronizar agora</span>`;
+    el.style.display = 'flex';
+  } else {
+    el.className = 'offline-ind ok';
+    el.innerHTML = `✅ Tudo sincronizado`;
+    el.style.display = 'flex';
+    setTimeout(()=>{ if(el && contarPendentes()===0 && estaOnline()) el.style.display='none'; }, 2500);
+  }
+}
+
+// Quando a rede volta, sincroniza automaticamente
+window.addEventListener('online', () => { atualizarIndicadorOffline(); sincronizarFila(); });
+window.addEventListener('offline', () => { atualizarIndicadorOffline(); });
 
 // ── UTILS ──
 function fmt(n) { return Number(n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -649,7 +789,25 @@ function iniciarSessao() {
   if (modoAtual === 'aplicacoes') {
     document.getElementById('header-nome').textContent = 'Aplicações';
     document.getElementById('nav-gestor').style.display = 'none';
-    carregarDados().then(() => renderModoAplicacoes());
+    if (estaOnline()) {
+      carregarDados().then(() => {
+        salvarCacheAplicacoes();       // guarda snapshot p/ uso offline
+        sincronizarFila(true);         // sobe ações que ficaram pendentes
+        renderModoAplicacoes();
+      }).catch(() => {
+        // falhou apesar de "online": tenta o cache
+        if (carregarCacheAplicacoes()) renderModoAplicacoes();
+        else document.getElementById('main-content').innerHTML = '<div style="padding:40px;text-align:center;color:var(--cinza)">Sem conexão e sem dados salvos neste aparelho.<br>Conecte-se à internet uma vez para baixar as aplicações.</div>';
+      });
+    } else {
+      // Offline: carrega do cache salvo
+      if (carregarCacheAplicacoes()) {
+        renderModoAplicacoes();
+        toast('Modo offline — mostrando aplicações salvas neste aparelho.');
+      } else {
+        document.getElementById('main-content').innerHTML = '<div style="padding:40px;text-align:center;color:var(--cinza)">📴 Sem conexão e sem dados salvos.<br>Conecte-se à internet uma vez para baixar as aplicações e poder usá-las offline depois.</div>';
+      }
+    }
   } else {
     document.getElementById('header-nome').textContent = 'Gestão';
     document.getElementById('nav-gestor').style.display = 'flex';
@@ -678,10 +836,23 @@ onAuthStateChanged(auth, async (user) => {
       await signInAnonymously(auth);
     } catch(e) {
       document.getElementById('modo-conectando').style.display = 'none';
-      document.getElementById('login-erro').textContent = 'Não foi possível conectar. Verifique a internet e recarregue a página.';
+      // Offline: se há aplicações salvas, ainda permite entrar no modo Aplicações
+      if (!estaOnline() && localStorage.getItem(OFFLINE_CACHE_KEY)) {
+        mostrarTelaLogin();
+      } else {
+        document.getElementById('login-erro').textContent = 'Não foi possível conectar. Verifique a internet e recarregue a página.';
+      }
     }
   }
 });
+
+// Se depois de 4s ainda estiver "conectando" e offline com cache, libera a escolha de modo
+setTimeout(() => {
+  const conect = document.getElementById('modo-conectando');
+  if (conect && conect.style.display !== 'none' && !estaOnline() && localStorage.getItem(OFFLINE_CACHE_KEY) && !modoAtual) {
+    mostrarTelaLogin();
+  }
+}, 4000);
 
 // ══════════════ MODO APLICAÇÕES (substitui o AgroOp) ══════════════
 // Operador no campo: vê o que foi planejado (insumos_campo_adubacao), inicia e conclui.
@@ -697,6 +868,7 @@ window.renderModoAplicacoes = function() {
   };
   el.innerHTML = `
     <div class="sec-titulo" style="margin-bottom:16px">🚜 Aplicações no Campo</div>
+    <div id="offline-indicador" class="offline-ind" style="display:none"></div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${aplicSubaba==='pendentes'?'ativo':''}" onclick="mudarSubabaAplic('pendentes')">🌱 Pendentes (${cont.pendentes})</button>
       <button class="nav-btn ${aplicSubaba==='execucao'?'ativo':''}" onclick="mudarSubabaAplic('execucao')">🚧 Em Execução (${cont.execucao})</button>
@@ -704,6 +876,7 @@ window.renderModoAplicacoes = function() {
     </div>
     <div id="aplic-conteudo"></div>`;
   renderSubabaAplic();
+  atualizarIndicadorOffline();
 };
 
 window.mudarSubabaAplic = function(sub) {
@@ -858,12 +1031,21 @@ window.salvarObsOperador = async function(id, cardId) {
   const el = document.getElementById(`obsop-${cardId}`);
   if (!el) return;
   const texto = el.value.trim();
-  try {
-    await updateDoc(doc(db,'insumos_campo_adubacao',id), { obs_operador: texto });
-    const a = adubacoes.find(x=>x.id===id);
-    if (a) a.obs_operador = texto;
-    toast('Observação salva!');
-  } catch(e) { toast('Erro: '+e.message,'erro'); }
+  const a = adubacoes.find(x=>x.id===id);
+  if (a) a.obs_operador = texto;
+  if (estaOnline()) {
+    try {
+      await updateDoc(doc(db,'insumos_campo_adubacao',id), { obs_operador: texto });
+      toast('Observação salva!');
+    } catch(e) {
+      enfileirarAcao({ tipo:'obs', id, obs_operador: texto });
+      toast('Observação salva (offline).');
+    }
+  } else {
+    enfileirarAcao({ tipo:'obs', id, obs_operador: texto });
+    toast('Observação salva (offline).');
+  }
+  salvarCacheAplicacoes();
 };
 
 // Busca a área (ha) de um talhão pelo cadastro, casando fazenda + nome do talhão
@@ -921,11 +1103,21 @@ function fmtDataHora(ts) {
 window.aplicIniciar = async function(id, emLote) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
-  try {
-    await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'execucao', iniciado_em: Timestamp.now() });
-    a.status = 'execucao'; a.iniciado_em = Timestamp.now();
-    if (!emLote) { toast('Aplicação iniciada!'); renderModoAplicacoes(); }
-  } catch(e) { toast('Erro: '+e.message,'erro'); }
+  const agora = Date.now();
+  // aplica local na hora (funciona on e offline)
+  a.status = 'execucao'; a.iniciado_em = agora;
+  const acao = { tipo:'iniciar', id, ts: agora };
+  if (estaOnline()) {
+    try {
+      await updateDoc(doc(db,'insumos_campo_adubacao',id), { status:'execucao', iniciado_em: Timestamp.fromMillis(agora) });
+    } catch(e) {
+      enfileirarAcao(acao); // falhou mesmo online: enfileira
+    }
+  } else {
+    enfileirarAcao(acao); // offline: guarda para subir depois
+  }
+  salvarCacheAplicacoes();
+  if (!emLote) { toast(estaOnline()?'Aplicação iniciada!':'Iniciada (offline) — vai sincronizar ao voltar a rede.'); renderModoAplicacoes(); }
 };
 
 // ── BAIXA AUTOMÁTICA DE ESTOQUE ──
@@ -986,21 +1178,32 @@ window.aplicConcluir = async function(id, emLote, obsOperador) {
   const a = adubacoes.find(x=>x.id===id);
   if (!a) return;
   if (!emLote && !confirm(`Concluir a aplicação de "${a.produto}" em ${a.talhao}?`)) return;
-  try {
-    const data_conclusao = hoje();
-    const upd = { status:'concluido', data_conclusao };
-    if (obsOperador != null && obsOperador !== '') upd.obs_operador = obsOperador;
-    await updateDoc(doc(db,'insumos_campo_adubacao',id), upd);
-    a.status = 'concluido'; a.data_conclusao = data_conclusao;
-    if (upd.obs_operador != null) a.obs_operador = upd.obs_operador;
-    // Baixa automática de estoque
-    const baixa = await baixarEstoquePorAplicacao(a);
-    if (!emLote) {
-      if (baixa.ok) toast('Aplicação concluída!' + (baixa.semCadastro ? ' (produto sem entrada no estoque — retirada registrada mesmo assim)' : ''));
-      else toast(`Aplicação concluída, mas estoque NÃO baixado: ${baixa.motivo}.`, 'erro');
-      renderModoAplicacoes();
+  const data_conclusao = hoje();
+  const iniciado_em_ts = (typeof a.iniciado_em === 'number') ? a.iniciado_em : (a.iniciado_em?.toMillis ? a.iniciado_em.toMillis() : null);
+  // aplica local na hora
+  a.status = 'concluido'; a.data_conclusao = data_conclusao;
+  if (obsOperador != null && obsOperador !== '') a.obs_operador = obsOperador;
+  const acao = { tipo:'concluir', id, data_conclusao, obs_operador: obsOperador||'', iniciado_em_ts };
+  if (estaOnline()) {
+    try {
+      const upd = { status:'concluido', data_conclusao };
+      if (obsOperador != null && obsOperador !== '') upd.obs_operador = obsOperador;
+      await updateDoc(doc(db,'insumos_campo_adubacao',id), upd);
+      const baixa = await baixarEstoquePorAplicacao(a);
+      if (!emLote) {
+        if (baixa.ok) toast('Aplicação concluída!' + (baixa.semCadastro ? ' (produto sem entrada no estoque)' : ''));
+        else toast(`Concluída, mas estoque NÃO baixado: ${baixa.motivo}.`, 'erro');
+      }
+    } catch(e) {
+      enfileirarAcao(acao); // falhou online: enfileira
+      if (!emLote) toast('Concluída (será sincronizada em breve).');
     }
-  } catch(e) { toast('Erro: '+e.message,'erro'); }
+  } else {
+    enfileirarAcao(acao); // offline
+    if (!emLote) toast('Concluída (offline) — vai sincronizar ao voltar a rede.');
+  }
+  salvarCacheAplicacoes();
+  if (!emLote) renderModoAplicacoes();
 };
 
 // ── DADOS ──
@@ -1310,7 +1513,11 @@ window.exportarCobertura = function() {
 };
 
 // ══════════════ PEDIDOS ══════════════
+let ordenacaoPedidos = { campo: 'fornecedor', dir: 1 };
+
 function renderPedidos() {
+  // Lista de fornecedores distintos para o dropdown
+  const fornecedores = [...new Set(pedidos.map(p => p.fornecedor).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   document.getElementById('main-content').innerHTML = `
     <div class="sec-header">
       <div class="sec-titulo">📋 Pedidos de Compra</div>
@@ -1332,25 +1539,42 @@ function renderPedidos() {
         <option value="">Todas as safras</option>
         ${safrasDisponiveis().map(s=>`<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('')}
       </select>
-      <input type="text" id="filtro-fornecedor" oninput="filtrarPedidos()" placeholder="Buscar fornecedor...">
+      <select id="filtro-fornecedor" onchange="filtrarPedidos()">
+        <option value="">Todos os fornecedores</option>
+        ${fornecedores.map(f=>`<option value="${f.replace(/"/g,'&quot;')}">${f}</option>`).join('')}
+      </select>
+      <input type="text" id="filtro-produto" oninput="filtrarPedidos()" placeholder="Buscar produto...">
     </div>
     <div id="lista-pedidos"></div>`;
   filtrarPedidos();
 }
 
+window.ordenarPedidos = function(campo) {
+  if (ordenacaoPedidos.campo === campo) ordenacaoPedidos.dir *= -1;
+  else { ordenacaoPedidos.campo = campo; ordenacaoPedidos.dir = 1; }
+  filtrarPedidos();
+};
+
+function thOrdPed(campo, rotulo) {
+  const seta = ordenacaoPedidos.campo === campo ? (ordenacaoPedidos.dir===1?' ▲':' ▼') : '';
+  return `<th class="th-ord" onclick="ordenarPedidos('${campo}')">${rotulo}<span class="th-seta">${seta}</span></th>`;
+}
+
 window.filtrarPedidos = function() {
   const statusF = document.getElementById('filtro-status-pedido')?.value || '';
   const safraF = document.getElementById('filtro-safra-pedido')?.value || '';
-  const fornF = (document.getElementById('filtro-fornecedor')?.value || '').toLowerCase();
-  const lista = pedidos.filter(p => (!statusF || p.status === statusF) && (!fornF || p.fornecedor.toLowerCase().includes(fornF)));
+  const fornF = document.getElementById('filtro-fornecedor')?.value || '';
+  const prodF = (document.getElementById('filtro-produto')?.value || '').toLowerCase();
+  const lista = pedidos.filter(p => (!statusF || p.status === statusF) && (!fornF || p.fornecedor === fornF));
   const el = document.getElementById('lista-pedidos');
   if (!el) return;
 
-  // Achata pedidos -> um item por linha (filtra por safra no nível do item), ordenado por fornecedor
+  // Achata pedidos -> um item por linha (filtra safra e produto no nível do item)
   const linhas = [];
   lista.forEach(p => {
     (p.itens||[]).forEach(it => {
       if (safraF && normalizar(it.safra||'') !== normalizar(safraF)) return;
+      if (prodF && !(it.produto||'').toLowerCase().includes(prodF)) return;
       const saldo = (it.quantidade||0) - (it.quantidade_recebida||0);
       const statusItem = saldo<=0 ? 'entregue_total' : (it.quantidade_recebida||0)>0 ? 'parcial' : 'pendente';
       linhas.push({ pedidoId: p.id, pedidoStatus: p.status, fornecedor: p.fornecedor, produto: it.produto,
@@ -1359,11 +1583,29 @@ window.filtrarPedidos = function() {
     });
   });
   if (linhas.length === 0) { el.innerHTML = `<div class="tabela-wrap"><div class="tabela-vazia">Nenhum pedido encontrado</div></div>`; return; }
-  linhas.sort((a,b) => a.fornecedor.localeCompare(b.fornecedor) || a.produto.localeCompare(b.produto));
+
+  // Ordenação clicável
+  const o = ordenacaoPedidos;
+  const numericos = ['volumeCompra','volumeRecebido','saldo','precoUnit'];
+  linhas.sort((a,b) => {
+    let va = a[o.campo], vb = b[o.campo];
+    if (o.campo === 'status') { va = a.statusItem; vb = b.statusItem; }
+    if (numericos.includes(o.campo)) return ((va||0)-(vb||0)) * o.dir;
+    return String(va||'').localeCompare(String(vb||''), 'pt', {numeric:true}) * o.dir;
+  });
 
   el.innerHTML = `
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Fornecedor</th><th>Produto</th><th>Compra</th><th>Recebido</th><th>Saldo</th><th>Valor/un</th><th>Status</th><th>Ações</th></tr></thead>
+      <thead><tr>
+        ${thOrdPed('fornecedor','Fornecedor')}
+        ${thOrdPed('produto','Produto')}
+        ${thOrdPed('volumeCompra','Compra')}
+        ${thOrdPed('volumeRecebido','Recebido')}
+        ${thOrdPed('saldo','Saldo')}
+        ${thOrdPed('precoUnit','Valor/un')}
+        ${thOrdPed('status','Status')}
+        <th class="col-acoes">Ações</th>
+      </tr></thead>
       <tbody>
         ${linhas.map(l => `
           <tr>
@@ -1374,11 +1616,11 @@ window.filtrarPedidos = function() {
             <td style="font-weight:700;color:${l.saldo>0?'var(--laranja)':'var(--verde)'}">${fmt(l.saldo)} ${l.unidade}</td>
             <td>${l.precoUnit>0?'R$ '+fmt(l.precoUnit):'—'}</td>
             <td>${badgeStatus(l.statusItem)}</td>
-            <td style="white-space:nowrap">
+            <td class="col-acoes"><div class="acoes-wrap">
               <button class="btn btn-sm btn-secondary" onclick="verPedido('${l.pedidoId}')">Ver</button>
               ${l.pedidoStatus !== 'entregue_total' && l.pedidoStatus !== 'cancelado' ?
-                `<button class="btn btn-sm btn-laranja" style="margin-left:6px" onclick="abrirBaixa('${l.pedidoId}')">Receber</button>` : ''}
-            </td>
+                `<button class="btn btn-sm btn-laranja" onclick="abrirBaixa('${l.pedidoId}')">Receber</button>` : ''}
+            </div></td>
           </tr>`).join('')}
       </tbody>
     </table></div>`;
@@ -2770,7 +3012,7 @@ window.unificarSafras = async function() {
 };
 
 // ══════════════ CADERNO DE CAMPO ══════════════
-let cadernoSubaba = 'plantio';
+let cadernoSubaba = 'talhoes';
 let cadernoSafra = '';  // '' = todas as safras (filtro global do caderno)
 
 // Lista de safras disponíveis (cadastro + as que aparecem em registros)
@@ -2800,11 +3042,11 @@ function renderCaderno() {
       </div>
     </div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
+      <button class="nav-btn ${cadernoSubaba==='talhoes'?'ativo':''}" onclick="mudarSubabaCaderno('talhoes')">📍 Talhões</button>
       <button class="nav-btn ${cadernoSubaba==='plantio'?'ativo':''}" onclick="mudarSubabaCaderno('plantio')">🌱 Plantio</button>
       <button class="nav-btn ${cadernoSubaba==='pulverizacao'?'ativo':''}" onclick="mudarSubabaCaderno('pulverizacao')">💧 Pulverização</button>
       <button class="nav-btn ${cadernoSubaba==='solido'?'ativo':''}" onclick="mudarSubabaCaderno('solido')">🪨 Sólidos</button>
       <button class="nav-btn ${cadernoSubaba==='colheita'?'ativo':''}" onclick="mudarSubabaCaderno('colheita')">🌾 Colheita</button>
-      <button class="nav-btn ${cadernoSubaba==='talhoes'?'ativo':''}" onclick="mudarSubabaCaderno('talhoes')">📍 Talhões</button>
     </div>
     <div id="caderno-conteudo"></div>`;
   renderSubabaCaderno();
