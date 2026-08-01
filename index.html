@@ -256,8 +256,13 @@
   }
   .aplic-card-resumo { font-size: 14px; color: var(--aplic-texto2); margin-top: 10px; }
   /* Fundo por tipo de aplicação (fácil identificação para o operador) */
-  .aplic-card.tipo-solido { background: #f2f2f3; }
-  .aplic-card.tipo-pulv { background: #e9f2fb; }
+  .aplic-card.tipo-solido { background: #faf3d8; border-color: #e3d49c; }
+  .aplic-card.tipo-pulv { background: #e0edfb; border-color: #b4d0ec; }
+  /* Tabela do tanque: compacta para caber na tela do celular */
+  .aplic-tabela-tanque th { padding: 10px 8px; font-size: 10px; white-space: normal; line-height: 1.3; }
+  .aplic-tabela-tanque td { padding: 11px 8px; font-size: 15px; }
+  .aplic-tabela-tanque td:first-child { padding-left: 18px; }
+  .aplic-tabela-tanque th:first-child { padding-left: 18px; }
   /* Cabeçalho com rótulos claros e letras grandes */
   .aplic-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
   .aplic-info-label {
@@ -1062,8 +1067,8 @@ function cardAplicacao(g, idx) {
       <div class="aplic-tanque">
         <div class="aplic-tanque-titulo">🛢 Volume por tanque</div>
         ${infoTanques}
-        <table class="aplic-tabela">
-          <thead><tr><th>Produto</th><th>Por tanque cheio</th>${linhasUltimo?`<th>Último tanque (${fmt(restoHa)} ha)</th>`:''}</tr></thead>
+        <table class="aplic-tabela aplic-tabela-tanque">
+          <thead><tr><th>Produto</th><th>Tanque cheio</th>${linhasUltimo?`<th>Último tanque</th>`:''}</tr></thead>
           <tbody>${linhasTanque}</tbody>
         </table>
       </div>`;
