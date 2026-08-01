@@ -116,8 +116,8 @@
 
   .tabela-wrap { background: var(--branco); border-radius: var(--radius); box-shadow: var(--sombra); overflow: auto; }
   .tabela-wrap table { width: 100%; border-collapse: collapse; }
-  .tabela-wrap th { background: var(--verde); color: white; padding: 16px 10px; text-align: left; font-family: 'Syne', sans-serif;
-    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; line-height: 1.3; }
+  .tabela-wrap th { background: var(--verde); color: white; padding: 14px 10px; text-align: left; font-family: 'Syne', sans-serif;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; white-space: normal; line-height: 1.35; vertical-align: middle; max-width: 110px; }
   .tabela-wrap td { padding: 10px 10px; border-bottom: 1px solid var(--creme-escuro); font-size: 13px; vertical-align: middle; }
   .tabela-wrap tr:last-child td { border-bottom: none; }
   .tabela-wrap tbody tr:hover td { background: var(--creme); }
@@ -371,7 +371,7 @@
   th.col-acoes, td.col-acoes { text-align: right; white-space: nowrap; }
   .acoes-wrap { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
   /* Cabeçalhos ordenáveis */
-  th.th-ord { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.th-ord { cursor: pointer; user-select: none; white-space: normal; }
   th.th-ord:hover { background: rgba(255,255,255,0.08); }
   .th-seta { font-size: 10px; opacity: .9; }
 
@@ -1424,7 +1424,7 @@ function renderDashboard() {
   const hojeStr = hoje();
   // Junta todas as operações do caderno num formato comum
   const ops = [];
-  plantios.forEach(p => ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${p.cultivar?` (${p.cultivar})`:''}` }));
+  plantios.forEach(p => { const nomes = cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${nomes?` (${nomes})`:''}` }); });
   adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a) }));
   colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
 
@@ -3302,14 +3302,19 @@ function renderPlantio() {
         ordenarLista(lista,'plantio',(p,c)=>{
           if(c==='ciclo_dias') return parseFloat(p.ciclo_dias)||0;
           return p[c]||'';
-        }).map(p=>`<tr><td>${fmtDataBR(p.data)}</td><td>${p.data_conclusao?fmtDataBR(p.data_conclusao):'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
-        <td>${p.safra||'—'}</td><td>${p.cultivar||'—'}</td><td>${p.ciclo_dias?fmt(p.ciclo_dias)+'d':'—'}</td>
-        <td>${fmtDataBR(p.data_prevista_colheita)}</td><td>${badgeStatusCampo(p.status)}</td>
+        }).map(p=>{
+          const cs = cultivaresDoPlantio(p);
+          const cultCell = cs.length===0 ? '—' : cs.map(c=>`${c.cultivar||'—'}${c.area_ha>0?` <span style="font-size:11px;color:var(--cinza)">(${fmt(c.area_ha)} ha)</span>`:''}`).join('<br>');
+          const cicloCell = cs.length===0 ? '—' : cs.map(c=>c.ciclo_dias>0?fmt(c.ciclo_dias)+'d':'—').join('<br>');
+          const prevCell = cs.length===0 ? '—' : cs.map(c=>fmtDataBR(c.data_prevista_colheita)).join('<br>');
+          return `<tr><td>${fmtDataBR(p.data)}</td><td>${p.data_conclusao?fmtDataBR(p.data_conclusao):'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+        <td>${p.safra||'—'}</td><td>${cultCell}</td><td>${cicloCell}</td>
+        <td>${prevCell}</td><td>${badgeStatusCampo(p.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${p.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirPlantio('${p.id}')">✅ Concluir</button>`:''}
           <button class="btn btn-sm btn-secondary" onclick="abrirModalPlantio('${p.id}')">✏️</button>
           <button class="btn btn-sm btn-secondary" onclick="excluirRegistroCampo('insumos_campo_plantio','${p.id}','plantio')">✕</button>
-        </div></td></tr>`).join('')}
+        </div></td></tr>`;}).join('')}
       </tbody>
     </table></div>`;
 }
@@ -3318,6 +3323,23 @@ function badgeStatusCampo(status) {
   if (status === 'concluido') return '<span class="badge badge-verde">Concluído</span>';
   if (status === 'enviado_operador') return '<span class="badge badge-laranja">Enviado ao Operador</span>';
   return '<span class="badge badge-azul">Planejado</span>';
+}
+
+// Lê as cultivares de um plantio de forma retrocompatível:
+// - formato novo: p.cultivares = [{cultivar, area_ha, ciclo_dias, data_prevista_colheita}]
+// - formato antigo: p.cultivar / p.ciclo_dias / p.data_prevista_colheita (única)
+function cultivaresDoPlantio(p) {
+  if (Array.isArray(p.cultivares) && p.cultivares.length > 0) {
+    return p.cultivares.map(c => ({
+      cultivar: c.cultivar||'', area_ha: parseFloat(c.area_ha)||0,
+      ciclo_dias: parseFloat(c.ciclo_dias)||0, data_prevista_colheita: c.data_prevista_colheita||''
+    }));
+  }
+  if (p.cultivar || p.ciclo_dias) return [{
+    cultivar: p.cultivar||'', area_ha: 0,
+    ciclo_dias: parseFloat(p.ciclo_dias)||0, data_prevista_colheita: p.data_prevista_colheita||''
+  }];
+  return [];
 }
 
 window.abrirModalPlantio = function(id) {
@@ -3335,13 +3357,11 @@ window.abrirModalPlantio = function(id) {
           <div class="form-group"><label>Talhão *</label><select id="pl-talhao"><option value="">Selecione a fazenda...</option></select></div>
           <div class="form-group"><label>Cultura *</label><select id="pl-cultura"><option value="">Selecione...</option>${culturas.map(c=>`<option ${c.nome===p?.cultura?'selected':''}>${c.nome}</option>`).join('')}</select></div>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>Safra</label><select id="pl-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===p?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Cultivar/Variedade</label><input type="text" id="pl-cultivar" value="${p?.cultivar||''}" placeholder="Ex: TMG 7062"></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Ciclo da Cultivar (dias)</label><input type="number" id="pl-ciclo" value="${p?.ciclo_dias||''}" min="0" step="1" onchange="atualizarPrevisaoColheita()" placeholder="Ex: 115"></div>
-          <div class="form-group"><label>Previsão de Colheita</label><input type="date" id="pl-previsao-colheita" value="${p?.data_prevista_colheita||''}" readonly style="background:var(--creme);color:var(--cinza)"></div>
+        <div class="form-group"><label>Safra</label><select id="pl-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===p?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
+        <div class="form-group">
+          <label>Cultivares * <span style="font-weight:400;text-transform:none;color:var(--cinza)">(um talhão pode ter mais de uma — informe a área e o ciclo de cada)</span></label>
+          <div id="pl-cultivares-lista"></div>
+          <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaCultivar()">+ Adicionar cultivar</button>
         </div>
         <div class="form-row">
           <div class="form-group"><label>População (plantas ou sementes/ha)</label><input type="number" id="pl-populacao" value="${p?.populacao||''}" min="0" step="1"></div>
@@ -3354,15 +3374,66 @@ window.abrirModalPlantio = function(id) {
         </div>
       </div>
     </div>`);
+  // Inicializa as linhas de cultivar (formato novo ou antigo)
+  const cultivaresIniciais = p ? cultivaresDoPlantio(p) : [];
+  window._plCultivares = cultivaresIniciais.length ? cultivaresIniciais : [{cultivar:'',area_ha:'',ciclo_dias:''}];
+  renderLinhasCultivar();
   if (p?.fazenda) { atualizarTalhoesCampo('pl'); setTimeout(()=>{ const s=document.getElementById('pl-talhao'); if(s) s.value=p.talhao||''; },0); }
 };
 
-// Recalcula a previsão de colheita (data do plantio + ciclo da cultivar) em tempo real no formulário
+// Renderiza as linhas de cultivar preservando o que foi digitado
+function renderLinhasCultivar() {
+  const cont = document.getElementById('pl-cultivares-lista');
+  if (!cont) return;
+  const lista = window._plCultivares || [];
+  cont.innerHTML = lista.map((c, i) => `
+    <div class="pl-cult-linha" style="border:1px solid var(--creme-escuro);border-radius:10px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="text" class="pl-cult-nome" value="${(c.cultivar||'').replace(/"/g,'&quot;')}" placeholder="Cultivar (ex: TMG 7062)" style="flex:2;min-width:130px">
+        <input type="number" class="pl-cult-area" value="${c.area_ha||''}" placeholder="Área (ha)" min="0" step="0.01" style="flex:1;min-width:85px">
+        <input type="number" class="pl-cult-ciclo" value="${c.ciclo_dias||''}" placeholder="Ciclo (dias)" min="0" step="1" oninput="atualizarPrevisaoColheita()" style="flex:1;min-width:85px">
+        ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaCultivar(${i})" title="Remover">✕</button>`:''}
+      </div>
+      <div class="pl-cult-prev" style="font-size:12px;color:var(--cinza);margin-top:6px">Previsão de colheita: —</div>
+    </div>`).join('');
+  atualizarPrevisaoColheita();
+}
+
+function coletarLinhasCultivar() {
+  const cont = document.getElementById('pl-cultivares-lista');
+  if (!cont) return;
+  const linhas = [];
+  cont.querySelectorAll('.pl-cult-linha').forEach(div => {
+    linhas.push({
+      cultivar: div.querySelector('.pl-cult-nome').value.trim(),
+      area_ha: div.querySelector('.pl-cult-area').value,
+      ciclo_dias: div.querySelector('.pl-cult-ciclo').value
+    });
+  });
+  window._plCultivares = linhas;
+}
+
+window.adicionarLinhaCultivar = function() {
+  coletarLinhasCultivar();
+  window._plCultivares.push({cultivar:'',area_ha:'',ciclo_dias:''});
+  renderLinhasCultivar();
+};
+
+window.removerLinhaCultivar = function(i) {
+  coletarLinhasCultivar();
+  window._plCultivares.splice(i,1);
+  if (window._plCultivares.length === 0) window._plCultivares.push({cultivar:'',area_ha:'',ciclo_dias:''});
+  renderLinhasCultivar();
+};
+
+// Recalcula a previsão de colheita de cada cultivar (data do plantio + ciclo) em tempo real
 window.atualizarPrevisaoColheita = function() {
   const data = document.getElementById('pl-data')?.value;
-  const ciclo = parseFloat(document.getElementById('pl-ciclo')?.value)||0;
-  const campo = document.getElementById('pl-previsao-colheita');
-  if (campo) campo.value = (data && ciclo>0) ? somarDias(data, ciclo) : '';
+  document.querySelectorAll('.pl-cult-linha').forEach(div => {
+    const ciclo = parseFloat(div.querySelector('.pl-cult-ciclo')?.value)||0;
+    const span = div.querySelector('.pl-cult-prev');
+    if (span) span.textContent = 'Previsão de colheita: ' + ((data && ciclo>0) ? fmtDataBR(somarDias(data, ciclo)) : '—');
+  });
 };
 
 window.salvarPlantio = async function(id) {
@@ -3371,13 +3442,26 @@ window.salvarPlantio = async function(id) {
   const cultura = document.getElementById('pl-cultura').value;
   if (!fazenda || !talhao || !cultura) { toast('Preencha fazenda, talhão e cultura.','erro'); return; }
   const data = document.getElementById('pl-data').value;
-  const ciclo_dias = parseFloat(document.getElementById('pl-ciclo').value)||0;
+  // Coleta as cultivares e valida
+  coletarLinhasCultivar();
+  const cultivares = (window._plCultivares||[])
+    .map(c => ({
+      cultivar: (c.cultivar||'').trim(),
+      area_ha: parseFloat(c.area_ha)||0,
+      ciclo_dias: parseFloat(c.ciclo_dias)||0,
+      data_prevista_colheita: (data && (parseFloat(c.ciclo_dias)||0)>0) ? somarDias(data, parseFloat(c.ciclo_dias)) : ''
+    }))
+    .filter(c => c.cultivar);
+  if (cultivares.length === 0) { toast('Informe ao menos uma cultivar.','erro'); return; }
+
   const reg = {
     data, fazenda, talhao, cultura,
     safra: document.getElementById('pl-safra').value,
-    cultivar: document.getElementById('pl-cultivar').value,
-    ciclo_dias,
-    data_prevista_colheita: ciclo_dias>0 ? somarDias(data, ciclo_dias) : '',
+    // Formato novo: lista de cultivares. Mantém campos antigos com a 1ª p/ compatibilidade.
+    cultivares,
+    cultivar: cultivares[0].cultivar,
+    ciclo_dias: cultivares[0].ciclo_dias,
+    data_prevista_colheita: cultivares[0].data_prevista_colheita,
     populacao: parseFloat(document.getElementById('pl-populacao').value)||0,
     espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
     obs: document.getElementById('pl-obs').value
@@ -3879,7 +3963,7 @@ function renderListaTalhoes() {
         <div class="talhao-detalhes">
           ${blocoEventoTalhao('🌱 Plantio', pls.map(p => ({
             data: p.status==='concluido'?(p.data_conclusao||p.data):p.data,
-            titulo: `${p.cultura||'Plantio'}${p.cultivar?` (${p.cultivar})`:''}`,
+            titulo: (()=>{ const ns=cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); return `${p.cultura||'Plantio'}${ns?` (${ns})`:''}`; })(),
             info: [p.ciclo_dias?`ciclo ${fmt(p.ciclo_dias)}d`:'', p.data_prevista_colheita?`prev. colheita ${fmtDataBR(p.data_prevista_colheita)}`:''].filter(Boolean).join(' · '),
             status: p.status
           })))}
