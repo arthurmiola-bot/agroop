@@ -1424,18 +1424,32 @@ function renderDashboard() {
   const hojeStr = hoje();
   // Junta todas as operações do caderno num formato comum
   const ops = [];
-  plantios.forEach(p => { const nomes = cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${nomes?` (${nomes})`:''}` }); });
-  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a) }));
-  colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
+  plantios.forEach(p => { const nomes = cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, data_conclusao:p.data_conclusao||'', fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${nomes?` (${nomes})`:''}` }); });
+  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, data_conclusao:a.data_conclusao||'', fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a) }));
+  colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, data_conclusao:c.data_conclusao||'', fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
 
   // Contadores por status
   const nPlanejadas = ops.filter(o => o.status==='planejado' || o.status==='enviado_operador').length;
   const nExecucao = ops.filter(o => o.status==='execucao').length;
   const nConcluidas = ops.filter(o => o.status==='concluido').length;
 
-  // Atrasadas: data planejada já passou E não concluída
-  const atrasadas = ops.filter(o => o.status!=='concluido' && o.data && o.data < hojeStr)
-    .sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  // ATRASADA = concluída DEPOIS da data planejada. Dias de atraso = execução − planejada.
+  // Planejadas / em execução NÃO contam como atrasadas.
+  function diasEntre(d1, d2) { // d2 - d1 em dias (datas ISO)
+    const a = new Date(d1+'T00:00:00'), b = new Date(d2+'T00:00:00');
+    return Math.round((b - a) / 86400000);
+  }
+  const atrasadas = ops
+    .filter(o => o.status==='concluido' && o.data && o.data_conclusao && o.data_conclusao > o.data)
+    .map(o => ({ ...o, diasAtraso: diasEntre(o.data, o.data_conclusao) }))
+    .filter(o => o.diasAtraso > 0)
+    .sort((a,b)=> b.diasAtraso - a.diasAtraso);
+
+  // Agrupa por dias de atraso (ex: "3 atrasadas 2 dias")
+  const porDias = {};
+  atrasadas.forEach(o => { porDias[o.diasAtraso] = (porDias[o.diasAtraso]||0) + 1; });
+  const resumoAtraso = Object.keys(porDias).map(Number).sort((a,b)=>b-a)
+    .map(d => `${porDias[d]} atrasada${porDias[d]>1?'s':''} ${d} dia${d>1?'s':''}`).join(' · ');
 
   // Próximas 5 planejadas (data >= hoje, não concluídas)
   const proximas = ops.filter(o => o.status!=='concluido' && o.data && o.data >= hojeStr)
@@ -1460,30 +1474,32 @@ function renderDashboard() {
       </div>
       <div class="card-resumo ${atrasadas.length>0?'perigo':''}">
         <div class="card-resumo-valor">${atrasadas.length}</div>
-        <div class="card-resumo-label">⚠️ Atrasadas</div>
+        <div class="card-resumo-label">⚠️ Concluídas com atraso</div>
       </div>
     </div>
 
     ${atrasadas.length > 0 ? `
     <div class="tabela-wrap" style="margin-bottom:24px">
-      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro);color:var(--vermelho)">⚠️ Operações Atrasadas (${atrasadas.length})</div>
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro);color:var(--vermelho)">⚠️ Operações Concluídas com Atraso (${atrasadas.length})</div>
+      ${resumoAtraso?`<div style="padding:10px 20px;font-size:13px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">${resumoAtraso}</div>`:''}
       <table>
-        <thead><tr><th>Data Planejada</th><th>Operação</th><th>Fazenda</th><th>Talhão</th><th>Descrição</th><th>Status</th></tr></thead>
+        <thead><tr><th>Data Planejada</th><th>Data Execução</th><th>Atraso</th><th>Operação</th><th>Fazenda</th><th>Talhão</th><th>Descrição</th></tr></thead>
         <tbody>
           ${atrasadas.map(o => `<tr>
-            <td style="color:var(--vermelho);font-weight:600">${fmtDataBR(o.data)}</td>
+            <td>${fmtDataBR(o.data)}</td>
+            <td style="color:var(--vermelho);font-weight:600">${fmtDataBR(o.data_conclusao)}</td>
+            <td style="color:var(--vermelho);font-weight:700">${o.diasAtraso} dia${o.diasAtraso>1?'s':''}</td>
             <td>${o.icone} ${o.tipo}</td>
             <td>${o.fazenda||'—'}</td>
             <td>${o.talhao||'—'}</td>
             <td>${o.desc}</td>
-            <td>${badgeOp(o.status)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>` : `
     <div style="background:#eaf3ee;border:1px solid #b7dcc6;border-radius:var(--radius);padding:14px 18px;margin-bottom:24px;display:flex;align-items:center;gap:10px">
       <span style="font-size:20px">✅</span>
-      <div style="color:#2f7a55;font-weight:600">Nenhuma operação atrasada. Tudo em dia!</div>
+      <div style="color:#2f7a55;font-weight:600">Nenhuma operação concluída com atraso!</div>
     </div>`}
 
     <div class="tabela-wrap">
@@ -2621,14 +2637,97 @@ window.filtrarRetiradas = function() {
   el.innerHTML = `
     <div style="margin-bottom:12px;font-size:13px;color:var(--cinza)">${lista.length} registros — Custo total: <strong>R$ ${fmt(totalCusto)}</strong></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Custo</th></tr></thead>
+      <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Fazenda</th><th>Talhão</th><th>Cultura</th><th>Safra</th><th>Origem</th><th>Custo</th><th class="col-acoes">Ações</th></tr></thead>
       <tbody>
         ${lista.map(r => `<tr><td>${fmtData(r.data)}</td><td>${r.produto}</td><td>${fmt(r.quantidade)} ${r.unidade}</td>
-        <td>${r.fazenda}</td><td>${r.talhao||'—'}</td><td>${r.cultura||'—'}</td><td>${r.safra||'—'}</td><td>R$ ${fmt(r.custo_total)}</td></tr>`).join('')}
+        <td>${r.fazenda}</td><td>${r.talhao||'—'}</td><td>${r.cultura||'—'}</td><td>${r.safra||'—'}</td>
+        <td>${r.origem==='aplicacao'?'<span style="font-size:11px;color:var(--cinza)">🚜 Aplicação</span>':'<span style="font-size:11px;color:var(--cinza)">Manual</span>'}</td>
+        <td>R$ ${fmt(r.custo_total)}</td>
+        <td class="col-acoes"><div class="acoes-wrap">
+          <button class="btn btn-sm btn-secondary" onclick="abrirEditarRetirada('${r.id}')" title="Editar">✏️</button>
+          <button class="btn btn-sm btn-secondary" onclick="excluirRetirada('${r.id}')" title="Excluir">✕</button>
+        </div></td></tr>`).join('')}
       </tbody>
     </table></div>
     <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="exportarRetiradas()">📥 Exportar Excel</button></div>`;
   window._retiradasFiltradas = lista;
+};
+
+window.abrirEditarRetirada = function(id) {
+  if(!exigirMaster())return;
+  const r = retiradas.find(x=>x.id===id);
+  if (!r) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-editar-retirada">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-titulo">✏️ Editar Retirada</div>
+        <div style="font-size:13px;color:var(--cinza);margin-bottom:12px"><strong>${r.produto}</strong>${r.origem==='aplicacao'?' — gerada por uma aplicação concluída':''}</div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantidade *</label><input type="number" id="edr-qtd" value="${r.quantidade||0}" min="0" step="0.01"></div>
+          <div class="form-group"><label>Unidade</label><input type="text" id="edr-unidade" value="${r.unidade||''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Fazenda</label><input type="text" id="edr-fazenda" value="${(r.fazenda||'').replace(/"/g,'&quot;')}"></div>
+          <div class="form-group"><label>Talhão</label><input type="text" id="edr-talhao" value="${(r.talhao||'').replace(/"/g,'&quot;')}"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="edr-obs" value="${(r.obs||'').replace(/"/g,'&quot;')}" placeholder="Opcional"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-editar-retirada')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarEdicaoRetirada('${id}')">Salvar</button>
+        </div>
+      </div>
+    </div>`);
+};
+
+window.salvarEdicaoRetirada = async function(id) {
+  const r = retiradas.find(x=>x.id===id);
+  if (!r) return;
+  const qtd = parseFloat(document.getElementById('edr-qtd').value)||0;
+  const upd = {
+    quantidade: qtd,
+    unidade: document.getElementById('edr-unidade').value.trim(),
+    fazenda: document.getElementById('edr-fazenda').value.trim(),
+    talhao: document.getElementById('edr-talhao').value.trim(),
+    obs: document.getElementById('edr-obs').value.trim(),
+    custo_total: qtd * (r.custo_unitario||0)
+  };
+  try {
+    await updateDoc(doc(db,'insumos_retiradas',id), upd);
+    Object.assign(r, upd);
+    recalcularEstoque();
+    fecharModal('modal-editar-retirada');
+    toast('Retirada atualizada! Estoque recalculado.');
+    filtrarRetiradas();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+window.excluirRetirada = async function(id) {
+  if(!exigirMaster())return;
+  const r = retiradas.find(x=>x.id===id);
+  if (!r) return;
+  const aviso = r.origem==='aplicacao'
+    ? `Excluir esta retirada (gerada pela aplicação de "${r.produto}")? O produto volta ao estoque e a aplicação vinculada é marcada como não-baixada.`
+    : `Excluir a retirada de "${r.produto}"? O produto volta ao estoque.`;
+  if (!confirm(aviso)) return;
+  try {
+    await deleteDoc(doc(db,'insumos_retiradas',id));
+    const i = retiradas.findIndex(x=>x.id===id); if (i>=0) retiradas.splice(i,1);
+    // Se veio de uma aplicação, limpa o vínculo para permitir baixar de novo se quiser
+    if (r.origem === 'aplicacao' && r.aplicacao_id) {
+      const a = adubacoes.find(x=>x.id===r.aplicacao_id);
+      if (a) {
+        const idsRest = (a.retirada_ids||[]).filter(x=>x!==id);
+        const aindaTem = idsRest.length > 0;
+        try {
+          await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { retirada_ids: idsRest, estoque_baixado: aindaTem });
+          a.retirada_ids = idsRest; a.estoque_baixado = aindaTem;
+        } catch(e){}
+      }
+    }
+    recalcularEstoque();
+    toast('Retirada excluída. Estoque recalculado.');
+    filtrarRetiradas();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
 window.exportarRetiradas = function() {
@@ -3724,7 +3823,7 @@ window.abrirModalAdubacao = function(id, tipo) {
         <div class="modal-titulo">${titulo} — ${a?'Editar':'Novo'} Planejamento</div>
         <div class="form-row">
           <div class="form-group"><label>Fazenda *</label><select id="ad-fazenda" onchange="atualizarTalhoesCampo('ad')"><option value="">Selecione...</option>${nomesFazendas().map(f=>`<option ${f===a?.fazenda?'selected':''}>${f}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Talhão *</label><select id="ad-talhao" onchange="atualizarOpcoesModoData()"><option value="">Selecione a fazenda...</option></select></div>
+          <div class="form-group"><label>Talhão *</label><select id="ad-talhao" onchange="atualizarOpcoesModoData();recalcularTotaisTodos()"><option value="">Selecione a fazenda...</option></select></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===a?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
@@ -3784,12 +3883,20 @@ function renderLinhasProduto() {
   const cont = document.getElementById('ad-produtos-lista');
   if (!cont) return;
   const lista = window._adProdutos || [];
-  cont.innerHTML = lista.map((p, i) => `
+  cont.innerHTML = `
+    <div style="display:flex;gap:6px;margin-bottom:4px;font-size:11px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.03em">
+      <span style="flex:2">Produto</span>
+      <span style="flex:1;min-width:70px">Dose/ha</span>
+      <span style="flex:1;min-width:60px">Un</span>
+      <span style="flex:1;min-width:80px">Total no talhão</span>
+      ${lista.length>1?'<span style="width:28px"></span>':''}
+    </div>` + lista.map((p, i) => `
     <div class="ad-prod-linha" style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
       <input type="text" class="ad-prod-nome" data-i="${i}" value="${(p.produto||'').replace(/"/g,'&quot;')}" placeholder="Produto" list="ad-prod-dl-${i}" style="flex:2">
       <datalist id="ad-prod-dl-${i}" class="ad-prod-datalist"></datalist>
-      <input type="number" class="ad-prod-dose" data-i="${i}" value="${p.dose||''}" placeholder="Dose/ha" min="0" step="0.01" style="flex:1;min-width:70px">
+      <input type="number" class="ad-prod-dose" data-i="${i}" value="${p.dose||''}" placeholder="Dose/ha" min="0" step="0.01" style="flex:1;min-width:70px" oninput="recalcularTotalProduto(${i})">
       <select class="ad-prod-unidade" data-i="${i}" style="flex:1;min-width:60px">${UNIDADES.map(u=>`<option ${u===p.unidade?'selected':''}>${u}</option>`).join('')}</select>
+      <input type="number" class="ad-prod-total" data-i="${i}" value="${p.total||''}" placeholder="Total" min="0" step="0.01" style="flex:1;min-width:80px" oninput="recalcularDoseProduto(${i})" title="Total de produto no talhão (arredonde aqui para embalagem)">
       ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaProduto(${i})" title="Remover">✕</button>`:''}
     </div>`).join('');
   // preenche datalists do compêndio se já carregado
@@ -3798,7 +3905,47 @@ function renderLinhasProduto() {
       dl.innerHTML = window._compendioProdutos.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
     });
   }
+  // calcula os totais iniciais a partir das doses
+  (window._adProdutos||[]).forEach((_,i)=>recalcularTotalProduto(i, true));
 }
+
+// Área do talhão selecionado no modal de aplicação (0 se não cadastrada)
+function areaTalhaoModalAplic() {
+  const fazenda = document.getElementById('ad-fazenda')?.value || '';
+  const talhao = document.getElementById('ad-talhao')?.value || '';
+  return areaDoTalhao(fazenda, talhao);
+}
+
+// Dose digitada → recalcula o Total (dose × área)
+window.recalcularTotalProduto = function(i, silencioso) {
+  const cont = document.getElementById('ad-produtos-lista');
+  if (!cont) return;
+  const linha = cont.querySelectorAll('.ad-prod-linha')[i];
+  if (!linha) return;
+  const area = areaTalhaoModalAplic();
+  const dose = parseFloat(linha.querySelector('.ad-prod-dose').value)||0;
+  const campoTotal = linha.querySelector('.ad-prod-total');
+  if (area > 0 && dose > 0) {
+    campoTotal.value = +(dose * area).toFixed(2);
+    campoTotal.placeholder = 'Total';
+  } else if (!silencioso) {
+    campoTotal.placeholder = area>0 ? 'Total' : 'sem área';
+  }
+};
+
+// Total digitado (arredondado) → recalcula a Dose (total ÷ área). A dose ajustada vira a oficial.
+window.recalcularDoseProduto = function(i) {
+  const cont = document.getElementById('ad-produtos-lista');
+  if (!cont) return;
+  const linha = cont.querySelectorAll('.ad-prod-linha')[i];
+  if (!linha) return;
+  const area = areaTalhaoModalAplic();
+  const total = parseFloat(linha.querySelector('.ad-prod-total').value)||0;
+  const campoDose = linha.querySelector('.ad-prod-dose');
+  if (area > 0 && total > 0) {
+    campoDose.value = +(total / area).toFixed(4);
+  }
+};
 
 // Lê o que está nos inputs de volta para window._adProdutos (para não perder ao adicionar/remover)
 function coletarLinhasProduto() {
@@ -3809,11 +3956,18 @@ function coletarLinhasProduto() {
     linhas.push({
       produto: div.querySelector('.ad-prod-nome').value.trim(),
       dose: div.querySelector('.ad-prod-dose').value,
-      unidade: div.querySelector('.ad-prod-unidade').value
+      unidade: div.querySelector('.ad-prod-unidade').value,
+      total: div.querySelector('.ad-prod-total').value
     });
   });
   window._adProdutos = linhas;
 }
+
+window.recalcularTotaisTodos = function() {
+  const cont = document.getElementById('ad-produtos-lista');
+  if (!cont) return;
+  cont.querySelectorAll('.ad-prod-linha').forEach((_,i)=>recalcularTotalProduto(i));
+};
 
 window.adicionarLinhaProduto = function() {
   coletarLinhasProduto();
