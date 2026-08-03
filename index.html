@@ -3332,12 +3332,14 @@ function cultivaresDoPlantio(p) {
   if (Array.isArray(p.cultivares) && p.cultivares.length > 0) {
     return p.cultivares.map(c => ({
       cultivar: c.cultivar||'', area_ha: parseFloat(c.area_ha)||0,
-      ciclo_dias: parseFloat(c.ciclo_dias)||0, data_prevista_colheita: c.data_prevista_colheita||''
+      ciclo_dias: parseFloat(c.ciclo_dias)||0, data_prevista_colheita: c.data_prevista_colheita||'',
+      populacao: parseFloat(c.populacao)||0, obs: c.obs||''
     }));
   }
   if (p.cultivar || p.ciclo_dias) return [{
     cultivar: p.cultivar||'', area_ha: 0,
-    ciclo_dias: parseFloat(p.ciclo_dias)||0, data_prevista_colheita: p.data_prevista_colheita||''
+    ciclo_dias: parseFloat(p.ciclo_dias)||0, data_prevista_colheita: p.data_prevista_colheita||'',
+    populacao: parseFloat(p.populacao)||0, obs: p.obs||''
   }];
   return [];
 }
@@ -3363,11 +3365,7 @@ window.abrirModalPlantio = function(id) {
           <div id="pl-cultivares-lista"></div>
           <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaCultivar()">+ Adicionar cultivar</button>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>População (plantas ou sementes/ha)</label><input type="number" id="pl-populacao" value="${p?.populacao||''}" min="0" step="1"></div>
-          <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" value="${p?.espacamento||''}" min="0" step="0.1"></div>
-        </div>
-        <div class="form-group"><label>Observação</label><input type="text" id="pl-obs" value="${p?.obs||''}" placeholder="Opcional"></div>
+        <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" value="${p?.espacamento||''}" min="0" step="0.1" placeholder="Geral do plantio"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-plantio')">Cancelar</button>
           <button class="btn btn-primary" onclick="salvarPlantio(${p?`'${id}'`:'null'})">Salvar</button>
@@ -3376,7 +3374,7 @@ window.abrirModalPlantio = function(id) {
     </div>`);
   // Inicializa as linhas de cultivar (formato novo ou antigo)
   const cultivaresIniciais = p ? cultivaresDoPlantio(p) : [];
-  window._plCultivares = cultivaresIniciais.length ? cultivaresIniciais : [{cultivar:'',area_ha:'',ciclo_dias:''}];
+  window._plCultivares = cultivaresIniciais.length ? cultivaresIniciais : [{cultivar:'',area_ha:'',ciclo_dias:'',populacao:'',obs:''}];
   renderLinhasCultivar();
   if (p?.fazenda) { atualizarTalhoesCampo('pl'); setTimeout(()=>{ const s=document.getElementById('pl-talhao'); if(s) s.value=p.talhao||''; },0); }
 };
@@ -3394,6 +3392,10 @@ function renderLinhasCultivar() {
         <input type="number" class="pl-cult-ciclo" value="${c.ciclo_dias||''}" placeholder="Ciclo (dias)" min="0" step="1" oninput="atualizarPrevisaoColheita()" style="flex:1;min-width:85px">
         ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaCultivar(${i})" title="Remover">✕</button>`:''}
       </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <input type="number" class="pl-cult-pop" value="${c.populacao||''}" placeholder="População (sementes/ha)" min="0" step="1" style="flex:1;min-width:150px">
+        <input type="text" class="pl-cult-obs" value="${(c.obs||'').replace(/"/g,'&quot;')}" placeholder="Observação desta cultivar" style="flex:2;min-width:150px">
+      </div>
       <div class="pl-cult-prev" style="font-size:12px;color:var(--cinza);margin-top:6px">Previsão de colheita: —</div>
     </div>`).join('');
   atualizarPrevisaoColheita();
@@ -3407,7 +3409,9 @@ function coletarLinhasCultivar() {
     linhas.push({
       cultivar: div.querySelector('.pl-cult-nome').value.trim(),
       area_ha: div.querySelector('.pl-cult-area').value,
-      ciclo_dias: div.querySelector('.pl-cult-ciclo').value
+      ciclo_dias: div.querySelector('.pl-cult-ciclo').value,
+      populacao: div.querySelector('.pl-cult-pop').value,
+      obs: div.querySelector('.pl-cult-obs').value
     });
   });
   window._plCultivares = linhas;
@@ -3415,14 +3419,14 @@ function coletarLinhasCultivar() {
 
 window.adicionarLinhaCultivar = function() {
   coletarLinhasCultivar();
-  window._plCultivares.push({cultivar:'',area_ha:'',ciclo_dias:''});
+  window._plCultivares.push({cultivar:'',area_ha:'',ciclo_dias:'',populacao:'',obs:''});
   renderLinhasCultivar();
 };
 
 window.removerLinhaCultivar = function(i) {
   coletarLinhasCultivar();
   window._plCultivares.splice(i,1);
-  if (window._plCultivares.length === 0) window._plCultivares.push({cultivar:'',area_ha:'',ciclo_dias:''});
+  if (window._plCultivares.length === 0) window._plCultivares.push({cultivar:'',area_ha:'',ciclo_dias:'',populacao:'',obs:''});
   renderLinhasCultivar();
 };
 
@@ -3449,6 +3453,8 @@ window.salvarPlantio = async function(id) {
       cultivar: (c.cultivar||'').trim(),
       area_ha: parseFloat(c.area_ha)||0,
       ciclo_dias: parseFloat(c.ciclo_dias)||0,
+      populacao: parseFloat(c.populacao)||0,
+      obs: (c.obs||'').trim(),
       data_prevista_colheita: (data && (parseFloat(c.ciclo_dias)||0)>0) ? somarDias(data, parseFloat(c.ciclo_dias)) : ''
     }))
     .filter(c => c.cultivar);
@@ -3457,14 +3463,15 @@ window.salvarPlantio = async function(id) {
   const reg = {
     data, fazenda, talhao, cultura,
     safra: document.getElementById('pl-safra').value,
-    // Formato novo: lista de cultivares. Mantém campos antigos com a 1ª p/ compatibilidade.
+    // Formato novo: lista de cultivares (cada uma com área, ciclo, população e obs).
+    // Mantém campos antigos com a 1ª cultivar para compatibilidade.
     cultivares,
     cultivar: cultivares[0].cultivar,
     ciclo_dias: cultivares[0].ciclo_dias,
     data_prevista_colheita: cultivares[0].data_prevista_colheita,
-    populacao: parseFloat(document.getElementById('pl-populacao').value)||0,
-    espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
-    obs: document.getElementById('pl-obs').value
+    populacao: cultivares[0].populacao,
+    obs: cultivares[0].obs,
+    espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0
   };
   try {
     if (id) {
