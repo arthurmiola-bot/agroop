@@ -3388,7 +3388,7 @@ function renderLinhasCultivar() {
     <div class="pl-cult-linha" style="border:1px solid var(--creme-escuro);border-radius:10px;padding:10px;margin-bottom:8px">
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <input type="text" class="pl-cult-nome" value="${(c.cultivar||'').replace(/"/g,'&quot;')}" placeholder="Cultivar (ex: TMG 7062)" style="flex:2;min-width:130px">
-        <input type="number" class="pl-cult-area" value="${c.area_ha||''}" placeholder="Área (ha)" min="0" step="0.01" style="flex:1;min-width:85px">
+        <input type="number" class="pl-cult-area" value="${c.area_ha||''}" placeholder="Área (ha) — vazio = talhão todo" min="0" step="0.01" style="flex:1;min-width:85px">
         <input type="number" class="pl-cult-ciclo" value="${c.ciclo_dias||''}" placeholder="Ciclo (dias)" min="0" step="1" oninput="atualizarPrevisaoColheita()" style="flex:1;min-width:85px">
         ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaCultivar(${i})" title="Remover">✕</button>`:''}
       </div>
@@ -3459,6 +3459,11 @@ window.salvarPlantio = async function(id) {
     }))
     .filter(c => c.cultivar);
   if (cultivares.length === 0) { toast('Informe ao menos uma cultivar.','erro'); return; }
+  // Se houver só uma cultivar e a área não foi informada, assume a área do talhão
+  if (cultivares.length === 1 && !cultivares[0].area_ha) {
+    const areaTal = areaDoTalhao(fazenda, talhao);
+    if (areaTal > 0) cultivares[0].area_ha = areaTal;
+  }
 
   const reg = {
     data, fazenda, talhao, cultura,
@@ -3478,12 +3483,15 @@ window.salvarPlantio = async function(id) {
       await updateDoc(doc(db,'insumos_campo_plantio',id), reg);
       const i = plantios.findIndex(x=>x.id===id);
       if (i>=0) plantios[i] = { ...plantios[i], ...reg };
-      toast('Plantio atualizado!');
+      await sincronizarColheitasDoPlantio(plantios[i>=0?i:0]);
+      toast('Plantio atualizado! Colheitas sincronizadas.');
     } else {
       reg.status = 'planejado'; reg.criado_em = Timestamp.now();
       const ref = await addDoc(collection(db,'insumos_campo_plantio'), reg);
-      plantios.unshift({id: ref.id, ...reg});
-      toast('Plantio planejado!');
+      const novoPlantio = {id: ref.id, ...reg};
+      plantios.unshift(novoPlantio);
+      await sincronizarColheitasDoPlantio(novoPlantio);
+      toast('Plantio planejado! Colheita(s) gerada(s) automaticamente.');
     }
     fecharModal('modal-plantio');
     renderPlantio();
@@ -3509,12 +3517,76 @@ window.confirmarConcluirPlantio = async function(id) {
   try {
     await updateDoc(doc(db,'insumos_campo_plantio',id), { status: 'concluido', data_conclusao });
     const p = plantios.find(x=>x.id===id);
-    if (p) { p.status='concluido'; p.data_conclusao=data_conclusao; }
+    if (p) { p.status='concluido'; p.data_conclusao=data_conclusao; await sincronizarColheitasDoPlantio(p); }
     fecharModal('modal-concluir-plantio');
-    toast('Plantio concluído!');
+    toast('Plantio concluído! Datas de colheita atualizadas.');
     renderPlantio();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
+
+// A data-base da colheita é a data de EXECUÇÃO do plantio; se ainda não executado, a planejada.
+function dataBasePlantio(p) {
+  return (p.status === 'concluido' && p.data_conclusao) ? p.data_conclusao : p.data;
+}
+
+// Cria/atualiza/remove as colheitas de um plantio — uma por cultivar.
+// Vincula por plantio_id + cultivar. A data planejada = data-base + ciclo da cultivar.
+// Campos de execução (produtividade, umidade, PMS, stand_final) NÃO são tocados aqui.
+async function sincronizarColheitasDoPlantio(p) {
+  if (!p || !p.id) return;
+  const base = dataBasePlantio(p);
+  const cults = cultivaresDoPlantio(p);
+  const existentes = colheitas.filter(c => c.plantio_id === p.id);
+
+  // Remove colheitas de cultivares que não existem mais (só se ainda não colhidas)
+  for (const c of existentes) {
+    const aindaExiste = cults.some(cu => normalizar(cu.cultivar) === normalizar(c.cultivar));
+    if (!aindaExiste && c.status !== 'concluido') {
+      try { await deleteDoc(doc(db,'insumos_campo_colheita',c.id)); } catch(e){}
+      const i = colheitas.findIndex(x=>x.id===c.id); if (i>=0) colheitas.splice(i,1);
+    }
+  }
+
+  // Cria/atualiza uma colheita por cultivar
+  for (const cu of cults) {
+    const dataPrev = (base && cu.ciclo_dias>0) ? somarDias(base, cu.ciclo_dias) : (cu.data_prevista_colheita||'');
+    const jaTem = colheitas.find(c => c.plantio_id === p.id && normalizar(c.cultivar) === normalizar(cu.cultivar));
+    if (jaTem) {
+      // Atualiza só os campos vindos do plantio; preserva execução
+      const upd = {
+        data: dataPrev, fazenda: p.fazenda, talhao: p.talhao, cultura: p.cultura,
+        safra: p.safra, cultivar: cu.cultivar, area_ha: cu.area_ha, ciclo_dias: cu.ciclo_dias
+      };
+      // não recalcula data se a colheita já foi concluída
+      if (jaTem.status === 'concluido') delete upd.data;
+      try {
+        await updateDoc(doc(db,'insumos_campo_colheita',jaTem.id), upd);
+        Object.assign(jaTem, upd);
+      } catch(e){}
+    } else {
+      const nova = {
+        plantio_id: p.id, data: dataPrev, fazenda: p.fazenda, talhao: p.talhao,
+        cultura: p.cultura, safra: p.safra, cultivar: cu.cultivar, area_ha: cu.area_ha,
+        ciclo_dias: cu.ciclo_dias, status: 'planejado',
+        produtividade: 0, umidade: 0, pms: 0, stand_final: 0,
+        criado_em: Timestamp.now()
+      };
+      try {
+        const ref = await addDoc(collection(db,'insumos_campo_colheita'), nova);
+        colheitas.unshift({id: ref.id, ...nova});
+      } catch(e){}
+    }
+  }
+}
+
+// Remove todas as colheitas vinculadas a um plantio (usado ao excluir o plantio)
+async function removerColheitasDoPlantio(plantioId) {
+  const vinculadas = colheitas.filter(c => c.plantio_id === plantioId);
+  for (const c of vinculadas) {
+    try { await deleteDoc(doc(db,'insumos_campo_colheita',c.id)); } catch(e){}
+    const i = colheitas.findIndex(x=>x.id===c.id); if (i>=0) colheitas.splice(i,1);
+  }
+}
 
 // ── APLICAÇÕES: PULVERIZAÇÃO (líquidos, com vazão) e SÓLIDOS (corretivos/adubação) ──
 // tipo: 'pulverizacao' | 'solido'. Registros antigos sem tipo contam como 'solido'.
@@ -4017,12 +4089,9 @@ function renderColheita() {
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s)${cadernoSafra?` — ${cadernoSafra}`:''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" onclick="baixarModelo('colheita')">📋 Baixar Modelo</button>
-        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-colheita').click()">📤 Importar Excel</button>
-        <input type="file" id="import-colheita" accept=".xlsx,.xls" style="display:none" onchange="importarPlanilha(this,'colheita')">
         <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('colheita')">📥 Exportar Excel</button>
-        <button class="btn btn-primary" onclick="abrirModalColheita()">+ Novo Planejamento</button>
       </div></div>
+    <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 As colheitas são <strong>geradas automaticamente</strong> a partir dos plantios (uma por cultivar). A data planejada = data do plantio + ciclo da cultivar. Ao concluir, informe produtividade, umidade, PMS e stand final.</p>
     <div class="tabela-wrap"><table>
       <thead><tr>
         ${thOrd('colheita','data','Data Planejada')}
@@ -4030,24 +4099,28 @@ function renderColheita() {
         ${thOrd('colheita','fazenda','Fazenda')}
         ${thOrd('colheita','talhao','Talhão')}
         ${thOrd('colheita','cultura','Cultura')}
+        ${thOrd('colheita','cultivar','Cultivar')}
         ${thOrd('colheita','safra','Safra')}
         ${thOrd('colheita','status','Status')}
         ${thOrd('colheita','produtividade','Produtiv.')}
         ${thOrd('colheita','umidade','Umidade')}
         ${thOrd('colheita','pms','PMS')}
+        ${thOrd('colheita','stand_final','Stand Final')}
         <th class="col-acoes">Ações</th>
       </tr></thead>
       <tbody>
-        ${lista.length===0?'<tr><td colspan="11" class="tabela-vazia">Nenhum registro</td></tr>':
+        ${lista.length===0?'<tr><td colspan="13" class="tabela-vazia">Nenhuma colheita — crie um plantio para gerar as colheitas automaticamente</td></tr>':
         ordenarLista(lista,'colheita',(c,campo)=>{
           if(campo==='produtividade') return parseFloat(c.produtividade)||0;
           if(campo==='umidade') return parseFloat(c.umidade)||0;
           if(campo==='pms') return parseFloat(c.pms)||0;
+          if(campo==='stand_final') return parseFloat(c.stand_final)||0;
           return c[campo]||'';
-        }).map(c=>`<tr><td>${fmtDataBR(c.data)}</td><td>${c.data_conclusao?fmtDataBR(c.data_conclusao):'—'}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.safra||'—'}</td>
+        }).map(c=>`<tr><td>${fmtDataBR(c.data)}</td><td>${c.data_conclusao?fmtDataBR(c.data_conclusao):'—'}</td><td>${c.fazenda||'—'}</td><td>${c.talhao||'—'}</td><td>${c.cultura||'—'}</td><td>${c.cultivar||'—'}${c.area_ha>0?` <span style="font-size:11px;color:var(--cinza)">(${fmt(c.area_ha)} ha)</span>`:''}</td><td>${c.safra||'—'}</td>
         <td>${badgeStatusCampo(c.status)}</td>
         <td>${c.produtividade?fmt(c.produtividade)+' '+(c.unidade_produtividade||'sc/ha'):'—'}</td>
         <td>${c.umidade?fmt(c.umidade)+'%':'—'}</td><td>${c.pms?fmt(c.pms)+'g':'—'}</td>
+        <td>${c.stand_final?fmt(c.stand_final):'—'}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${c.status!=='concluido'?`<button class="btn btn-sm btn-primary" onclick="abrirConcluirColheita('${c.id}')">✅ Concluir</button>`:''}
           <button class="btn btn-sm btn-secondary" onclick="abrirEditarColheita('${c.id}')">✏️</button>
@@ -4101,10 +4174,11 @@ window.salvarColheita = async function() {
 };
 
 window.abrirConcluirColheita = function(id) {
+  const c = colheitas.find(x=>x.id===id);
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-concluir-colheita">
       <div class="modal">
-        <div class="modal-titulo">✅ Concluir Colheita</div>
+        <div class="modal-titulo">✅ Concluir Colheita${c?.cultivar?` — ${c.cultivar}`:''}</div>
         <div class="form-group"><label>Data de Conclusão *</label><input type="date" id="ccol-data" value="${hoje()}"></div>
         <div class="form-row">
           <div class="form-group"><label>Produtividade Média</label><input type="number" id="ccol-produtividade" min="0" step="0.01"></div>
@@ -4114,6 +4188,7 @@ window.abrirConcluirColheita = function(id) {
           <div class="form-group"><label>Umidade (%)</label><input type="number" id="ccol-umidade" min="0" max="100" step="0.1"></div>
           <div class="form-group"><label>PMS — Peso Mil Sementes (g)</label><input type="number" id="ccol-pms" min="0" step="0.01"></div>
         </div>
+        <div class="form-group"><label>Stand Final (plantas/ha)</label><input type="number" id="ccol-stand" min="0" step="1" placeholder="Ex: 240000"></div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-concluir-colheita')">Cancelar</button>
           <button class="btn btn-primary" onclick="confirmarConcluirColheita('${id}')">Confirmar</button>
@@ -4129,7 +4204,8 @@ window.confirmarConcluirColheita = async function(id) {
     produtividade: parseFloat(document.getElementById('ccol-produtividade').value)||0,
     unidade_produtividade: document.getElementById('ccol-unidade').value,
     umidade: parseFloat(document.getElementById('ccol-umidade').value)||0,
-    pms: parseFloat(document.getElementById('ccol-pms').value)||0
+    pms: parseFloat(document.getElementById('ccol-pms').value)||0,
+    stand_final: parseFloat(document.getElementById('ccol-stand').value)||0
   };
   try {
     await updateDoc(doc(db,'insumos_campo_colheita',id), upd);
@@ -4218,10 +4294,14 @@ window.atualizarTalhoesCampo = function(prefixo) {
 
 window.excluirRegistroCampo = async function(colecao, id, tipo) {
   if(!exigirMaster())return;
-  if (!confirm('Excluir este registro?')) return;
+  const aviso = tipo==='plantio' ? 'Excluir este plantio também remove as colheitas geradas a partir dele. Continuar?' : 'Excluir este registro?';
+  if (!confirm(aviso)) return;
   try {
     await deleteDoc(doc(db, colecao, id));
-    if (tipo==='plantio') plantios.splice(plantios.findIndex(x=>x.id===id),1);
+    if (tipo==='plantio') {
+      plantios.splice(plantios.findIndex(x=>x.id===id),1);
+      await removerColheitasDoPlantio(id); // remove colheitas vinculadas
+    }
     if (tipo==='adubacao') adubacoes.splice(adubacoes.findIndex(x=>x.id===id),1);
     if (tipo==='colheita') colheitas.splice(colheitas.findIndex(x=>x.id===id),1);
     toast('Registro excluído.');
@@ -4298,9 +4378,9 @@ const MODELOS_CADERNO = {
     }),
     obrigatorios: ['fazenda','talhao'],
     paraExportar: (c) => ({
-      'Data': c.data||'', 'Fazenda': c.fazenda||'', 'Talhão': c.talhao||'', 'Cultura': c.cultura||'', 'Safra': c.safra||'',
-      'Status': c.status||'', 'Data Conclusão': c.data_conclusao||'', 'Produtividade': c.produtividade||0,
-      'Unidade Produtividade': c.unidade_produtividade||'', 'Umidade (%)': c.umidade||0, 'PMS (g)': c.pms||0, 'Observação': c.obs||''
+      'Data Planejada': c.data||'', 'Fazenda': c.fazenda||'', 'Talhão': c.talhao||'', 'Cultura': c.cultura||'', 'Cultivar': c.cultivar||'', 'Área (ha)': c.area_ha||0, 'Safra': c.safra||'',
+      'Status': c.status||'', 'Data Execução': c.data_conclusao||'', 'Produtividade': c.produtividade||0,
+      'Unidade Produtividade': c.unidade_produtividade||'', 'Umidade (%)': c.umidade||0, 'PMS (g)': c.pms||0, 'Stand Final': c.stand_final||0, 'Observação': c.obs||''
     })
   }
 };
