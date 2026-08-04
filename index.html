@@ -3621,6 +3621,29 @@ window.confirmarConcluirPlantio = async function(id) {
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
 
+// Regulariza: gera as colheitas de todos os plantios que ainda não têm (plantios antigos)
+window.gerarColheitasFaltantes = async function() {
+  if(!exigirMaster())return;
+  const semColheita = plantios.filter(p => !colheitas.some(c => c.plantio_id === p.id));
+  if (semColheita.length === 0 && plantios.length > 0) {
+    // Mesmo que todos tenham, ressincroniza para atualizar datas/cultivares
+    if (!confirm('Todos os plantios já têm colheita. Deseja ressincronizar as datas e cultivares mesmo assim?')) return;
+  } else if (plantios.length === 0) {
+    toast('Nenhum plantio cadastrado.','erro'); return;
+  } else {
+    if (!confirm(`Gerar colheitas para ${semColheita.length} plantio(s) que ainda não têm? (uma colheita por cultivar)`)) return;
+  }
+  let total = 0;
+  for (const p of plantios) {
+    const antes = colheitas.filter(c => c.plantio_id === p.id).length;
+    await sincronizarColheitasDoPlantio(p);
+    const depois = colheitas.filter(c => c.plantio_id === p.id).length;
+    total += Math.max(0, depois - antes);
+  }
+  toast(`${total} colheita(s) gerada(s).`);
+  renderSubabaCaderno();
+};
+
 // A data-base da colheita é a data de EXECUÇÃO do plantio; se ainda não executado, a planejada.
 function dataBasePlantio(p) {
   return (p.status === 'concluido' && p.data_conclusao) ? p.data_conclusao : p.data;
@@ -3632,7 +3655,16 @@ function dataBasePlantio(p) {
 async function sincronizarColheitasDoPlantio(p) {
   if (!p || !p.id) return;
   const base = dataBasePlantio(p);
-  const cults = cultivaresDoPlantio(p);
+  let cults = cultivaresDoPlantio(p);
+  // Plantio antigo sem cultivar cadastrada: gera uma colheita "genérica" pela cultura,
+  // usando o ciclo/previsão que o plantio tiver (marcada com cultivar vazio).
+  if (cults.length === 0) {
+    cults = [{
+      cultivar: '', area_ha: areaDoTalhao(p.fazenda, p.talhao) || 0,
+      ciclo_dias: parseFloat(p.ciclo_dias)||0, data_prevista_colheita: p.data_prevista_colheita||'',
+      populacao: 0, obs: ''
+    }];
+  }
   const existentes = colheitas.filter(c => c.plantio_id === p.id);
 
   // Remove colheitas de cultivares que não existem mais (só se ainda não colhidas)
@@ -4241,6 +4273,7 @@ function renderColheita() {
   el.innerHTML = `
     <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s)${cadernoSafra?` — ${cadernoSafra}`:''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="gerarColheitasFaltantes()">🔄 Gerar colheitas dos plantios</button>
         <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('colheita')">📥 Exportar Excel</button>
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 As colheitas são <strong>geradas automaticamente</strong> a partir dos plantios (uma por cultivar). A data planejada = data do plantio + ciclo da cultivar. Ao concluir, informe produtividade, umidade, PMS e stand final.</p>
