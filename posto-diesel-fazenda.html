@@ -11,11 +11,36 @@
   <meta name="mobile-web-app-capable" content="yes"/>
   <link rel="manifest" href="posto-diesel-manifest.json"/>
   <script>
-    // Registra o Service Worker para funcionar offline e instalar como app
+    // Registra o Service Worker e verifica se ha versao nova sempre que abrir
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function(){
-        navigator.serviceWorker.register("posto-diesel-sw.js").catch(function(err){
+        navigator.serviceWorker.register("posto-diesel-sw.js").then(function(reg){
+          // Verifica atualizacao imediatamente ao abrir
+          reg.update();
+          // Verifica atualizacao a cada 60 segundos enquanto o app estiver aberto
+          setInterval(function(){ reg.update(); }, 60000);
+
+          // Quando uma versao nova for encontrada e instalada, ativa e recarrega
+          reg.addEventListener("updatefound", function(){
+            var newWorker = reg.installing;
+            if(!newWorker) return;
+            newWorker.addEventListener("statechange", function(){
+              if(newWorker.state === "installed" && navigator.serviceWorker.controller){
+                // Ja existe uma versao rodando e chegou uma nova: manda ativar
+                newWorker.postMessage({ action: "skipWaiting" });
+              }
+            });
+          });
+        }).catch(function(err){
           console.log("SW registro falhou:", err);
+        });
+
+        // Quando o novo SW assume o controle, recarrega a pagina uma unica vez
+        var refreshing = false;
+        navigator.serviceWorker.addEventListener("controllerchange", function(){
+          if(refreshing) return;
+          refreshing = true;
+          window.location.reload();
         });
       });
     }
@@ -73,6 +98,17 @@
     window._fbAddAdj  = function(item){ ADJ.doc(String(item.id)).set(item).catch(function(e){ console.error("adj:", e); }); };
 
     // Escuta tudo: config + as 3 subcolecoes, e monta o estado combinado
+    // Tambem monitora se ha dados pendentes (ainda nao confirmados no servidor)
+    window._fbPending = false;
+    function updatePending(qs){
+      // hasPendingWrites = true significa que ha dados salvos localmente mas ainda nao no servidor
+      try {
+        if(qs && qs.metadata){
+          window._fbPending = qs.metadata.hasPendingWrites;
+          window.dispatchEvent(new Event("fb-sync-change"));
+        }
+      } catch(e){}
+    }
     window._fbListenAll = function(cb){
       var state = { config:null, fuel:[], sup:[], adj:[] };
       var ready = { config:false, fuel:false, sup:false, adj:false };
@@ -80,19 +116,22 @@
         if(!ready.config) return; // espera ao menos a config
         cb(state);
       }
-      var u1 = CONFIG.onSnapshot(function(snap){
+      var u1 = CONFIG.onSnapshot({ includeMetadataChanges: true }, function(snap){
         try { state.config = snap.exists ? JSON.parse(snap.data().payload) : null; } catch(e){ state.config=null; }
+        updatePending(snap);
         ready.config = true; emit();
       });
-      var u2 = FUEL.onSnapshot(function(qs){
+      var u2 = FUEL.onSnapshot({ includeMetadataChanges: true }, function(qs){
         state.fuel = qs.docs.map(function(d){ return d.data(); });
+        updatePending(qs);
         ready.fuel = true; emit();
       });
-      var u3 = SUP.onSnapshot(function(qs){
+      var u3 = SUP.onSnapshot({ includeMetadataChanges: true }, function(qs){
         state.sup = qs.docs.map(function(d){ return d.data(); });
+        updatePending(qs);
         ready.sup = true; emit();
       });
-      var u4 = ADJ.onSnapshot(function(qs){
+      var u4 = ADJ.onSnapshot({ includeMetadataChanges: true }, function(qs){
         state.adj = qs.docs.map(function(d){ return d.data(); });
         ready.adj = true; emit();
       });
@@ -169,6 +208,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
+var APP_VERSION = "2.0";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarm(data,id){
@@ -362,6 +402,7 @@ function App(){
   var _toast=useState(null), toast=_toast[0], setToast=_toast[1];
   var _ready=useState(!!window._fbReady), ready=_ready[0], setReady=_ready[1];
   var _online=useState(navigator.onLine), online=_online[0], setOnline=_online[1];
+  var _syncing=useState(false), syncing=_syncing[0], setSyncing=_syncing[1];
   var tmr=useRef(null), sav=useRef(null);
 
   // Monitor de conexao online/offline
@@ -374,6 +415,13 @@ function App(){
       window.removeEventListener("online",goOn);
       window.removeEventListener("offline",goOff);
     };
+  },[]);
+
+  // Monitor de sincronizacao: dados pendentes (salvos no celular, ainda nao na nuvem)
+  useEffect(function(){
+    function onSync(){ setSyncing(!!window._fbPending); }
+    window.addEventListener("fb-sync-change",onSync);
+    return function(){ window.removeEventListener("fb-sync-change",onSync); };
   },[]);
 
   useEffect(function(){
@@ -550,9 +598,9 @@ function App(){
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:5,background:online?"rgba(255,255,255,0.12)":"rgba(220,38,38,0.35)",borderRadius:20,padding:"4px 10px"}}>
-            <div style={{width:9,height:9,borderRadius:"50%",background:online?"#4ade80":"#f87171"}} className={online?"":"pu"}/>
-            <span style={{fontSize:11,color:"#fff",fontWeight:600}}>{online?"Online":"Offline"}</span>
+          <div style={{display:"flex",alignItems:"center",gap:5,background:!online?"rgba(220,38,38,0.35)":syncing?"rgba(234,179,8,0.35)":"rgba(255,255,255,0.12)",borderRadius:20,padding:"4px 10px"}}>
+            <div style={{width:9,height:9,borderRadius:"50%",background:!online?"#f87171":syncing?"#fde047":"#4ade80"}} className={!online||syncing?"pu":""}/>
+            <span style={{fontSize:11,color:"#fff",fontWeight:600}}>{!online?"Offline":syncing?"Sincronizando":"Salvo na nuvem"}</span>
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:11,color:GN3}}>Logado como</div>
@@ -683,6 +731,7 @@ function Login(props){
       <button onClick={onGuest} style={{marginTop:18,background:"none",border:"2px solid "+GN3,color:GN3,borderRadius:9,padding:"12px 24px",fontSize:15,fontFamily:"'Barlow Condensed'",fontWeight:700,cursor:"pointer",width:"100%",maxWidth:300}}>
         ABASTECER SEM SENHA
       </button>
+      <div style={{marginTop:20,color:GN3,fontSize:11,opacity:0.7}}>Versao {APP_VERSION}</div>
     </div>
   );
 }

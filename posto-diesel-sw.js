@@ -1,6 +1,9 @@
 // Service Worker do Posto Diesel - ACF
 // Cache dedicado, nao interfere com AgroOp/Chuvas/Estoque
-var CACHE_NAME = "posto-diesel-v1";
+//
+// IMPORTANTE: sempre que atualizar o app, aumente o numero da versao abaixo
+// (ex: v1 -> v2 -> v3). Isso forca todos os celulares a baixarem a versao nova.
+var CACHE_NAME = "posto-diesel-v2";
 var APP_URL = "posto-diesel-fazenda.html";
 var MANIFEST_URL = "posto-diesel-manifest.json";
 
@@ -14,6 +17,13 @@ var ASSETS = [
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"
 ];
+
+// Recebe ordem do app para ativar a versao nova imediatamente
+self.addEventListener("message", function(e){
+  if(e.data && e.data.action === "skipWaiting"){
+    self.skipWaiting();
+  }
+});
 
 // Instalacao: guarda os arquivos no cache
 self.addEventListener("install", function(e){
