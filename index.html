@@ -3424,6 +3424,7 @@ function renderPlantio() {
 
 function badgeStatusCampo(status) {
   if (status === 'concluido') return '<span class="badge badge-verde">Concluído</span>';
+  if (status === 'execucao') return '<span class="badge badge-laranja">Em execução</span>';
   if (status === 'enviado_operador') return '<span class="badge badge-laranja">Enviado ao Operador</span>';
   return '<span class="badge badge-azul">Planejado</span>';
 }
@@ -3780,13 +3781,12 @@ function renderAdubacao(tipo) {
         }).map(a=>{
           const prods = produtosDaAplicacao(a);
           // Cada produto numa linha, com a dose alinhada à direita na mesma altura do nome
-          const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
+          const prodCell = (prods.length===0 ? '—' : `<table class="prod-dose-mini">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`)
+            + (a.categoria?`<div style="font-size:11px;color:var(--cinza);margin-top:4px">📋 ${a.categoria}</div>`:'');
           return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
-          ${a.status==='enviado_operador'?`<span style="font-size:12px;color:var(--cinza);align-self:center">Aguardando execução</span>`:''}
-          ${a.status==='execucao'?`<span style="font-size:12px;color:var(--laranja);align-self:center">Em execução no campo</span>`:''}
           ${a.modo_data && a.modo_data!=='fixa'?`<button class="btn btn-sm btn-secondary" title="Recalcular data" onclick="recalcularDataAdubacao('${a.id}')">🔄</button>`:''}
           ${a.status==='concluido' && !a.estoque_baixado?`<button class="btn btn-sm btn-laranja" onclick="baixarEstoqueRetroativo('${a.id}')" title="Esta aplicação foi concluída sem baixar o estoque. Clique para baixar agora (dose × área).">📦 Baixar estoque</button>`:''}
           <button class="btn btn-sm btn-secondary" onclick="abrirModalAdubacao('${a.id}','${tipo}')" title="Editar (requer senha master)">✏️</button>
@@ -3858,7 +3858,9 @@ window.abrirModalAdubacao = function(id, tipo) {
         </div>
         <div class="form-row">
           <div class="form-group"><label>Safra</label><select id="ad-safra"><option value="">—</option>${safras.map(s=>`<option ${s.nome===a?.safra?'selected':''}>${s.nome}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Categoria</label><select id="ad-categoria">${categorias.map(c=>`<option ${c===a?.categoria?'selected':''}>${c}</option>`).join('')}</select></div>
+          ${ehPulv
+            ? `<div class="form-group"><label>Descrição</label><input type="text" id="ad-categoria" value="${(a?.categoria||'').replace(/"/g,'&quot;')}" placeholder="Ex: dessecação, pós-emergente, fungicida 1..."></div>`
+            : `<div class="form-group"><label>Categoria</label><select id="ad-categoria">${categorias.map(c=>`<option ${c===a?.categoria?'selected':''}>${c}</option>`).join('')}</select></div>`}
         </div>
         <div class="form-group">
           <label>Produtos *</label>
