@@ -149,6 +149,17 @@
         } else { done(null); }
       }).catch(function(){ done(null); });
     };
+    // Marca no Firebase que a migracao ja foi feita (para nunca repetir)
+    window._fbMarkMigrated = function(){
+      CONFIG.get().then(function(snap){
+        var current = {};
+        if(snap.exists && snap.data() && snap.data().payload){
+          try { current = JSON.parse(snap.data().payload); } catch(e){}
+        }
+        current.migrationDone = true;
+        return CONFIG.set({ payload: JSON.stringify(current) });
+      }).catch(function(e){ console.error("mark migrated:", e); });
+    };
 
     window._fbBackup = function(data){
       var dow = new Date().getDay();
@@ -208,7 +219,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "2.0";
+var APP_VERSION = "2.1";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarm(data,id){
@@ -436,40 +447,37 @@ function App(){
     if(!ready||!window._fbListenAll) return;
     var migrated=false;
     var unsub=window._fbListenAll(function(s){
-      // Migra se: (1) config nao existe OU (2) config existe mas subcolicoes estao vazias E dados antigos existem
-      var needsMigration = !migrated && window._fbMigrate && (
-        s.config===null ||
-        (s.fuel.length===0 && s.sup.length===0)
-      );
+      // A migracao roda UMA UNICA VEZ na vida do app.
+      // Controlada pela flag migrationDone salva no Firebase - nunca repete,
+      // mesmo que as subcolecoes demorem a carregar (conexao lenta/offline).
+      var migrationAlreadyDone = s.config && s.config.migrationDone === true;
+      var needsMigration = !migrated && !migrationAlreadyDone && window._fbMigrate && s.config===null;
       if(needsMigration){
         migrated=true;
         window._fbMigrate(function(old){
           if(old && ((old.fuelings&&old.fuelings.length)||(old.supplies&&old.supplies.length)||(old.stockAdjustments&&old.stockAdjustments.length))){
-            // migra configuracoes apenas se config nao existe ainda
-            if(s.config===null){
-              var farms;
-              if(old.farms && old.farms.length){
-                farms=old.farms;
-              } else {
-                farms=[{
-                  id:1, name:"Corrego das Flores",
-                  tankCapacity: old.tankCapacity||10000,
-                  tankStock: old.tankStock||0,
-                  lowStockThreshold: old.lowStockThreshold||1000,
-                  active:true
-                }];
-              }
-              window._fbSaveConfig({
-                operators:old.operators||INIT.operators,
-                machines:old.machines||INIT.machines,
-                farms:farms,
-                avgCostPerLiter:old.avgCostPerLiter||0,
-                users:old.users||INIT.users,
-                lastBackupDate:old.lastBackupDate||""
-              });
+            var farms;
+            if(old.farms && old.farms.length){
+              farms=old.farms;
+            } else {
+              farms=[{
+                id:1, name:"Corrego das Flores",
+                tankCapacity: old.tankCapacity||10000,
+                tankStock: old.tankStock||0,
+                lowStockThreshold: old.lowStockThreshold||1000,
+                active:true
+              }];
             }
-            // migra SEMPRE os registros antigos (fuelings/supplies/adjustments) para subcolicoes
-            var firstFarmId = (s.config && s.config.farms && s.config.farms.length) ? s.config.farms[0].id : 1;
+            window._fbSaveConfig({
+              operators:old.operators||INIT.operators,
+              machines:old.machines||INIT.machines,
+              farms:farms,
+              avgCostPerLiter:old.avgCostPerLiter||0,
+              users:old.users||INIT.users,
+              lastBackupDate:old.lastBackupDate||"",
+              migrationDone:true
+            });
+            var firstFarmId = (farms && farms.length) ? farms[0].id : 1;
             (old.fuelings||[]).forEach(function(x){
               window._fbAddFuel(Object.assign({farmId:firstFarmId},x));
             });
@@ -479,15 +487,23 @@ function App(){
             (old.stockAdjustments||[]).forEach(function(x){
               window._fbAddAdj(Object.assign({farmId:firstFarmId},x));
             });
-          } else if(s.config===null){
-            // primeira vez de tudo: cria config inicial
+          } else {
+            // primeira vez de tudo: cria config inicial ja marcada como migrada
             window._fbSaveConfig({
               operators:INIT.operators, machines:INIT.machines, farms:INIT.farms,
-              avgCostPerLiter:INIT.avgCostPerLiter, users:INIT.users, lastBackupDate:""
+              avgCostPerLiter:INIT.avgCostPerLiter, users:INIT.users, lastBackupDate:"",
+              migrationDone:true
             });
           }
         });
         return; // espera proximo snapshot
+      }
+
+      // Se a config existe mas nunca foi marcada como migrada (apps que migraram antes
+      // desta correcao), marca agora para travar a migracao de vez - SEM reimportar nada.
+      if(s.config && s.config.migrationDone !== true && !migrated){
+        migrated=true;
+        if(window._fbMarkMigrated) window._fbMarkMigrated();
       }
       var cfg=s.config||{};
       var firstFarmId = (cfg.farms&&cfg.farms.length) ? cfg.farms[0].id : 1;
@@ -532,7 +548,8 @@ function App(){
         window._fbSaveConfig({
           operators:nd.operators, machines:nd.machines, farms:nd.farms,
           avgCostPerLiter:nd.avgCostPerLiter,
-          users:nd.users, lastBackupDate:nd.lastBackupDate
+          users:nd.users, lastBackupDate:nd.lastBackupDate,
+          migrationDone:true
         });
       }
       return nd;
@@ -547,7 +564,8 @@ function App(){
         window._fbSaveConfig({
           operators:nd.operators, machines:nd.machines, farms:nd.farms,
           avgCostPerLiter:nd.avgCostPerLiter,
-          users:nd.users, lastBackupDate:nd.lastBackupDate
+          users:nd.users, lastBackupDate:nd.lastBackupDate,
+          migrationDone:true
         });
       }
       return nd;
