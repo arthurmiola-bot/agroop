@@ -3,7 +3,7 @@
 //
 // IMPORTANTE: sempre que atualizar o app, aumente o numero da versao abaixo
 // (ex: v1 -> v2 -> v3). Isso forca todos os celulares a baixarem a versao nova.
-var CACHE_NAME = "posto-diesel-v2";
+var CACHE_NAME = "posto-diesel-v3";
 var APP_URL = "posto-diesel-fazenda.html";
 var MANIFEST_URL = "posto-diesel-manifest.json";
 
