@@ -406,6 +406,10 @@
   .talhao-secao { padding:12px 18px; border-bottom:1px solid #f0f3ee; }
   .talhao-secao:last-child { border-bottom:none; }
   .talhao-secao-titulo { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#8fa089; margin-bottom:8px; }
+  .talhao-evento-tab { width:100%; border-collapse:collapse; }
+  .talhao-evento-tab th { text-align:left; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:#9aa89f; padding:4px 8px 6px; border-bottom:1px solid #eef1ec; white-space:nowrap; }
+  .talhao-evento-tab td { padding:8px; border-bottom:1px solid #f4f6f3; vertical-align:top; font-size:13px; }
+  .talhao-evento-tab tr:last-child td { border-bottom:none; }
   .talhao-evento { display:flex; align-items:center; gap:12px; padding:7px 0; border-bottom:1px solid #f6f8f4; }
   .talhao-evento:last-child { border-bottom:none; }
   .te-data { font-family:'DM Mono',monospace; font-size:12px; color:#9aa89f; white-space:nowrap; min-width:64px; }
@@ -1431,7 +1435,7 @@ function renderDashboard() {
   // Junta todas as operações do caderno num formato comum
   const ops = [];
   plantios.forEach(p => { const nomes = cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, data_conclusao:p.data_conclusao||'', fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${nomes?` (${nomes})`:''}` }); });
-  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, data_conclusao:a.data_conclusao||'', fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a) }));
+  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, data_conclusao:a.data_conclusao||'', fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a), descricao: a.categoria||'', produtos: produtosDaAplicacao(a) }));
   colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, data_conclusao:c.data_conclusao||'', fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
 
   // Contadores por status
@@ -1461,8 +1465,6 @@ function renderDashboard() {
   const proximas = ops.filter(o => o.status!=='concluido' && o.data && o.data >= hojeStr)
     .sort((a,b)=>(a.data||'').localeCompare(b.data||''))
     .slice(0,5);
-
-  const badgeOp = (s) => s==='execucao'?'<span class="badge badge-laranja">Em execução</span>':s==='enviado_operador'?'<span class="badge badge-laranja">Liberada</span>':'<span class="badge badge-azul">Planejada</span>';
 
   document.getElementById('main-content').innerHTML = `
     <div class="cards-grid">
@@ -1509,22 +1511,42 @@ function renderDashboard() {
     </div>`}
 
     <div class="tabela-wrap">
-      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">📅 Próximas 5 Operações Planejadas</div>
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">📅 Próximas 5 Operações Planejadas <span style="font-weight:400;font-size:12px;color:var(--cinza)">(clique para ver produtos)</span></div>
       <table>
         <thead><tr><th>Data Planejada</th><th>Operação</th><th>Fazenda</th><th>Talhão</th><th>Descrição</th><th>Status</th></tr></thead>
         <tbody>
-          ${proximas.length > 0 ? proximas.map(o => `<tr>
-            <td style="font-weight:600">${fmtDataBR(o.data)}</td>
+          ${proximas.length > 0 ? proximas.map((o,idx) => {
+            const temDetalhe = o.produtos && o.produtos.length > 0;
+            const prodTab = temDetalhe
+              ? `<table class="prod-dose-mini" style="margin-top:4px">${o.produtos.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||'')+'/ha':''}</td></tr>`).join('')}</table>`
+              : '';
+            return `<tr ${temDetalhe?`onclick="toggleDashOp(${idx})" style="cursor:pointer"`:''}>
+            <td style="font-weight:600">${fmtDataBR(o.data)}${temDetalhe?' <span id="dashseta-'+idx+'" style="color:var(--cinza);font-size:11px">▾</span>':''}</td>
             <td>${o.icone} ${o.tipo}</td>
             <td>${o.fazenda||'—'}</td>
             <td>${o.talhao||'—'}</td>
-            <td>${o.desc}</td>
-            <td>${badgeOp(o.status)}</td>
-          </tr>`).join('') : '<tr><td colspan="6" class="tabela-vazia">Nenhuma operação planejada para o futuro</td></tr>'}
+            <td>${o.descricao||o.desc||'—'}</td>
+            <td>${badgeStatusCampo(o.status)}</td>
+          </tr>
+          ${temDetalhe?`<tr id="dashdet-${idx}" style="display:none"><td colspan="6" style="background:var(--creme);padding:12px 20px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--cinza);margin-bottom:4px">Produtos e doses</div>
+            ${prodTab}
+            ${o.descricao?`<div style="font-size:12px;color:var(--cinza);margin-top:6px">📋 ${o.descricao}</div>`:''}
+          </td></tr>`:''}`;
+          }).join('') : '<tr><td colspan="6" class="tabela-vazia">Nenhuma operação planejada para o futuro</td></tr>'}
         </tbody>
       </table>
     </div>`;
 }
+
+window.toggleDashOp = function(idx) {
+  const det = document.getElementById('dashdet-'+idx);
+  const seta = document.getElementById('dashseta-'+idx);
+  if (!det) return;
+  const abrir = det.style.display === 'none';
+  det.style.display = abrir ? 'table-row' : 'none';
+  if (seta) seta.textContent = abrir ? '▴' : '▾';
+};
 
 // ══════════════ PREVISÃO DE COBERTURA ══════════════
 window.renderCobertura = renderCobertura;
@@ -4239,22 +4261,23 @@ function renderListaTalhoes() {
           </div>
         </div>
         <div class="talhao-detalhes">
-          ${blocoEventoTalhao('🌱 Plantio', pls.map(p => ({
-            data: p.status==='concluido'?(p.data_conclusao||p.data):p.data,
-            titulo: (()=>{ const ns=cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); return `${p.cultura||'Plantio'}${ns?` (${ns})`:''}`; })(),
-            info: [p.ciclo_dias?`ciclo ${fmt(p.ciclo_dias)}d`:'', p.data_prevista_colheita?`prev. colheita ${fmtDataBR(p.data_prevista_colheita)}`:''].filter(Boolean).join(' · '),
+          ${blocoEventoTalhao('🌱 Plantio', [...pls].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).map(p => ({
+            dataPlan: p.data,
+            dataExec: p.status==='concluido'?(p.data_conclusao||''):'',
+            produtos: (()=>{ const cs=cultivaresDoPlantio(p); return cs.length?cs.map(c=>({nome:`${p.cultura||'Plantio'}${c.cultivar?` — ${c.cultivar}`:''}`, dose:c.ciclo_dias?`ciclo ${fmt(c.ciclo_dias)}d`:''})):[{nome:p.cultura||'Plantio',dose:''}]; })(),
             status: p.status
           })))}
-          ${blocoEventoTalhao('🧪 Aplicações', aps.sort((a,b)=>(a.data||'').localeCompare(b.data||'')).map(a => ({
-            data: a.data,
-            titulo: (()=>{ const ps=produtosDaAplicacao(a); return ps.length<=1 ? `${ps[0]?.produto||'—'}${ps[0]&&ps[0].dose?` — ${fmt(ps[0].dose)} ${ps[0].unidade||''}/ha`:''}` : ps.map(p=>p.produto).join(', '); })(),
-            info: [tipoDaAdubacao(a)==='pulverizacao'?'💧 pulveriz.':'🪨 sólido', a.categoria||''].filter(Boolean).join(' · '),
+          ${blocoEventoTalhao('🧪 Aplicações', [...aps].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).map(a => ({
+            dataPlan: a.data,
+            dataExec: a.status==='concluido'?(a.data_conclusao||''):'',
+            produtos: produtosDaAplicacao(a).map(p=>({nome:p.produto||'—', dose:p.dose?`${fmt(p.dose)} ${p.unidade||''}/ha`:''})),
+            descricao: [tipoDaAdubacao(a)==='pulverizacao'?'💧 pulveriz.':'🪨 sólido', a.categoria||''].filter(Boolean).join(' · '),
             status: a.status
           })))}
-          ${blocoEventoTalhao('🌾 Colheita', cols.map(c => ({
-            data: c.status==='concluido'?(c.data_conclusao||c.data):c.data,
-            titulo: `${c.cultura||'Colheita'}`,
-            info: c.status==='concluido'?[c.produtividade?`${fmt(c.produtividade)} ${c.unidade_produtividade||'sc/ha'}`:'', c.umidade?`umid. ${fmt(c.umidade)}%`:''].filter(Boolean).join(' · '):'',
+          ${blocoEventoTalhao('🌾 Colheita', [...cols].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).map(c => ({
+            dataPlan: c.data,
+            dataExec: c.status==='concluido'?(c.data_conclusao||''):'',
+            produtos: [{nome:`${c.cultura||'Colheita'}${c.cultivar?` — ${c.cultivar}`:''}`, dose: c.status==='concluido'&&c.produtividade?`${fmt(c.produtividade)} ${c.unidade_produtividade||'sc/ha'}`:''}],
             status: c.status
           })))}
         </div>
@@ -4264,16 +4287,27 @@ function renderListaTalhoes() {
   cont.innerHTML = cards || `<div style="text-align:center;padding:48px 16px;color:var(--cinza)"><div style="font-size:34px;opacity:.35;margin-bottom:8px">📍</div>Nenhum evento para a safra selecionada</div>`;
 }
 
-// Bloco de uma categoria de evento dentro do card do talhão
+// Bloco de uma categoria de evento (tabela: Data Plan. | Data Exec. | Produtos/doses | Status)
 function blocoEventoTalhao(titulo, eventos) {
   if (!eventos.length) return '';
-  const linhas = eventos.map(e => `
-    <div class="talhao-evento">
-      <span class="te-data">${fmtDataBR(e.data)}</span>
-      <span class="te-titulo">${e.titulo}${e.info?`<span class="te-info">${e.info}</span>`:''}</span>
-      ${badgeStatusCampo(e.status)}
-    </div>`).join('');
-  return `<div class="talhao-secao"><div class="talhao-secao-titulo">${titulo}</div>${linhas}</div>`;
+  const linhas = eventos.map(e => {
+    const prodTab = e.produtos && e.produtos.length
+      ? `<table class="prod-dose-mini">${e.produtos.map(p=>`<tr><td class="pd-nome">${p.nome}</td><td class="pd-dose">${p.dose||''}</td></tr>`).join('')}</table>${e.descricao?`<div style="font-size:11px;color:var(--cinza);margin-top:3px">${e.descricao}</div>`:''}`
+      : '—';
+    return `<tr>
+      <td class="te-data">${fmtDataBR(e.dataPlan)}</td>
+      <td class="te-data">${e.dataExec?fmtDataBR(e.dataExec):'—'}</td>
+      <td>${prodTab}</td>
+      <td style="text-align:right">${badgeStatusCampo(e.status)}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="talhao-secao">
+    <div class="talhao-secao-titulo">${titulo}</div>
+    <table class="talhao-evento-tab">
+      <thead><tr><th>Data Plan.</th><th>Data Exec.</th><th>Produtos (dose)</th><th style="text-align:right">Status</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>
+  </div>`;
 }
 
 window.toggleTalhaoCard = function(cardId) {
