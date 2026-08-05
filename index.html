@@ -4595,21 +4595,61 @@ window.importarPlanilha = function(input, tipo) {
       let importados = 0, ignorados = 0;
       const batch = writeBatch(db);
       const novosLocais = [];
-      linhas.forEach(row => {
-        const reg = m.doExcel(row);
-        const faltando = m.obrigatorios.some(campo => !reg[campo]);
-        if (faltando) { ignorados++; return; }
-        const ref = doc(collection(db, m.colecao));
-        batch.set(ref, reg);
-        novosLocais.push({ id: ref.id, ...reg });
-        importados++;
-      });
+
+      if (tipo === 'solido' || tipo === 'pulverizacao') {
+        // Agrupa linhas por fazenda+talhão+data+vazão+safra -> uma aplicação com vários produtos.
+        // A categoria fica em cada produto (uma aplicação pode ter herbicida, inseticida, óleo...).
+        const grupos = {};
+        linhas.forEach(row => {
+          const reg = m.doExcel(row);
+          if (!reg.fazenda || !reg.talhao || !reg.produto) { ignorados++; return; }
+          const k = [normalizar(reg.fazenda), normalizar(reg.talhao), reg.data||'', normalizar(reg.vazao||''), normalizar(reg.safra||'')].join('||');
+          if (!grupos[k]) {
+            grupos[k] = {
+              data: reg.data, fazenda: reg.fazenda, talhao: reg.talhao, safra: reg.safra,
+              vazao: reg.vazao||'', tipo_aplicacao: reg.tipo_aplicacao,
+              obs: reg.obs||'', categoria: reg.categoria||'',
+              produtos: [], status: 'planejado', criado_em: Timestamp.now(),
+              modo_data: 'fixa'
+            };
+          }
+          grupos[k].produtos.push({ produto: reg.produto, dose: reg.dose||0, unidade: reg.unidade||'', categoria: reg.categoria||'' });
+        });
+        Object.values(grupos).forEach(g => {
+          // mantém produto/dose/unidade/categoria da 1ª linha para compatibilidade
+          g.produto = g.produtos[0].produto;
+          g.dose = g.produtos[0].dose;
+          g.unidade = g.produtos[0].unidade;
+          g.categoria = g.produtos[0].categoria || g.categoria;
+          const ref = doc(collection(db, m.colecao));
+          batch.set(ref, g);
+          novosLocais.push({ id: ref.id, ...g });
+          importados++;
+        });
+      } else {
+        // Plantio / colheita: uma linha = um registro
+        linhas.forEach(row => {
+          const reg = m.doExcel(row);
+          const faltando = m.obrigatorios.some(campo => !reg[campo]);
+          if (faltando) { ignorados++; return; }
+          const ref = doc(collection(db, m.colecao));
+          batch.set(ref, reg);
+          novosLocais.push({ id: ref.id, ...reg });
+          importados++;
+        });
+      }
+
       if (importados === 0) { toast('Nenhuma linha válida encontrada — confira as colunas obrigatórias.','erro'); input.value=''; return; }
       await batch.commit();
-      if (tipo==='plantio') plantios.unshift(...novosLocais);
+      if (tipo==='plantio') {
+        plantios.unshift(...novosLocais);
+        // gera as colheitas de cada plantio importado
+        for (const p of novosLocais) { await sincronizarColheitasDoPlantio(p); }
+      }
       if (tipo==='solido' || tipo==='pulverizacao') adubacoes.unshift(...novosLocais);
       if (tipo==='colheita') colheitas.unshift(...novosLocais);
-      toast(`${importados} registro(s) importado(s)${ignorados>0?`, ${ignorados} ignorado(s) por falta de dados obrigatórios`:''}.`);
+      const msgAgrup = (tipo==='solido'||tipo==='pulverizacao') ? ' (linhas do mesmo talhão/data/vazão agrupadas numa aplicação)' : '';
+      toast(`${importados} registro(s) importado(s)${msgAgrup}${ignorados>0?`, ${ignorados} ignorado(s)`:''}.`);
       renderSubabaCaderno();
     } catch(e) { toast('Erro ao importar: '+e.message,'erro'); }
     input.value = '';
