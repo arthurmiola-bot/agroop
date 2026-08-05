@@ -372,6 +372,12 @@
   .acoes-wrap { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
   /* Cabeçalhos ordenáveis */
   th.th-ord { cursor: pointer; user-select: none; white-space: normal; }
+  /* Mini-tabela produto → dose (alinha cada dose na frente do seu produto) */
+  .prod-dose-mini { border-collapse: collapse; width: 100%; }
+  .prod-dose-mini td { border: none !important; padding: 2px 0 !important; font-size: 13px; vertical-align: top; }
+  .prod-dose-mini .pd-nome { padding-right: 14px !important; }
+  .prod-dose-mini .pd-dose { text-align: right; white-space: nowrap; font-family: 'DM Mono', monospace; color: var(--verde); font-weight: 500; }
+  .prod-dose-mini tr:hover td { background: transparent !important; }
   th.th-ord:hover { background: rgba(255,255,255,0.08); }
   .th-seta { font-size: 10px; opacity: .9; }
 
@@ -3761,26 +3767,21 @@ function renderAdubacao(tipo) {
         ${thOrd(tipo,'data_conclusao','Data Execução')}
         ${thOrd(tipo,'fazenda','Fazenda')}
         ${thOrd(tipo,'talhao','Talhão')}
-        ${thOrd(tipo,'produto','Produto')}
-        ${thOrd(tipo,'categoria','Categoria')}
-        ${thOrd(tipo,'dose','Dose')}
+        <th>Produtos (dose)</th>
         ${ehPulv?thOrd(tipo,'vazao','Vazão'):''}
         ${thOrd(tipo,'status','Status')}
         <th class="col-acoes">Ações</th>
       </tr></thead>
       <tbody>
-        ${lista.length===0?`<tr><td colspan="${ehPulv?10:9}" class="tabela-vazia">Nenhum registro</td></tr>`:
+        ${lista.length===0?`<tr><td colspan="${ehPulv?8:7}" class="tabela-vazia">Nenhum registro</td></tr>`:
         ordenarLista(lista,tipo,(a,c)=>{
           if(c==='dose') return parseFloat(a.dose)||0;
           return a[c]||'';
         }).map(a=>{
           const prods = produtosDaAplicacao(a);
-          const prodCell = prods.length<=1 ? (prods[0]?.produto||'—') : prods.map(p=>p.produto).join('<br>');
-          const doseCell = prods.length<=1
-            ? (prods[0]&&prods[0].dose?fmt(prods[0].dose)+' '+(prods[0].unidade||''):'—')
-            : prods.map(p=>fmt(p.dose)+' '+(p.unidade||'')).join('<br>');
-          return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td><td>${a.categoria||'—'}</td>
-        <td>${doseCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
+          // Cada produto numa linha, com a dose alinhada à direita na mesma altura do nome
+          const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
+          return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
