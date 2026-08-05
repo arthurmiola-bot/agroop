@@ -3770,20 +3770,20 @@ function renderAdubacao(tipo) {
         ${thOrd(tipo,'talhao','Talhão')}
         <th>Produtos (dose)</th>
         ${ehPulv?thOrd(tipo,'vazao','Vazão'):''}
+        ${ehPulv?`<th>Descrição</th>`:''}
         ${thOrd(tipo,'status','Status')}
         <th class="col-acoes">Ações</th>
       </tr></thead>
       <tbody>
-        ${lista.length===0?`<tr><td colspan="${ehPulv?8:7}" class="tabela-vazia">Nenhum registro</td></tr>`:
+        ${lista.length===0?`<tr><td colspan="${ehPulv?9:7}" class="tabela-vazia">Nenhum registro</td></tr>`:
         ordenarLista(lista,tipo,(a,c)=>{
           if(c==='dose') return parseFloat(a.dose)||0;
           return a[c]||'';
         }).map(a=>{
           const prods = produtosDaAplicacao(a);
           // Cada produto numa linha, com a dose alinhada à direita na mesma altura do nome
-          const prodCell = (prods.length===0 ? '—' : `<table class="prod-dose-mini">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`)
-            + (a.categoria?`<div style="font-size:11px;color:var(--cinza);margin-top:4px">📋 ${a.categoria}</div>`:'');
-          return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
+          const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
+          return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}${ehPulv?`<td>${a.categoria||'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
@@ -3930,7 +3930,9 @@ function renderLinhasProduto() {
       <input type="number" class="ad-prod-dose" data-i="${i}" value="${p.dose||''}" placeholder="Dose/ha" min="0" step="0.01" style="flex:1;min-width:70px" oninput="recalcularTotalProduto(${i})">
       <select class="ad-prod-unidade" data-i="${i}" style="flex:1;min-width:60px">${UNIDADES.map(u=>`<option ${u===p.unidade?'selected':''}>${u}</option>`).join('')}</select>
       <input type="number" class="ad-prod-total" data-i="${i}" value="${p.total||''}" placeholder="Total" min="0" step="0.01" style="flex:1;min-width:80px" oninput="recalcularDoseProduto(${i})" title="Total de produto no talhão (arredonde aqui para embalagem)">
-      ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaProduto(${i})" title="Remover">✕</button>`:''}
+      ${lista.length>1?`<button type="button" class="btn btn-sm btn-secondary" onclick="moverLinhaProduto(${i},-1)" title="Mover para cima" ${i===0?'disabled style="opacity:.35"':''}>▲</button>
+      <button type="button" class="btn btn-sm btn-secondary" onclick="moverLinhaProduto(${i},1)" title="Mover para baixo" ${i===lista.length-1?'disabled style="opacity:.35"':''}>▼</button>
+      <button type="button" class="btn btn-sm btn-secondary" onclick="removerLinhaProduto(${i})" title="Remover">✕</button>`:''}
     </div>`).join('');
   // preenche datalists do compêndio se já carregado
   if (window._compendioProdutos) {
@@ -4000,6 +4002,16 @@ window.recalcularTotaisTodos = function() {
   const cont = document.getElementById('ad-produtos-lista');
   if (!cont) return;
   cont.querySelectorAll('.ad-prod-linha').forEach((_,i)=>recalcularTotalProduto(i));
+};
+
+window.moverLinhaProduto = function(i, dir) {
+  coletarLinhasProduto();
+  const j = i + dir;
+  if (j < 0 || j >= window._adProdutos.length) return;
+  const tmp = window._adProdutos[i];
+  window._adProdutos[i] = window._adProdutos[j];
+  window._adProdutos[j] = tmp;
+  renderLinhasProduto();
 };
 
 window.adicionarLinhaProduto = function() {
