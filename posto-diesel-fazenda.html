@@ -87,7 +87,13 @@
         if(snap.exists && snap.data() && snap.data().payload){
           try { current = JSON.parse(snap.data().payload); } catch(e){}
         }
-        var merged = Object.assign({}, current, cfg);
+        // Protecao: se o novo cfg traz farms vazio/ausente mas ja existe farms salvo,
+        // mantem o farms atual (nunca apaga as fazendas por engano)
+        var safeCfg = Object.assign({}, cfg);
+        if((!safeCfg.farms || safeCfg.farms.length===0) && current.farms && current.farms.length){
+          delete safeCfg.farms;
+        }
+        var merged = Object.assign({}, current, safeCfg);
         return CONFIG.set({ payload: JSON.stringify(merged) });
       }).catch(function(e){ console.error("cfg:", e); });
     };
@@ -95,6 +101,7 @@
     window._fbAddFuel = function(item){ FUEL.doc(String(item.id)).set(item).catch(function(e){ console.error("fuel:", e); }); };
     window._fbDelFuel = function(id){ FUEL.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
     window._fbAddSup  = function(item){ SUP.doc(String(item.id)).set(item).catch(function(e){ console.error("sup:", e); }); };
+    window._fbDelSup  = function(id){ SUP.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
     window._fbAddAdj  = function(item){ ADJ.doc(String(item.id)).set(item).catch(function(e){ console.error("adj:", e); }); };
 
     // Escuta tudo: config + as 3 subcolecoes, e monta o estado combinado
@@ -173,7 +180,7 @@
   } catch(e) {
     console.error("Firebase init error:", e);
     window._fbSaveConfig=function(){}; window._fbAddFuel=function(){}; window._fbDelFuel=function(){};
-    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbBackup=function(){};
+    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbBackup=function(){}; window._fbDelSup=function(){};
     window._fbListenAll=function(cb){ cb({config:null,fuel:[],sup:[],adj:[]}); return function(){}; };
     window._fbMigrate=function(done){ done(null); };
     window._fbReady=true;
@@ -219,7 +226,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "2.1";
+var APP_VERSION = "2.2";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarm(data,id){
@@ -415,6 +422,7 @@ function App(){
   var _online=useState(navigator.onLine), online=_online[0], setOnline=_online[1];
   var _syncing=useState(false), syncing=_syncing[0], setSyncing=_syncing[1];
   var tmr=useRef(null), sav=useRef(null);
+  var dataLoaded=useRef(false);
 
   // Monitor de conexao online/offline
   useEffect(function(){
@@ -507,6 +515,9 @@ function App(){
       }
       var cfg=s.config||{};
       var firstFarmId = (cfg.farms&&cfg.farms.length) ? cfg.farms[0].id : 1;
+      // Marca que os dados reais chegaram do Firebase (config existe de verdade).
+      // So depois disso o app pode salvar - evita sobrescrever com dados do INIT.
+      if(s.config!==null){ dataLoaded.current=true; }
       var combined={
         operators: cfg.operators||INIT.operators,
         machines: cfg.machines||INIT.machines,
@@ -525,12 +536,26 @@ function App(){
   },[ready]);
 
   // Backup automatico diario (1x por dia, rotativo por dia da semana)
+  // So roda quando os dados estao completamente carregados, para nunca salvar estado parcial
+  var backupDone=useRef(false);
   useEffect(function(){
     if(!data||!window._fbBackup) return;
+    // Guarda de seguranca: so faz backup se os dados estiverem completos
+    // (tem fazendas com estoque definido). Evita salvar estado incompleto no carregamento.
+    if(!data.farms||data.farms.length===0) return;
+    var hasValidStock=data.farms.every(function(fa){ return typeof fa.tankStock==="number"; });
+    if(!hasValidStock) return;
     var today=tsNow().slice(0,10);
     if(data.lastBackupDate===today) return;
+    if(backupDone.current) return; // evita repeticao na mesma sessao
+    backupDone.current=true;
+    // faz o backup (apenas guarda copia, nunca restaura)
     window._fbBackup(data);
-    saveConfig({lastBackupDate:today});
+    // marca a data do backup diretamente no Firebase, sem passar pelo estado local
+    // (evita arrastar um data parcial e sobrescrever o estoque)
+    if(window._fbSaveConfig){
+      window._fbSaveConfig({ lastBackupDate:today });
+    }
   },[data]);
 
   function showToast(msg,type){
@@ -542,6 +567,9 @@ function App(){
 
   // Salva CONFIGURACOES (fazendas/tanques, custo, operadores, maquinas, etc) com merge - nunca apaga registros
   function saveConfig(partial){
+    // Trava de seguranca: nao salva antes dos dados reais carregarem do Firebase.
+    // Isso impede sobrescrever o estoque com os valores em branco do INIT.
+    if(!dataLoaded.current){ return; }
     setData(function(d){
       var nd=Object.assign({},d,partial);
       if(window._fbSaveConfig){
@@ -557,6 +585,7 @@ function App(){
   }
   // Atualiza uma fazenda especifica (ex: tankStock) preservando as demais
   function updFarm(farmId,partial){
+    if(!dataLoaded.current){ return; }
     setData(function(d){
       var farms=d.farms.map(function(fa){ return fa.id===Number(farmId) ? Object.assign({},fa,partial) : fa; });
       var nd=Object.assign({},d,{farms:farms});
@@ -575,6 +604,7 @@ function App(){
   function addFuel(item){ if(window._fbAddFuel) window._fbAddFuel(item); }
   function delFuel(id){ if(window._fbDelFuel) window._fbDelFuel(id); }
   function addSup(item){ if(window._fbAddSup) window._fbAddSup(item); }
+  function delSup(id){ if(window._fbDelSup) window._fbDelSup(id); }
   function addAdj(item){ if(window._fbAddAdj) window._fbAddAdj(item); }
 
   // Compatibilidade: upd ainda existe para configuracoes
@@ -683,7 +713,7 @@ function App(){
         <div className="fi" key={tab}>
           {tab==="fuel"&&<Fuel data={data} saveConfig={saveConfig} updFarm={updFarm} addFuel={addFuel} role={role} toast={showToast}/>}
           {tab==="dash"&&<Dash data={data}/>}
-          {tab==="sup"&&<Sup data={data} saveConfig={saveConfig} updFarm={updFarm} addSup={addSup} toast={showToast}/>}
+          {tab==="sup"&&<Sup data={data} saveConfig={saveConfig} updFarm={updFarm} addSup={addSup} delSup={delSup} toast={showToast}/>}
           {tab==="reg"&&<Reg data={data} upd={upd} saveConfig={saveConfig} toast={showToast}/>}
           {tab==="rep"&&<Rep data={data}/>}
           {tab==="adj"&&<Adj data={data} saveConfig={saveConfig} updFarm={updFarm} addAdj={addAdj} addFuel={addFuel} delFuel={delFuel} toast={showToast}/>}
@@ -1055,11 +1085,66 @@ function Sup(props){
     setTimeout(function(){submitting.current=false;},1500);
   }
 
-  var curTotal2=farmTotalStock(data);
-  var previewAvg=0;
-  if(totalLiters>0&&f.pricePerLiter&&curTotal2+totalLiters>0){
-    previewAvg=((curTotal2*(data.avgCostPerLiter||0))+(totalLiters*Number(f.pricePerLiter)))/(curTotal2+totalLiters);
+  // ── EDICAO E EXCLUSAO DE ENTRADAS ──────────────────────────────────────────
+  var delSup=props.delSup;
+  var _pinOk=useState(false), pinOk=_pinOk[0], setPinOk=_pinOk[1];
+  var _pin=useState(""), pin=_pin[0], setPin=_pin[1];
+  var _pinErr=useState(false), pinErr=_pinErr[0], setPinErr=_pinErr[1];
+  var _editSup=useState(null), editSup=_editSup[0], setEditSup=_editSup[1];
+  var _editAlloc=useState({}), editAlloc=_editAlloc[0], setEditAlloc=_editAlloc[1];
+  var _delSupConfirm=useState(null), delSupConfirm=_delSupConfirm[0], setDelSupConfirm=_delSupConfirm[1];
+
+  function checkSupPin(){
+    if(pin==="284284"){ setPinOk(true); setPinErr(false); }
+    else { setPinErr(true); setPin(""); }
   }
+  function openEditSup(s){
+    setEditSup(s);
+    var al={};
+    activeFarms.forEach(function(fa){ al[fa.id]=""; });
+    (s.allocations||[]).forEach(function(a){ al[a.farmId]=String(a.liters); });
+    setEditAlloc(al);
+  }
+  // Devolve o estoque de uma entrada (reverte as alocacoes)
+  function revertSupplyStock(s){
+    (s.allocations||[]).forEach(function(a){
+      var fa=getFarm(data,a.farmId);
+      if(fa) updFarm(fa.id,{tankStock:Math.max(0,fa.tankStock-a.liters)});
+    });
+  }
+  function saveEditSup(){
+    var newP=Number(editSup._newPrice!==undefined?editSup._newPrice:editSup.pricePerLiter);
+    var newAllocs=activeFarms.filter(function(fa){return Number(editAlloc[fa.id])>0;}).map(function(fa){
+      return {farmId:fa.id, liters:Number(editAlloc[fa.id])};
+    });
+    var newTotal=newAllocs.reduce(function(s,a){return s+a.liters;},0);
+    // 1. reverte o estoque da entrada antiga
+    revertSupplyStock(editSup);
+    // 2. aplica o estoque da entrada nova
+    newAllocs.forEach(function(a){
+      var fa=getFarm(data,a.farmId);
+      if(fa) updFarm(fa.id,{tankStock:Math.min(fa.tankCapacity,fa.tankStock+a.liters)});
+    });
+    // 3. salva a entrada atualizada (mesmo id)
+    addSup(Object.assign({},editSup,{
+      supplier:editSup.supplier, nf:editSup.nf, date:editSup.date,
+      paymentTerm:editSup.paymentTerm,
+      pricePerLiter:newP, liters:newTotal, allocations:newAllocs
+    }));
+    setEditSup(null);
+    toast("Entrada atualizada");
+  }
+  function confirmDelSup(){
+    if(delSupConfirm){
+      revertSupplyStock(delSupConfirm);
+      delSup(delSupConfirm.id);
+      toast("Entrada excluida e estoque revertido");
+    }
+    setDelSupConfirm(null);
+  }
+  function sef(k,v){ setEditSup(function(p){return Object.assign({},p,{[k]:v});}); }
+  function sea(farmId,v){ setEditAlloc(function(p){var n=Object.assign({},p); n[farmId]=v; return n;}); }
+
 
   // Price chart data
   var pts=data.supplies.slice().sort(function(a,b){return a.date>b.date?1:-1;});
