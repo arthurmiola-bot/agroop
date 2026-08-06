@@ -168,19 +168,12 @@
       }).catch(function(e){ console.error("mark migrated:", e); });
     };
 
-    window._fbBackup = function(data){
-      var dow = new Date().getDay();
-      ROOT.doc("backup-"+dow)
-        .set({ payload: JSON.stringify(data), savedAt: new Date().toISOString() })
-        .catch(function(e){ console.error("backup:", e); });
-    };
-
     window._fbReady = true;
     window.dispatchEvent(new Event("fb-ready"));
   } catch(e) {
     console.error("Firebase init error:", e);
     window._fbSaveConfig=function(){}; window._fbAddFuel=function(){}; window._fbDelFuel=function(){};
-    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbBackup=function(){}; window._fbDelSup=function(){};
+    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbDelSup=function(){};
     window._fbListenAll=function(cb){ cb({config:null,fuel:[],sup:[],adj:[]}); return function(){}; };
     window._fbMigrate=function(done){ done(null); };
     window._fbReady=true;
@@ -226,24 +219,68 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "2.2";
+var APP_VERSION = "3.0";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
-function getFarm(data,id){
+function getFarmRaw(data,id){
   if(!data.farms) return null;
   for(var i=0;i<data.farms.length;i++){ if(data.farms[i].id===Number(id)) return data.farms[i]; }
   return null;
 }
+// getFarm retorna a fazenda JA com o estoque calculado (tankStock sempre correto)
+function getFarm(data,id){
+  var f=getFarmRaw(data,id);
+  return f ? Object.assign({},f,{tankStock:computeFarmStock(data,f.id)}) : null;
+}
+// ESTOQUE CALCULADO: o estoque de cada fazenda e sempre calculado a partir dos registros,
+// nunca um numero salvo que possa ser sobrescrito. Isso elimina de vez os erros de estoque.
+// Formula: entradas + ajustes (inicial/adicao/correcao/remocao) - abastecimentos
+function computeFarmStock(data,farmId){
+  farmId=Number(farmId);
+  var stock=0;
+  // 1. Ajustes definem ou alteram o estoque (ordenados por data)
+  var adjs=(data.stockAdjustments||[]).filter(function(a){return Number(a.farmId)===farmId;})
+    .slice().sort(function(a,b){return (a.date>b.date?1:a.date<b.date?-1:0);});
+  var supplies=(data.supplies||[]);
+  var fuelings=(data.fuelings||[]).filter(function(x){return Number(x.farmId)===farmId;});
+  // Junta todos os eventos numa linha do tempo para aplicar em ordem cronologica
+  var events=[];
+  adjs.forEach(function(a){ events.push({date:a.date||"",kind:"adj",type:a.type,liters:Number(a.liters)||0}); });
+  supplies.forEach(function(s){
+    (s.allocations||[]).forEach(function(al){
+      if(Number(al.farmId)===farmId) events.push({date:s.date||"",kind:"sup",liters:Number(al.liters)||0});
+    });
+  });
+  fuelings.forEach(function(x){ events.push({date:x.date||"",kind:"fuel",liters:Number(x.liters)||0}); });
+  events.sort(function(a,b){return (a.date>b.date?1:a.date<b.date?-1:0);});
+  events.forEach(function(e){
+    if(e.kind==="sup"){ stock+=e.liters; }
+    else if(e.kind==="fuel"){ stock-=e.liters; }
+    else if(e.kind==="adj"){
+      if(e.type==="inicial"||e.type==="correcao"){ stock=e.liters; }
+      else if(e.type==="adicao"){ stock+=e.liters; }
+      else if(e.type==="remocao"){ stock-=e.liters; }
+    }
+  });
+  return Math.max(0,Math.round(stock));
+}
+// Retorna a fazenda com o tankStock calculado na hora
+function farmWithStock(data,farm){
+  return Object.assign({},farm,{tankStock:computeFarmStock(data,farm.id)});
+}
 function farmTotalStock(data){
   if(!data.farms) return 0;
-  return data.farms.reduce(function(s,f){return s+(f.tankStock||0);},0);
+  return data.farms.reduce(function(s,f){return s+computeFarmStock(data,f.id);},0);
 }
 function farmLow(farm){
   return farm && farm.tankStock<=(farm.lowStockThreshold||1000);
 }
 function anyFarmLow(data){
   if(!data.farms) return false;
-  for(var i=0;i<data.farms.length;i++){ if(farmLow(data.farms[i])) return true; }
+  for(var i=0;i<data.farms.length;i++){
+    var s=computeFarmStock(data,data.farms[i].id);
+    if(s<=(data.farms[i].lowStockThreshold||1000)) return true;
+  }
   return false;
 }
 
@@ -423,6 +460,7 @@ function App(){
   var _syncing=useState(false), syncing=_syncing[0], setSyncing=_syncing[1];
   var tmr=useRef(null), sav=useRef(null);
   var dataLoaded=useRef(false);
+  var stockConverted=useRef(false);
 
   // Monitor de conexao online/offline
   useEffect(function(){
@@ -518,6 +556,25 @@ function App(){
       // Marca que os dados reais chegaram do Firebase (config existe de verdade).
       // So depois disso o app pode salvar - evita sobrescrever com dados do INIT.
       if(s.config!==null){ dataLoaded.current=true; }
+
+      // CONVERSAO UNICA para estoque calculado: se as fazendas ainda tem tankStock salvo
+      // e a flag stockConverted nunca foi marcada, transforma o estoque atual de cada fazenda
+      // num ajuste inicial (para nao perder o estoque ao migrar para o modelo calculado).
+      if(s.config!==null && cfg.stockConverted!==true && !stockConverted.current && cfg.farms && cfg.farms.length){
+        stockConverted.current=true;
+        cfg.farms.forEach(function(fa){
+          if(typeof fa.tankStock==="number"){
+            // cria um ajuste inicial com o estoque que estava salvo, datado bem no passado
+            // para vir antes de qualquer abastecimento futuro
+            window._fbAddAdj({id:Date.now()+fa.id, farmId:fa.id, date:"2000-01-01 00:00",
+              type:"inicial", liters:fa.tankStock, note:"Estoque convertido para modelo calculado",
+              by:"SISTEMA", cost:data&&data.avgCostPerLiter?data.avgCostPerLiter:0});
+          }
+        });
+        // marca que a conversao foi feita (nunca repete)
+        if(window._fbSaveConfig) window._fbSaveConfig({stockConverted:true});
+      }
+
       var combined={
         operators: cfg.operators||INIT.operators,
         machines: cfg.machines||INIT.machines,
@@ -534,29 +591,6 @@ function App(){
     });
     return unsub;
   },[ready]);
-
-  // Backup automatico diario (1x por dia, rotativo por dia da semana)
-  // So roda quando os dados estao completamente carregados, para nunca salvar estado parcial
-  var backupDone=useRef(false);
-  useEffect(function(){
-    if(!data||!window._fbBackup) return;
-    // Guarda de seguranca: so faz backup se os dados estiverem completos
-    // (tem fazendas com estoque definido). Evita salvar estado incompleto no carregamento.
-    if(!data.farms||data.farms.length===0) return;
-    var hasValidStock=data.farms.every(function(fa){ return typeof fa.tankStock==="number"; });
-    if(!hasValidStock) return;
-    var today=tsNow().slice(0,10);
-    if(data.lastBackupDate===today) return;
-    if(backupDone.current) return; // evita repeticao na mesma sessao
-    backupDone.current=true;
-    // faz o backup (apenas guarda copia, nunca restaura)
-    window._fbBackup(data);
-    // marca a data do backup diretamente no Firebase, sem passar pelo estado local
-    // (evita arrastar um data parcial e sobrescrever o estoque)
-    if(window._fbSaveConfig){
-      window._fbSaveConfig({ lastBackupDate:today });
-    }
-  },[data]);
 
   function showToast(msg,type){
     type=type||"success";
@@ -669,13 +703,14 @@ function App(){
         </div>
         <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
           {(data.farms||[]).filter(function(fa){return fa.active!==false;}).map(function(fa){
-            var pctF=Math.max(0,Math.min(100,(fa.tankStock/fa.tankCapacity)*100));
-            var lowF=farmLow(fa);
+            var stk=computeFarmStock(data,fa.id);
+            var pctF=Math.max(0,Math.min(100,(stk/fa.tankCapacity)*100));
+            var lowF=stk<=(fa.lowStockThreshold||1000);
             return (
               <div key={fa.id} style={{flex:"1 1 160px",minWidth:140}}>
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
                   <span style={{color:MUT,fontWeight:600}}>{fa.name}</span>
-                  <span style={{color:lowF?RED:GN,fontWeight:700}}>{fmtN(fa.tankStock)}/{fmtN(fa.tankCapacity)} L</span>
+                  <span style={{color:lowF?RED:GN,fontWeight:700}}>{fmtN(stk)}/{fmtN(fa.tankCapacity)} L</span>
                 </div>
                 <div className="tbar" style={{height:16}}><div className={"tfill"+(lowF?" low":"")} style={{width:pctF+"%"}}/></div>
               </div>
@@ -824,9 +859,8 @@ function Fuel(props){
       estoqueApos:novoEstoque
     };
     // adiciona o abastecimento como documento individual (sem sobrescrever nada)
+    // O estoque e recalculado automaticamente a partir dos registros - nao precisa mais atualizar manualmente
     addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:litros,date:tsNow(),registeredBy:role});
-    // atualiza apenas o estoque da fazenda especifica
-    updFarm(farm.id,{tankStock:novoEstoque});
     setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""});
     setConf(false);
     setSuccess(det);
@@ -974,8 +1008,9 @@ function Dash(props){
         <div className="sec" style={{fontSize:16}}>Estoque por Fazenda</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
           {activeFarms.map(function(fa){
-            var pctF=Math.max(0,Math.min(100,(fa.tankStock/fa.tankCapacity)*100));
-            var lowF=farmLow(fa);
+            var stk=computeFarmStock(data,fa.id);
+            var pctF=Math.max(0,Math.min(100,(stk/fa.tankCapacity)*100));
+            var lowF=stk<=(fa.lowStockThreshold||1000);
             var farmFuel=data.fuelings.filter(function(x){return x.farmId===fa.id;});
             var farmConsumed=farmFuel.reduce(function(s,x){return s+x.liters;},0);
             return (
@@ -984,7 +1019,7 @@ function Dash(props){
                   <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:16,color:GN}}>{fa.name}</span>
                   {lowF&&<span className="bdg br" style={{fontSize:10}}>BAIXO</span>}
                 </div>
-                <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800,color:lowF?RED:TXT}}>{fmtN(fa.tankStock)}<span style={{fontSize:13,color:MUT,fontWeight:400}}> / {fmtN(fa.tankCapacity)} L</span></div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800,color:lowF?RED:TXT}}>{fmtN(stk)}<span style={{fontSize:13,color:MUT,fontWeight:400}}> / {fmtN(fa.tankCapacity)} L</span></div>
                 <div className="tbar" style={{height:10,marginTop:6}}><div className={"tfill"+(lowF?" low":"")} style={{width:pctF+"%"}}/></div>
                 <div style={{fontSize:11,color:DIM,marginTop:6}}>{farmFuel.length} abastecimentos - {fmtN(farmConsumed)} L consumidos</div>
               </div>
@@ -1001,8 +1036,9 @@ function Dash(props){
                 return (
                   <div key={m.id}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
-                      <div style={{display:"flex",gap:7,alignItems:"center"}}>
+                      <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
                         <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{m.code}</span>
+                        {getMachineDesc(m)&&<span style={{fontSize:12,color:MUT}}>{getMachineDesc(m)}</span>}
                         <span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{getMachineMt(m)==="odometer"?"ODO":"HOR"}</span>
                       </div>
                       <span style={{color:GN,fontWeight:600}}>{fmtN(m.tot)} L</span>
@@ -1026,7 +1062,7 @@ function Dash(props){
             return (
               <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"} - {op?op.name:"-"}</div>
+                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"}{mc2&&getMachineDesc(mc2)?" "+getMachineDesc(mc2):""} - {op?op.name:"-"}</div>
                   <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
                 </div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
@@ -1069,13 +1105,9 @@ function Sup(props){
     });
 
     // adiciona a entrada como documento individual, com a divisao por fazenda
+    // O estoque de cada fazenda e recalculado automaticamente - nao precisa atualizar manualmente
     addSup(Object.assign({id:Date.now(),liters:totalLiters,pricePerLiter:nP,allocations:allocations},f));
 
-    // atualiza o estoque de cada fazenda que recebeu volume
-    allocations.forEach(function(a){
-      var fa=getFarm(data,a.farmId);
-      if(fa) updFarm(fa.id,{tankStock:Math.min(fa.tankCapacity,fa.tankStock+a.liters)});
-    });
     // custo medio e geral, salva na config
     saveConfig({avgCostPerLiter:Math.round(nA*10000)/10000});
 
@@ -1105,27 +1137,13 @@ function Sup(props){
     (s.allocations||[]).forEach(function(a){ al[a.farmId]=String(a.liters); });
     setEditAlloc(al);
   }
-  // Devolve o estoque de uma entrada (reverte as alocacoes)
-  function revertSupplyStock(s){
-    (s.allocations||[]).forEach(function(a){
-      var fa=getFarm(data,a.farmId);
-      if(fa) updFarm(fa.id,{tankStock:Math.max(0,fa.tankStock-a.liters)});
-    });
-  }
   function saveEditSup(){
     var newP=Number(editSup._newPrice!==undefined?editSup._newPrice:editSup.pricePerLiter);
     var newAllocs=activeFarms.filter(function(fa){return Number(editAlloc[fa.id])>0;}).map(function(fa){
       return {farmId:fa.id, liters:Number(editAlloc[fa.id])};
     });
     var newTotal=newAllocs.reduce(function(s,a){return s+a.liters;},0);
-    // 1. reverte o estoque da entrada antiga
-    revertSupplyStock(editSup);
-    // 2. aplica o estoque da entrada nova
-    newAllocs.forEach(function(a){
-      var fa=getFarm(data,a.farmId);
-      if(fa) updFarm(fa.id,{tankStock:Math.min(fa.tankCapacity,fa.tankStock+a.liters)});
-    });
-    // 3. salva a entrada atualizada (mesmo id)
+    // salva a entrada atualizada (mesmo id). O estoque e recalculado automaticamente.
     addSup(Object.assign({},editSup,{
       supplier:editSup.supplier, nf:editSup.nf, date:editSup.date,
       paymentTerm:editSup.paymentTerm,
@@ -1136,9 +1154,9 @@ function Sup(props){
   }
   function confirmDelSup(){
     if(delSupConfirm){
-      revertSupplyStock(delSupConfirm);
+      // basta remover o registro - o estoque e recalculado automaticamente
       delSup(delSupConfirm.id);
-      toast("Entrada excluida e estoque revertido");
+      toast("Entrada excluida");
     }
     setDelSupConfirm(null);
   }
@@ -1584,6 +1602,7 @@ function Rep(props){
                     <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:GN}}>{m.code}</span>
                     <span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{getMachineMt(m)==="odometer"?"ODO":"HOR"}</span>
                   </div>
+                  {getMachineDesc(m)&&<div style={{fontSize:12,color:MUT,marginTop:-2,marginBottom:4}}>{getMachineDesc(m)}</div>}
                   <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800}}>{m.eff||"--"}<span style={{fontSize:13,color:MUT,fontWeight:400}}> {eLbl(getMachineMt(m))}</span></div>
                   <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+BDR,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
                     <div><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Litros</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{fmtN(m.tot)} L</div></div>
@@ -1610,8 +1629,9 @@ function Rep(props){
                   <tr key={x.id}>
                     <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDateTime(x.date)}</td>
                     <td style={{fontSize:12,color:MUT}}>{fa?fa.name:"-"}</td>
-                    <td><div style={{display:"flex",gap:5,alignItems:"center"}}>
+                    <td><div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
+                      {mc&&getMachineDesc(mc)&&<span style={{fontSize:12,color:MUT}}>{getMachineDesc(mc)}</span>}
                       <span className={"bdg "+(mc&&getMachineMt(mc)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&getMachineMt(mc)==="odometer"?"ODO":"HOR"}</span>
                     </div></td>
                     <td>{op?op.name:"-"}</td>
@@ -1670,30 +1690,23 @@ function Adj(props){
   function applyAdj(){
     if(!farm) return;
     var L=Number(f.liters), C=Number(f.cost)||0;
-    var ns=farm.tankStock, na=data.avgCostPerLiter||0;
-    if(f.type==="inicial"){ns=L;if(C>0)na=C;}
+    var na=data.avgCostPerLiter||0;
+    // atualiza custo medio se informado (inicial/adicao/correcao)
+    if(f.type==="inicial"||f.type==="correcao"){ if(C>0)na=C; }
     else if(f.type==="adicao"){
       var totalStockNow=farmTotalStock(data);
       if(C>0&&(totalStockNow+L>0)) na=((totalStockNow*na)+(L*C))/(totalStockNow+L);
-      ns=Math.min(farm.tankCapacity,ns+L);
     }
-    else if(f.type==="correcao"){ns=L;if(C>0)na=C;}
-    else if(f.type==="remocao"){ns=Math.max(0,ns-L);}
+    // cria o registro de ajuste. O estoque e recalculado automaticamente a partir dele.
     addAdj({id:Date.now(),farmId:farm.id,date:tsNow(),type:f.type,liters:L,note:f.note,by:"ADMINISTRADOR",cost:C});
-    updFarm(farm.id,{tankStock:ns});
     if(na!==data.avgCostPerLiter) saveConfig({avgCostPerLiter:Math.round(na*10000)/10000});
     setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",type:"correcao",liters:"",note:"",cost:""});
     toast("Ajuste aplicado em "+farm.name);
   }
   function saveE(){
-    var oldL=Number(em.liters);
     var newL=Number(ef.liters||em.liters);
-    var oldFarmId=em.farmId;
     var newFarmId=Number(ef.farmId||em.farmId);
-    var oldFarm=getFarm(data,oldFarmId);
-    var newFarm=getFarm(data,newFarmId);
-
-    // salva o registro atualizado
+    // salva o registro atualizado. O estoque de todas as fazendas e recalculado automaticamente.
     addFuel(Object.assign({},em,{
       farmId:newFarmId,
       operatorId:Number(ef.operatorId||em.operatorId),
@@ -1702,28 +1715,13 @@ function Adj(props){
       liters:newL,
       date:ef.date||(em.date||tsNow())
     }));
-
-    if(oldFarmId===newFarmId){
-      // mesma fazenda: ajusta diferenca de litros
-      var diff=oldL-newL;
-      if(diff!==0&&oldFarm) updFarm(oldFarmId,{tankStock:Math.max(0,Math.min(oldFarm.tankCapacity,oldFarm.tankStock+diff))});
-    } else {
-      // mudou de fazenda: devolve litros antigos para fazenda antiga, debita novos da nova
-      if(oldFarm) updFarm(oldFarmId,{tankStock:Math.min(oldFarm.tankCapacity,oldFarm.tankStock+oldL)});
-      if(newFarm) updFarm(newFarmId,{tankStock:Math.max(0,newFarm.tankStock-newL)});
-    }
     setEm(null);
     toast("Abastecimento atualizado");
   }
   function delE(id){
-    var x=null;
-    for(var i=0;i<data.fuelings.length;i++){if(data.fuelings[i].id===id){x=data.fuelings[i];break;}}
+    // basta remover o registro - o estoque e recalculado automaticamente
     delFuel(id);
-    if(x){
-      var xFarm=getFarm(data,x.farmId);
-      if(xFarm) updFarm(xFarm.id,{tankStock:xFarm.tankStock+x.liters});
-    }
-    toast("Removido e estoque restaurado");setEm(null);
+    toast("Abastecimento removido");setEm(null);
   }
   // Abre o modal de edicao de um abastecimento
   function openEditFuel(x){
@@ -1739,16 +1737,22 @@ function Adj(props){
 
   // Cadastro/edicao de fazendas
   function openFarmAdd(){ setFmodal({item:null}); setFform({tankCapacity:"",tankStock:"",lowStockThreshold:"1000"}); }
-  function openFarmEdit(fa){ setFmodal({item:fa}); setFform({name:fa.name,tankCapacity:String(fa.tankCapacity),tankStock:String(fa.tankStock),lowStockThreshold:String(fa.lowStockThreshold||1000)}); }
+  function openFarmEdit(fa){ setFmodal({item:fa}); setFform({name:fa.name,tankCapacity:String(fa.tankCapacity),lowStockThreshold:String(fa.lowStockThreshold||1000)}); }
   function saveFarm(){
     if(!fform.name||!fform.name.trim()) return;
-    var cap=Number(fform.tankCapacity)||0, stk=Number(fform.tankStock)||0, thrv=Number(fform.lowStockThreshold)||1000;
+    var cap=Number(fform.tankCapacity)||0, thrv=Number(fform.lowStockThreshold)||1000;
     if(fmodal.item){
-      saveConfig({farms:data.farms.map(function(fa){return fa.id===fmodal.item.id?Object.assign({},fa,{name:fform.name,tankCapacity:cap,tankStock:stk,lowStockThreshold:thrv}):fa;})});
+      // edicao: so altera nome, capacidade e limite - NUNCA mexe no estoque (que e calculado)
+      saveConfig({farms:data.farms.map(function(fa){return fa.id===fmodal.item.id?Object.assign({},fa,{name:fform.name,tankCapacity:cap,lowStockThreshold:thrv}):fa;})});
       toast("Fazenda atualizada");
     } else {
+      // nova fazenda: cadastra a fazenda e, se informou estoque inicial, cria um ajuste inicial
       var newId=Date.now();
-      saveConfig({farms:data.farms.concat([{id:newId,name:fform.name,tankCapacity:cap,tankStock:stk,lowStockThreshold:thrv,active:true}])});
+      var stk=Number(fform.tankStock)||0;
+      saveConfig({farms:data.farms.concat([{id:newId,name:fform.name,tankCapacity:cap,lowStockThreshold:thrv,active:true}])});
+      if(stk>0){
+        addAdj({id:Date.now()+1,farmId:newId,date:tsNow(),type:"inicial",liters:stk,note:"Estoque inicial no cadastro",by:"ADMINISTRADOR",cost:0});
+      }
       toast("Fazenda cadastrada: "+fform.name);
     }
     setFmodal(null);
@@ -1782,11 +1786,10 @@ function Adj(props){
       {adjPinOk&&(
         <div style={{display:"flex",flexDirection:"column",gap:22}}>
           <div className="card" style={{borderColor:"#93c5fd"}}>
-            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:BLU,marginBottom:5}}>BACKUP DOS DADOS</div>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,color:BLU,marginBottom:5}}>EXPORTAR DADOS</div>
             <div style={{fontSize:13,color:MUT,marginBottom:12}}>
-              O sistema salva backup automatico 1x por dia na nuvem (ultimos 7 dias).
-              {data.lastBackupDate?" Ultimo backup: "+fmtDate(data.lastBackupDate)+".":""}
-              Voce tambem pode baixar uma copia manual agora:
+              Todos os dados ficam salvos com seguranca na nuvem (Firebase). Se quiser guardar uma copia
+              em arquivo no seu computador, baixe agora:
             </div>
             <Btn onClick={function(){
               var json=JSON.stringify(data,null,2);
@@ -1794,8 +1797,8 @@ function Adj(props){
               a.href="data:application/json;charset=utf-8,"+encodeURIComponent(json);
               a.download="backup_posto_diesel_"+tsNow().slice(0,10)+".json";
               a.click();
-              toast("Backup baixado");
-            }} color={BLU} style={{fontSize:14}}>BAIXAR BACKUP COMPLETO</Btn>
+              toast("Copia baixada");
+            }} color={BLU} style={{fontSize:14}}>BAIXAR COPIA DOS DADOS</Btn>
           </div>
 
           <div className="card" style={{borderColor:"#fca5a5"}}>
@@ -1815,7 +1818,7 @@ function Adj(props){
                     </div>
                     <div style={{display:"flex",gap:14,marginTop:10,flexWrap:"wrap"}}>
                       <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Limite atual:</span><strong style={{color:RED}}>{fmtN(fa.lowStockThreshold||1000)} L</strong></div>
-                      <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque:</span><strong style={{color:farmLow(fa)?RED:GN}}>{fmtN(fa.tankStock)} L</strong></div>
+                      <div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between"}}><span>Estoque:</span><strong style={{color:computeFarmStock(data,fa.id)<=(fa.lowStockThreshold||1000)?RED:GN}}>{fmtN(computeFarmStock(data,fa.id))} L</strong></div>
                     </div>
                   </div>
                 );
@@ -1835,7 +1838,7 @@ function Adj(props){
                 <tr key={fa.id}>
                   <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fa.name}</td>
                   <td>{fmtN(fa.tankCapacity)} L</td>
-                  <td>{fmtN(fa.tankStock)} L</td>
+                  <td>{fmtN(computeFarmStock(data,fa.id))} L</td>
                   <td><span className={"bdg "+(fa.active!==false?"bg":"br")}>{fa.active!==false?"Ativa":"Inativa"}</span></td>
                   <td><div style={{display:"flex",gap:7}}>
                     <Btn onClick={function(){openFarmEdit(fa);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
@@ -1912,7 +1915,7 @@ function Adj(props){
                     <tr key={x.id}>
                       <td style={{fontSize:13}}>{fmtDateTime(x.date)}</td>
                       <td style={{fontSize:12,color:MUT}}>{xFarm?xFarm.name:"-"}</td>
-                      <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</td>
+                      <td><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</div>{mc&&getMachineDesc(mc)&&<div style={{fontSize:11,color:MUT}}>{getMachineDesc(mc)}</div>}</td>
                       <td>{op?op.name:"-"}</td>
                       <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
                       <td>
@@ -1994,7 +1997,8 @@ function Adj(props){
           <div style={{display:"flex",flexDirection:"column",gap:13}}>
             <Fld label="Nome da Fazenda" value={fform.name||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{name:v});});}} placeholder="Ex: Rodeio"/>
             <Fld label="Capacidade do Tanque (L)" type="number" value={fform.tankCapacity||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{tankCapacity:v});});}} placeholder="Ex: 5000"/>
-            <Fld label={fmodal.item?"Estoque Atual (L)":"Estoque Inicial (L)"} type="number" value={fform.tankStock||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{tankStock:v});});}} placeholder="Ex: 0"/>
+            {!fmodal.item&&<Fld label="Estoque Inicial (L)" type="number" value={fform.tankStock||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{tankStock:v});});}} placeholder="Ex: 0"/>}
+            {fmodal.item&&<div style={{fontSize:12,color:MUT,background:"#f0f4f0",borderRadius:8,padding:"8px 12px"}}>O estoque e calculado automaticamente pelos abastecimentos e entradas. Para corrigir, use "Ajuste de Estoque" abaixo.</div>}
             <Fld label="Nivel Critico de Alerta (L)" type="number" value={fform.lowStockThreshold||""} onChange={function(v){setFform(function(p){return Object.assign({},p,{lowStockThreshold:v});});}} placeholder="Ex: 500"/>
             <div style={{display:"flex",gap:10,marginTop:5}}>
               <Btn full={true} onClick={function(){setFmodal(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
