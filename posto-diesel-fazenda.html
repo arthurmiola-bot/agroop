@@ -103,6 +103,7 @@
     window._fbAddSup  = function(item){ SUP.doc(String(item.id)).set(item).catch(function(e){ console.error("sup:", e); }); };
     window._fbDelSup  = function(id){ SUP.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
     window._fbAddAdj  = function(item){ ADJ.doc(String(item.id)).set(item).catch(function(e){ console.error("adj:", e); }); };
+    window._fbDelAdj  = function(id){ ADJ.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
 
     // Escuta tudo: config + as 3 subcolecoes, e monta o estado combinado
     // Tambem monitora se ha dados pendentes (ainda nao confirmados no servidor)
@@ -173,7 +174,7 @@
   } catch(e) {
     console.error("Firebase init error:", e);
     window._fbSaveConfig=function(){}; window._fbAddFuel=function(){}; window._fbDelFuel=function(){};
-    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbDelSup=function(){};
+    window._fbAddSup=function(){}; window._fbAddAdj=function(){}; window._fbDelSup=function(){}; window._fbDelAdj=function(){};
     window._fbListenAll=function(cb){ cb({config:null,fuel:[],sup:[],adj:[]}); return function(){}; };
     window._fbMigrate=function(done){ done(null); };
     window._fbReady=true;
@@ -219,7 +220,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.0";
+var APP_VERSION = "3.1";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -640,6 +641,7 @@ function App(){
   function addSup(item){ if(window._fbAddSup) window._fbAddSup(item); }
   function delSup(id){ if(window._fbDelSup) window._fbDelSup(id); }
   function addAdj(item){ if(window._fbAddAdj) window._fbAddAdj(item); }
+  function delAdj(id){ if(window._fbDelAdj) window._fbDelAdj(id); }
 
   // Compatibilidade: upd ainda existe para configuracoes
   function upd(k,v){
@@ -751,7 +753,7 @@ function App(){
           {tab==="sup"&&<Sup data={data} saveConfig={saveConfig} updFarm={updFarm} addSup={addSup} delSup={delSup} toast={showToast}/>}
           {tab==="reg"&&<Reg data={data} upd={upd} saveConfig={saveConfig} toast={showToast}/>}
           {tab==="rep"&&<Rep data={data}/>}
-          {tab==="adj"&&<Adj data={data} saveConfig={saveConfig} updFarm={updFarm} addAdj={addAdj} addFuel={addFuel} delFuel={delFuel} toast={showToast}/>}
+          {tab==="adj"&&<Adj data={data} saveConfig={saveConfig} updFarm={updFarm} addAdj={addAdj} delAdj={delAdj} addFuel={addFuel} delFuel={delFuel} toast={showToast}/>}
         </div>
       </main>
     </div>
@@ -1143,10 +1145,11 @@ function Sup(props){
       return {farmId:fa.id, liters:Number(editAlloc[fa.id])};
     });
     var newTotal=newAllocs.reduce(function(s,a){return s+a.liters;},0);
+    // monta o registro limpo (sem o campo temporario _newPrice)
+    var clean=Object.assign({},editSup);
+    delete clean._newPrice;
     // salva a entrada atualizada (mesmo id). O estoque e recalculado automaticamente.
-    addSup(Object.assign({},editSup,{
-      supplier:editSup.supplier, nf:editSup.nf, date:editSup.date,
-      paymentTerm:editSup.paymentTerm,
+    addSup(Object.assign(clean,{
       pricePerLiter:newP, liters:newTotal, allocations:newAllocs
     }));
     setEditSup(null);
@@ -1163,6 +1166,13 @@ function Sup(props){
   function sef(k,v){ setEditSup(function(p){return Object.assign({},p,{[k]:v});}); }
   function sea(farmId,v){ setEditAlloc(function(p){var n=Object.assign({},p); n[farmId]=v; return n;}); }
 
+
+  // Previa do novo custo medio ao digitar uma nova entrada
+  var curTotal2=farmTotalStock(data);
+  var previewAvg=0;
+  if(totalLiters>0&&f.pricePerLiter&&curTotal2+totalLiters>0){
+    previewAvg=((curTotal2*(data.avgCostPerLiter||0))+(totalLiters*Number(f.pricePerLiter)))/(curTotal2+totalLiters);
+  }
 
   // Price chart data
   var pts=data.supplies.slice().sort(function(a,b){return a.date>b.date?1:-1;});
@@ -1214,9 +1224,17 @@ function Sup(props){
               </div>
             </div>
           )}
+          {!pinOk&&(
+            <div style={{background:"#f0f4f0",borderRadius:10,padding:"12px 14px",marginBottom:12,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:13,color:MUT}}>Para editar/excluir entradas, digite a senha:</span>
+              <input type="password" value={pin} onChange={function(e){setPin(e.target.value);}} placeholder="Senha" style={{width:110,fontSize:14,padding:"6px 10px"}}/>
+              <Btn onClick={checkSupPin} style={{padding:"6px 14px",fontSize:13}}>OK</Btn>
+              {pinErr&&<span style={{color:RED,fontSize:12}}>Senha incorreta</span>}
+            </div>
+          )}
           <div style={{overflowX:"auto"}}>
             <table>
-              <thead><tr><th>Data</th><th>Fornecedor</th><th>Fazendas</th><th>Volume</th><th>Preco/L</th><th>Total</th></tr></thead>
+              <thead><tr><th>Data</th><th>Fornecedor</th><th>Fazendas</th><th>Volume</th><th>Preco/L</th><th>Total</th>{pinOk&&<th>Acoes</th>}</tr></thead>
               <tbody>{data.supplies.slice().reverse().map(function(s){
                 var allocTxt=(s.allocations||[]).map(function(a){
                   var fa=getFarm(data,a.farmId);
@@ -1230,6 +1248,10 @@ function Sup(props){
                     <td><span style={{color:GN,fontWeight:600}}>{fmtN(s.liters)} L</span></td>
                     <td style={{color:GN,fontWeight:600}}>{fmtR(s.pricePerLiter)}</td>
                     <td style={{color:AMB}}>{fmtR(s.liters*s.pricePerLiter)}</td>
+                    {pinOk&&<td><div style={{display:"flex",gap:6}}>
+                      <Btn onClick={function(){openEditSup(s);}} color={INP} style={{color:TXT,padding:"4px 10px",fontSize:12}}>Editar</Btn>
+                      <Btn onClick={function(){setDelSupConfirm(s);}} color={RED} style={{padding:"4px 10px",fontSize:12}}>Excluir</Btn>
+                    </div></td>}
                   </tr>
                 );
               })}</tbody>
@@ -1237,6 +1259,54 @@ function Sup(props){
           </div>
         </div>
       </div>
+
+      {editSup&&(
+        <Modal title="Editar Entrada de Diesel" onClose={function(){setEditSup(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
+            <Fld label="Fornecedor" value={editSup.supplier||""} onChange={function(v){sef("supplier",v);}}/>
+            <Fld label="NF / Documento" value={editSup.nf||""} onChange={function(v){sef("nf",v);}}/>
+            <Fld label="Data" type="date" value={editSup.date||""} onChange={function(v){sef("date",v);}}/>
+            <Fld label="Condicao de Pagamento" value={editSup.paymentTerm||""} onChange={function(v){sef("paymentTerm",v);}}/>
+            <Fld label="Preco/Litro (R$)" type="number" value={editSup._newPrice!==undefined?editSup._newPrice:editSup.pricePerLiter} onChange={function(v){sef("_newPrice",v);}}/>
+            <div className="fg">
+              <div className="flbl">Volume por Fazenda (L)</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {activeFarms.map(function(fa){
+                  return (
+                    <div key={fa.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:13,color:MUT,flex:1}}>{fa.name}</span>
+                      <input type="number" value={editAlloc[fa.id]||""} onChange={function(e){sea(fa.id,e.target.value);}} placeholder="0" style={{width:110,fontSize:15,textAlign:"center"}}/>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div style={{fontSize:12,color:MUT,marginBottom:14,background:"#f0f4f0",borderRadius:8,padding:"8px 12px"}}>O estoque das fazendas e recalculado automaticamente ao salvar.</div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn full={true} onClick={function(){setEditSup(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn full={true} onClick={saveEditSup} color={GN}>Salvar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {delSupConfirm&&(
+        <Modal title="Excluir Entrada" onClose={function(){setDelSupConfirm(null);}}>
+          <div style={{marginBottom:18}}>
+            <div style={{fontSize:15,marginBottom:14}}>Tem certeza que deseja excluir esta entrada? O estoque sera recalculado automaticamente.</div>
+            <div style={{background:"#f7faf7",borderRadius:10,padding:"12px 14px",border:"1px solid "+BDR}}>
+              <Rw label="Data" value={fmtDate(delSupConfirm.date)}/>
+              <Rw label="Fornecedor" value={delSupConfirm.supplier||"-"}/>
+              <Rw label="Volume" value={fmtN(delSupConfirm.liters)+" L"}/>
+              <Rw label="Preco/L" value={fmtR(delSupConfirm.pricePerLiter)}/>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn full={true} onClick={function(){setDelSupConfirm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn full={true} onClick={confirmDelSup} color={RED}>SIM, EXCLUIR</Btn>
+          </div>
+        </Modal>
+      )}
 
       {pts.length>=2&&(
         <div className="card">
@@ -1652,7 +1722,7 @@ function Rep(props){
 
 // ── AJUSTES ──────────────────────────────────────────────────────────────────
 function Adj(props){
-  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addAdj=props.addAdj, addFuel=props.addFuel, delFuel=props.delFuel, toast=props.toast;
+  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addAdj=props.addAdj, delAdj=props.delAdj, addFuel=props.addFuel, delFuel=props.delFuel, toast=props.toast;
   var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
   var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",type:"correcao",liters:"",note:"",cost:""}), f=_f[0], setF=_f[1];
   function sf(k,v){setF(function(p){return Object.assign({},p,{[k]:v});});}
@@ -1672,6 +1742,8 @@ function Adj(props){
   var _em=useState(null), em=_em[0], setEm=_em[1];
   var _ef=useState({}), ef=_ef[0], setEf=_ef[1];
   var _delConfirm=useState(null), delConfirm=_delConfirm[0], setDelConfirm=_delConfirm[1];
+  var _editAdj=useState(null), editAdj=_editAdj[0], setEditAdj=_editAdj[1];
+  var _delAdjConfirm=useState(null), delAdjConfirm=_delAdjConfirm[0], setDelAdjConfirm=_delAdjConfirm[1];
 
   // Cadastro de fazendas
   var _fmodal=useState(null), fmodal=_fmodal[0], setFmodal=_fmodal[1];
@@ -1703,6 +1775,20 @@ function Adj(props){
     setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",type:"correcao",liters:"",note:"",cost:""});
     toast("Ajuste aplicado em "+farm.name);
   }
+  // Editar um ajuste existente (tipo, litros, motivo). Estoque recalculado automaticamente.
+  function openEditAdj(a){ setEditAdj(Object.assign({},a)); }
+  function saveEditAdj(){
+    addAdj(Object.assign({},editAdj,{
+      type:editAdj.type, liters:Number(editAdj.liters)||0, note:editAdj.note||""
+    }));
+    setEditAdj(null);
+    toast("Ajuste atualizado");
+  }
+  function confirmDelAdj(){
+    if(delAdjConfirm && delAdj){ delAdj(delAdjConfirm.id); toast("Ajuste excluido"); }
+    setDelAdjConfirm(null);
+  }
+  function seadj(k,v){ setEditAdj(function(p){return Object.assign({},p,{[k]:v});}); }
   function saveE(){
     var newL=Number(ef.liters||em.liters);
     var newFarmId=Number(ef.farmId||em.farmId);
@@ -1891,11 +1977,15 @@ function Adj(props){
                 var aFarm=getFarm(data,a.farmId);
                 return (
                   <div key={a.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44"}}>
-                    <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span className="bdg by">{a.type.toUpperCase()}</span>
                       <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{fmtN(a.liters)} L</span>
                     </div>
                     <div style={{fontSize:12,color:MUT,marginTop:3}}>{aFarm?aFarm.name+" - ":""}{a.note} - {fmtDateTime(a.date)}</div>
+                    <div style={{display:"flex",gap:6,marginTop:6}}>
+                      <Btn onClick={function(){openEditAdj(a);}} color={INP} style={{color:TXT,padding:"3px 10px",fontSize:12}}>Editar</Btn>
+                      <Btn onClick={function(){setDelAdjConfirm(a);}} color={RED} style={{padding:"3px 10px",fontSize:12}}>Excluir</Btn>
+                    </div>
                   </div>
                 );
               })}
@@ -1988,6 +2078,46 @@ function Adj(props){
           <div style={{display:"flex",gap:10}}>
             <Btn full={true} onClick={function(){setDelConfirm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
             <Btn full={true} onClick={confirmDelete} color={RED}>SIM, EXCLUIR</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {editAdj&&(
+        <Modal title="Editar Ajuste" onClose={function(){setEditAdj(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:13,marginBottom:16}}>
+            <div className="fg">
+              <div className="flbl">Tipo de Ajuste</div>
+              <select value={editAdj.type} onChange={function(e){seadj("type",e.target.value);}}>
+                <option value="correcao">Correcao (valor exato)</option>
+                <option value="inicial">Estoque Inicial</option>
+                <option value="adicao">Adicao manual</option>
+                <option value="remocao">Remocao manual</option>
+              </select>
+            </div>
+            <Fld label="Litros" type="number" value={editAdj.liters} onChange={function(v){seadj("liters",v);}}/>
+            <Fld label="Motivo / Observacao" value={editAdj.note||""} onChange={function(v){seadj("note",v);}}/>
+          </div>
+          <div style={{fontSize:12,color:MUT,marginBottom:14,background:"#f0f4f0",borderRadius:8,padding:"8px 12px"}}>O estoque e recalculado automaticamente ao salvar.</div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn full={true} onClick={function(){setEditAdj(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn full={true} onClick={saveEditAdj} color={GN}>Salvar</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {delAdjConfirm&&(
+        <Modal title="Excluir Ajuste" onClose={function(){setDelAdjConfirm(null);}}>
+          <div style={{marginBottom:18}}>
+            <div style={{fontSize:15,marginBottom:14}}>Tem certeza que deseja excluir este ajuste? O estoque sera recalculado automaticamente.</div>
+            <div style={{background:"#f7faf7",borderRadius:10,padding:"12px 14px",border:"1px solid "+BDR}}>
+              <Rw label="Tipo" value={delAdjConfirm.type.toUpperCase()}/>
+              <Rw label="Litros" value={fmtN(delAdjConfirm.liters)+" L"}/>
+              <Rw label="Motivo" value={delAdjConfirm.note||"-"}/>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <Btn full={true} onClick={function(){setDelAdjConfirm(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
+            <Btn full={true} onClick={confirmDelAdj} color={RED}>SIM, EXCLUIR</Btn>
           </div>
         </Modal>
       )}
