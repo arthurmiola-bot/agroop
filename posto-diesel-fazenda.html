@@ -68,9 +68,9 @@
     var existing = firebase.apps.filter(function(a){return a.name==="postodiesel";});
     var fbApp = existing.length ? existing[0] : firebase.initializeApp(firebaseConfig, "postodiesel");
     var db = fbApp.firestore();
-    try {
-      db.enablePersistence({ synchronizeTabs: true }).catch(function(){});
-    } catch(e){}
+    // MODO SOMENTE ONLINE: nao usa cache offline de dados.
+    // Isso garante que todos os aparelhos sempre leem e escrevem os dados reais do servidor,
+    // eliminando qualquer risco de dados antigos "ressuscitarem" de um cache local.
 
     var ROOT = db.collection("posto-diesel");
     var CONFIG = ROOT.doc("config");          // configuracoes (tanque, custo, operadores, maquinas)
@@ -99,11 +99,14 @@
     };
     // Adiciona um registro individual (abastecimento/entrada/ajuste) - nunca sobrescreve
     window._fbAddFuel = function(item){ FUEL.doc(String(item.id)).set(item).catch(function(e){ console.error("fuel:", e); }); };
-    window._fbDelFuel = function(id){ FUEL.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
+    // EXCLUSAO LOGICA (soft delete): em vez de apagar o documento, marca como deleted:true.
+    // Isso impede que celulares com cache antigo "ressuscitem" o registro ao sincronizar.
+    // O app ignora tudo que estiver marcado como deleted.
+    window._fbDelFuel = function(id){ FUEL.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()}, {merge:true}).catch(function(e){ console.error(e); }); };
     window._fbAddSup  = function(item){ SUP.doc(String(item.id)).set(item).catch(function(e){ console.error("sup:", e); }); };
-    window._fbDelSup  = function(id){ SUP.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
+    window._fbDelSup  = function(id){ SUP.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()}, {merge:true}).catch(function(e){ console.error(e); }); };
     window._fbAddAdj  = function(item){ ADJ.doc(String(item.id)).set(item).catch(function(e){ console.error("adj:", e); }); };
-    window._fbDelAdj  = function(id){ ADJ.doc(String(id)).delete().catch(function(e){ console.error(e); }); };
+    window._fbDelAdj  = function(id){ ADJ.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()}, {merge:true}).catch(function(e){ console.error(e); }); };
 
     // Escuta tudo: config + as 3 subcolecoes, e monta o estado combinado
     // Tambem monitora se ha dados pendentes (ainda nao confirmados no servidor)
@@ -130,17 +133,18 @@
         ready.config = true; emit();
       });
       var u2 = FUEL.onSnapshot({ includeMetadataChanges: true }, function(qs){
-        state.fuel = qs.docs.map(function(d){ return d.data(); });
+        // ignora registros marcados como excluidos (soft delete)
+        state.fuel = qs.docs.map(function(d){ return d.data(); }).filter(function(x){ return x && !x.deleted; });
         updatePending(qs);
         ready.fuel = true; emit();
       });
       var u3 = SUP.onSnapshot({ includeMetadataChanges: true }, function(qs){
-        state.sup = qs.docs.map(function(d){ return d.data(); });
+        state.sup = qs.docs.map(function(d){ return d.data(); }).filter(function(x){ return x && !x.deleted; });
         updatePending(qs);
         ready.sup = true; emit();
       });
       var u4 = ADJ.onSnapshot({ includeMetadataChanges: true }, function(qs){
-        state.adj = qs.docs.map(function(d){ return d.data(); });
+        state.adj = qs.docs.map(function(d){ return d.data(); }).filter(function(x){ return x && !x.deleted; });
         ready.adj = true; emit();
       });
       return function(){ u1(); u2(); u3(); u4(); };
@@ -220,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.1";
+var APP_VERSION = "3.3";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -576,6 +580,11 @@ function App(){
         if(window._fbSaveConfig) window._fbSaveConfig({stockConverted:true});
       }
 
+      // Lista permanente de IDs excluidos - registros com esses IDs sao sempre ignorados,
+      // mesmo que reaparecam (ressuscitados por cache de outro celular).
+      var deletedIds = cfg.deletedIds || [];
+      function notDeleted(x){ return x && deletedIds.indexOf(String(x.id))===-1; }
+
       var combined={
         operators: cfg.operators||INIT.operators,
         machines: cfg.machines||INIT.machines,
@@ -583,10 +592,12 @@ function App(){
         avgCostPerLiter: cfg.avgCostPerLiter||0,
         users: cfg.users||INIT.users,
         lastBackupDate: cfg.lastBackupDate||"",
+        deletedIds: deletedIds,
         // registros sem farmId (migrados do sistema antigo) recebem a primeira fazenda
-        fuelings: (s.fuel||[]).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); }),
-        supplies: (s.sup||[]).map(function(x){ return x.allocations ? x : Object.assign({},x,{allocations:[{farmId:firstFarmId,liters:x.liters}]}); }),
-        stockAdjustments: (s.adj||[]).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); })
+        // e registros na lista de excluidos sao filtrados
+        fuelings: (s.fuel||[]).filter(notDeleted).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); }),
+        supplies: (s.sup||[]).filter(notDeleted).map(function(x){ return x.allocations ? x : Object.assign({},x,{allocations:[{farmId:firstFarmId,liters:x.liters}]}); }),
+        stockAdjustments: (s.adj||[]).filter(notDeleted).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); })
       };
       setData(combined);
     });
@@ -612,7 +623,7 @@ function App(){
           operators:nd.operators, machines:nd.machines, farms:nd.farms,
           avgCostPerLiter:nd.avgCostPerLiter,
           users:nd.users, lastBackupDate:nd.lastBackupDate,
-          migrationDone:true
+          migrationDone:true, deletedIds:nd.deletedIds||[]
         });
       }
       return nd;
@@ -629,19 +640,33 @@ function App(){
           operators:nd.operators, machines:nd.machines, farms:nd.farms,
           avgCostPerLiter:nd.avgCostPerLiter,
           users:nd.users, lastBackupDate:nd.lastBackupDate,
-          migrationDone:true
+          migrationDone:true, deletedIds:nd.deletedIds||[]
         });
       }
       return nd;
     });
   }
   // Adiciona/remove registros individuais - cada um e um documento separado (sem sobrescrita)
+  // A exclusao marca o registro (soft delete) E registra o ID numa lista permanente de
+  // excluidos na config. Assim, mesmo que um celular antigo ressuscite o documento, o app
+  // continua ignorando aquele ID para sempre.
+  function registerDeleted(id){
+    setData(function(d){
+      var list=(d.deletedIds||[]).slice();
+      if(list.indexOf(String(id))===-1) list.push(String(id));
+      var nd=Object.assign({},d,{deletedIds:list});
+      if(window._fbSaveConfig){
+        window._fbSaveConfig({ deletedIds:list });
+      }
+      return nd;
+    });
+  }
   function addFuel(item){ if(window._fbAddFuel) window._fbAddFuel(item); }
-  function delFuel(id){ if(window._fbDelFuel) window._fbDelFuel(id); }
+  function delFuel(id){ if(window._fbDelFuel) window._fbDelFuel(id); registerDeleted(id); }
   function addSup(item){ if(window._fbAddSup) window._fbAddSup(item); }
-  function delSup(id){ if(window._fbDelSup) window._fbDelSup(id); }
+  function delSup(id){ if(window._fbDelSup) window._fbDelSup(id); registerDeleted(id); }
   function addAdj(item){ if(window._fbAddAdj) window._fbAddAdj(item); }
-  function delAdj(id){ if(window._fbDelAdj) window._fbDelAdj(id); }
+  function delAdj(id){ if(window._fbDelAdj) window._fbDelAdj(id); registerDeleted(id); }
 
   // Compatibilidade: upd ainda existe para configuracoes
   function upd(k,v){
@@ -748,7 +773,7 @@ function App(){
           </div>
         )}
         <div className="fi" key={tab}>
-          {tab==="fuel"&&<Fuel data={data} saveConfig={saveConfig} updFarm={updFarm} addFuel={addFuel} role={role} toast={showToast}/>}
+          {tab==="fuel"&&<Fuel data={data} saveConfig={saveConfig} updFarm={updFarm} addFuel={addFuel} role={role} online={online} toast={showToast}/>}
           {tab==="dash"&&<Dash data={data}/>}
           {tab==="sup"&&<Sup data={data} saveConfig={saveConfig} updFarm={updFarm} addSup={addSup} delSup={delSup} toast={showToast}/>}
           {tab==="reg"&&<Reg data={data} upd={upd} saveConfig={saveConfig} toast={showToast}/>}
@@ -823,7 +848,7 @@ function Login(props){
 
 // ── ABASTECER ────────────────────────────────────────────────────────────────
 function Fuel(props){
-  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addFuel=props.addFuel, role=props.role, toast=props.toast;
+  var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addFuel=props.addFuel, role=props.role, online=props.online, toast=props.toast;
   var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
   var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""}), f=_f[0], setF=_f[1];
   var _conf=useState(false), conf=_conf[0], setConf=_conf[1];
@@ -846,6 +871,11 @@ function Fuel(props){
   var submitting=useRef(false);
   function submit(){
     if(submitting.current||!farm) return; // evita duplo clique
+    // MODO ONLINE: exige conexao para registrar. Sem internet, avisa e nao salva.
+    if(!online){
+      toast("Sem conexao. Aguarde o sinal voltar e tente novamente.","error");
+      return;
+    }
     submitting.current=true;
     var op=null;
     for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===Number(f.op)){op=data.operators[i];break;}}
@@ -906,6 +936,13 @@ function Fuel(props){
 
   return (
     <div>
+      {!online&&<div style={{background:"#fee2e2",border:"2px solid #f87171",borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:22}}>📶</span>
+        <div>
+          <div style={{fontWeight:800,color:"#b91c1c",fontFamily:"'Barlow Condensed'",fontSize:16}}>SEM CONEXAO COM A INTERNET</div>
+          <div style={{fontSize:13,color:"#b91c1c"}}>Aguarde o sinal voltar para registrar o abastecimento.</div>
+        </div>
+      </div>}
       {farm&&farmLow(farm)&&<div className="alrt" style={{marginBottom:16}}>ESTOQUE CRITICO em {farm.name}: {fmtN(farm.tankStock)} L. Solicite reabastecimento!</div>}
       <div className="sec" style={{display:"flex",alignItems:"center",gap:8}}><Logo size={28} white={false}/> Registrar Abastecimento</div>
       <div className="card" style={{maxWidth:500}}>
@@ -956,7 +993,7 @@ function Fuel(props){
             <input type="number" placeholder="Ex: 45" value={f.lts} onChange={function(e){sf("lts",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
             {farm&&f.lts&&Number(f.lts)>farm.tankStock&&<div style={{color:RED,fontSize:12,marginTop:4}}>Quantidade maior que o estoque de {farm.name} ({fmtN(farm.tankStock)} L)</div>}
           </div>
-          <Btn full={true} onClick={function(){setConf(true);}} disabled={!ok} style={{padding:"15px",fontSize:17,marginTop:4}}>REGISTRAR ABASTECIMENTO</Btn>
+          <Btn full={true} onClick={function(){setConf(true);}} disabled={!ok||!online} style={{padding:"15px",fontSize:17,marginTop:4}}>{online?"REGISTRAR ABASTECIMENTO":"SEM CONEXAO"}</Btn>
         </div>
       </div>
       {conf&&farm&&(
