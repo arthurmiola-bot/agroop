@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.3";
+var APP_VERSION = "3.4";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -276,6 +276,27 @@ function farmWithStock(data,farm){
 function farmTotalStock(data){
   if(!data.farms) return 0;
   return data.farms.reduce(function(s,f){return s+computeFarmStock(data,f.id);},0);
+}
+// CUSTO MEDIO CALCULADO: media ponderada do preco de todas as entradas existentes.
+// Como e calculado das entradas, ao excluir/editar uma entrada o custo recalcula sozinho.
+// Ajustes com custo informado (inicial/correcao/adicao) tambem entram na conta.
+function computeAvgCost(data){
+  var totalValue=0, totalLiters=0;
+  (data.supplies||[]).forEach(function(s){
+    var liters=Number(s.liters)||0;
+    var price=Number(s.pricePerLiter)||0;
+    if(liters>0&&price>0){ totalValue+=liters*price; totalLiters+=liters; }
+  });
+  // ajustes que informaram um custo/litro (ex: estoque inicial com preco) entram na media
+  (data.stockAdjustments||[]).forEach(function(a){
+    var liters=Number(a.liters)||0;
+    var cost=Number(a.cost)||0;
+    if((a.type==="inicial"||a.type==="adicao"||a.type==="correcao")&&liters>0&&cost>0){
+      totalValue+=liters*cost; totalLiters+=liters;
+    }
+  });
+  if(totalLiters<=0) return 0;
+  return Math.round((totalValue/totalLiters)*10000)/10000;
 }
 function farmLow(farm){
   return farm && farm.tankStock<=(farm.lowStockThreshold||1000);
@@ -599,6 +620,8 @@ function App(){
         supplies: (s.sup||[]).filter(notDeleted).map(function(x){ return x.allocations ? x : Object.assign({},x,{allocations:[{farmId:firstFarmId,liters:x.liters}]}); }),
         stockAdjustments: (s.adj||[]).filter(notDeleted).map(function(x){ return x.farmId ? x : Object.assign({},x,{farmId:firstFarmId}); })
       };
+      // Custo medio SEMPRE calculado a partir das entradas atuais (recalcula ao excluir/editar).
+      combined.avgCostPerLiter = computeAvgCost(combined);
       setData(combined);
     });
     return unsub;
@@ -1134,25 +1157,18 @@ function Sup(props){
     if(submitting.current) return;
     submitting.current=true;
     var nP=Number(f.pricePerLiter);
-    var ca=data.avgCostPerLiter||0;
-    var curTotal=farmTotalStock(data);
-    // custo medio ponderado GERAL (soma de todas as fazendas)
-    var nA=curTotal+totalLiters>0?((curTotal*ca)+(totalLiters*nP))/(curTotal+totalLiters):nP;
 
     var allocations=activeFarms.filter(function(fa){return Number(alloc[fa.id])>0;}).map(function(fa){
       return {farmId:fa.id, liters:Number(alloc[fa.id])};
     });
 
     // adiciona a entrada como documento individual, com a divisao por fazenda
-    // O estoque de cada fazenda e recalculado automaticamente - nao precisa atualizar manualmente
+    // O estoque e o custo medio sao recalculados automaticamente das entradas - nao precisa salvar manualmente
     addSup(Object.assign({id:Date.now(),liters:totalLiters,pricePerLiter:nP,allocations:allocations},f));
-
-    // custo medio e geral, salva na config
-    saveConfig({avgCostPerLiter:Math.round(nA*10000)/10000});
 
     setF({supplier:"",date:"",paymentTerm:"",pricePerLiter:"",nf:""});
     setAlloc(initAlloc);
-    toast("Entrada: "+totalLiters+"L - Custo medio: "+fmtR(nA)+"/L");
+    toast("Entrada registrada: "+totalLiters+"L a "+fmtR(nP)+"/L");
     setTimeout(function(){submitting.current=false;},1500);
   }
 
@@ -1204,11 +1220,13 @@ function Sup(props){
   function sea(farmId,v){ setEditAlloc(function(p){var n=Object.assign({},p); n[farmId]=v; return n;}); }
 
 
-  // Previa do novo custo medio ao digitar uma nova entrada
-  var curTotal2=farmTotalStock(data);
+  // Previa do novo custo medio ao digitar uma nova entrada (simula adicionar a entrada e recalcular)
   var previewAvg=0;
-  if(totalLiters>0&&f.pricePerLiter&&curTotal2+totalLiters>0){
-    previewAvg=((curTotal2*(data.avgCostPerLiter||0))+(totalLiters*Number(f.pricePerLiter)))/(curTotal2+totalLiters);
+  if(totalLiters>0&&f.pricePerLiter){
+    var simulated=Object.assign({},data,{
+      supplies:(data.supplies||[]).concat([{liters:totalLiters,pricePerLiter:Number(f.pricePerLiter)}])
+    });
+    previewAvg=computeAvgCost(simulated);
   }
 
   // Price chart data
