@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.6";
+var APP_VERSION = "3.7";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -835,9 +835,8 @@ function Login(props){
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,background:GN}}>
       <style>{CSS}</style>
       <div style={{textAlign:"center",marginBottom:28}}>
-        <Logo size={120} white={true}/>
+        <div style={{display:"flex",justifyContent:"center"}}><Logo size={138} white={true}/></div>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:30,color:"#e6b800",letterSpacing:2,marginTop:8}}>POSTO DIESEL</div>
-        <div style={{color:GN3,fontSize:12,textTransform:"uppercase",letterSpacing:2,marginTop:3}}>Agropecuaria Corrego das Flores</div>
       </div>
       <div className="card" style={{width:"100%",maxWidth:300,textAlign:"center"}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontSize:15,color:MUT,letterSpacing:1,textTransform:"uppercase",marginBottom:16}}>Digite seu PIN</div>
