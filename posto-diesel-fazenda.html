@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.5";
+var APP_VERSION = "3.6";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -720,25 +720,29 @@ function App(){
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <style>{CSS}</style>
 
-      <header style={{background:GN,borderBottom:"3px solid #e6b800",padding:"10px 18px",
-        display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 2px 8px rgba(0,0,0,0.2)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <Logo size={56} white={true}/>
-          <div>
-            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:"#e6b800",letterSpacing:1}}>POSTO DIESEL</div>
-            <div style={{fontSize:10,color:GN3,letterSpacing:1.5,textTransform:"uppercase"}}>Agropecuaria Corrego das Flores</div>
+      <header style={{background:GN,borderBottom:"3px solid #e6b800",padding:"9px 16px 8px",
+        position:"sticky",top:0,zIndex:50,boxShadow:"0 2px 8px rgba(0,0,0,0.18)"}}>
+        {/* Linha 1: marca + sair */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:11,minWidth:0}}>
+            <Logo size={44} white={true}/>
+            <div style={{minWidth:0}}>
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:21,color:"#e6b800",letterSpacing:1.5,lineHeight:1,whiteSpace:"nowrap"}}>POSTO DIESEL</div>
+              <div style={{fontSize:9.5,color:GN3,letterSpacing:2,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:3,opacity:0.9}}>Agropecuaria Corrego das Flores</div>
+            </div>
           </div>
+          <Btn onClick={function(){setRole(null);}} color={GN2} style={{padding:"7px 17px",fontSize:13,flexShrink:0}}>Sair</Btn>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:5,background:!online?"rgba(220,38,38,0.35)":syncing?"rgba(234,179,8,0.35)":"rgba(255,255,255,0.12)",borderRadius:20,padding:"4px 10px"}}>
-            <div style={{width:9,height:9,borderRadius:"50%",background:!online?"#f87171":syncing?"#fde047":"#4ade80"}} className={!online||syncing?"pu":""}/>
-            <span style={{fontSize:11,color:"#fff",fontWeight:600}}>{!online?"Offline":syncing?"Sincronizando":"Salvo na nuvem"}</span>
+        {/* Linha 2: status + perfil */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,0.14)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:!online?"#f87171":syncing?"#fde047":"#4ade80",flexShrink:0}} className={!online||syncing?"pu":""}/>
+            <span style={{fontSize:11.5,color:"rgba(255,255,255,0.88)",fontWeight:500,whiteSpace:"nowrap"}}>{!online?"Sem conexao":syncing?"Sincronizando...":"Salvo na nuvem"}</span>
           </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:11,color:GN3}}>Logado como</div>
-            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:"#e6b800"}}>{role}</div>
+          <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.1)",borderRadius:20,padding:"3px 12px"}}>
+            <span style={{fontSize:9,color:GN3,textTransform:"uppercase",letterSpacing:1.5}}>Perfil</span>
+            <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:13.5,color:"#e6b800",letterSpacing:0.5,whiteSpace:"nowrap"}}>{role}</span>
           </div>
-          <Btn onClick={function(){setRole(null);}} color={GN2} style={{padding:"6px 13px",fontSize:13}}>Sair</Btn>
         </div>
       </header>
 
