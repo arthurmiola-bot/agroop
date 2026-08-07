@@ -375,8 +375,21 @@
   /* Mini-tabela produto → dose (alinha cada dose na frente do seu produto) */
   .prod-dose-mini { border-collapse: collapse; width: 100%; }
   .prod-dose-mini td { border: none !important; padding: 2px 0 !important; font-size: 13px; vertical-align: top; }
-  .prod-dose-mini .pd-nome { padding-right: 14px !important; }
+  .prod-dose-mini .pd-nome { padding-right: 14px !important; word-break: break-word; }
   .prod-dose-mini .pd-dose { text-align: right; white-space: nowrap; font-family: 'DM Mono', monospace; color: var(--verde); font-weight: 500; }
+  /* Painéis expansíveis do dashboard */
+  .dash-exp { background:#fff; border:1px solid var(--creme-escuro); border-radius:var(--radius); padding:16px 18px; margin-bottom:20px; box-shadow:var(--sombra); }
+  .dash-exp-tit { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; margin-bottom:12px; }
+  .dash-exp-item { padding:12px 0; border-bottom:1px solid #f0f3ee; }
+  .dash-exp-item:last-child { border-bottom:none; }
+  .dash-exp-topo { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .dash-exp-titulo { font-weight:700; font-size:15px; color:#1f2a24; }
+  .dash-exp-sub { font-size:12px; color:var(--cinza); margin-top:2px; }
+  .dash-exp-datas { display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; font-family:'DM Mono',monospace; font-size:12px; color:#5b6b60; }
+  .de-lbl { color:#9aa89f; text-transform:uppercase; font-size:10px; letter-spacing:.03em; display:block; }
+  .dash-exp-vazio { color:var(--cinza); font-size:13px; padding:8px 0; }
+  .te-corpo .prod-dose-mini { table-layout: fixed; }
+  .te-corpo .prod-dose-mini .pd-dose { width: 42%; }
   .prod-dose-mini tr:hover td { background: transparent !important; }
   th.th-ord:hover { background: rgba(255,255,255,0.08); }
   .th-seta { font-size: 10px; opacity: .9; }
@@ -410,6 +423,14 @@
   .talhao-evento-tab th { text-align:left; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:#9aa89f; padding:4px 8px 6px; border-bottom:1px solid #eef1ec; white-space:nowrap; }
   .talhao-evento-tab td { padding:8px; border-bottom:1px solid #f4f6f3; vertical-align:top; font-size:13px; }
   .talhao-evento-tab tr:last-child td { border-bottom:none; }
+  /* Item de evento empilhado (cabe na largura do celular, sem rolagem lateral) */
+  .te-item { padding:10px 0; border-bottom:1px solid #f4f6f3; }
+  .te-item:last-child { border-bottom:none; }
+  .te-topo { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+  .te-datas { display:flex; gap:14px; flex-wrap:wrap; font-family:'DM Mono',monospace; font-size:12px; color:#5b6b60; }
+  .te-lbl { color:#9aa89f; text-transform:uppercase; font-size:10px; letter-spacing:.03em; }
+  .te-corpo { }
+  .te-desc { font-size:11px; color:var(--cinza); margin-top:4px; }
   .talhao-evento { display:flex; align-items:center; gap:12px; padding:7px 0; border-bottom:1px solid #f6f8f4; }
   .talhao-evento:last-child { border-bottom:none; }
   .te-data { font-family:'DM Mono',monospace; font-size:12px; color:#9aa89f; white-space:nowrap; min-width:64px; }
@@ -1434,9 +1455,15 @@ function renderDashboard() {
   const hojeStr = hoje();
   // Junta todas as operações do caderno num formato comum
   const ops = [];
-  plantios.forEach(p => { const nomes = cultivaresDoPlantio(p).map(c=>c.cultivar).filter(Boolean).join(', '); ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, data_conclusao:p.data_conclusao||'', fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${nomes?` (${nomes})`:''}` }); });
-  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, data_conclusao:a.data_conclusao||'', fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a), descricao: a.categoria||'', produtos: produtosDaAplicacao(a) }));
-  colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, data_conclusao:c.data_conclusao||'', fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}` }));
+  // Converte iniciado_em (Timestamp ou número) para data ISO
+  const dataInicio = (v) => {
+    if (!v) return '';
+    try { const d = v.toDate ? v.toDate() : new Date(v); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+    catch(e) { return ''; }
+  };
+  plantios.forEach(p => { const cs = cultivaresDoPlantio(p); const nomes = cs.map(c=>c.cultivar).filter(Boolean).join(', '); ops.push({ tipo:'Plantio', icone:'🌱', data:p.data, iniciado:dataInicio(p.iniciado_em), data_conclusao:p.data_conclusao||'', fazenda:p.fazenda, talhao:p.talhao, status:p.status, desc:`${p.cultura||'Plantio'}${nomes?` (${nomes})`:''}`, descricao:p.cultura||'', produtos: cs.map(c=>({produto:`${c.cultivar||p.cultura||'—'}`, dose:c.ciclo_dias?`ciclo ${fmt(c.ciclo_dias)}d`:'', unidade:''})) }); });
+  adubacoes.forEach(a => ops.push({ tipo: tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólidos', icone: tipoDaAdubacao(a)==='pulverizacao'?'💧':'🪨', data:a.data, iniciado:dataInicio(a.iniciado_em), data_conclusao:a.data_conclusao||'', fazenda:a.fazenda, talhao:a.talhao, status:a.status, desc: resumoProdutos(a), descricao: a.categoria||(tipoDaAdubacao(a)==='pulverizacao'?'Pulverização':'Sólido'), produtos: produtosDaAplicacao(a) }));
+  colheitas.forEach(c => ops.push({ tipo:'Colheita', icone:'🌾', data:c.data, iniciado:dataInicio(c.iniciado_em), data_conclusao:c.data_conclusao||'', fazenda:c.fazenda, talhao:c.talhao, status:c.status, desc:`${c.cultura||'Colheita'}`, descricao:c.cultura||'Colheita', produtos: c.produtividade?[{produto:c.cultura||'Colheita', dose:`${fmt(c.produtividade)} ${c.unidade_produtividade||'sc/ha'}`, unidade:''}]:[] }));
 
   // Contadores por status
   const nPlanejadas = ops.filter(o => o.status==='planejado' || o.status==='enviado_operador').length;
@@ -1466,24 +1493,61 @@ function renderDashboard() {
     .sort((a,b)=>(a.data||'').localeCompare(b.data||''))
     .slice(0,5);
 
+  // Listas para os cards expansíveis
+  const emExecucao = ops.filter(o => o.status==='execucao');
+  const executadas = ops.filter(o => o.status==='concluido').sort((a,b)=>(b.data_conclusao||'').localeCompare(a.data_conclusao||''));
+  const ultimas6 = executadas.slice(0,6);
+
+  // Monta um painel de detalhes (lista de operações com fazenda, talhão, tipo e as 3 datas + produtos)
+  const painelOps = (lista, corData) => lista.length===0
+    ? `<div class="dash-exp-vazio">Nenhuma operação.</div>`
+    : lista.map(o => `
+      <div class="dash-exp-item">
+        <div class="dash-exp-topo">
+          <div class="dash-exp-titulo">${o.icone} ${o.fazenda||'—'} · ${o.talhao||'—'}</div>
+          ${badgeStatusCampo(o.status)}
+        </div>
+        <div class="dash-exp-sub">${o.tipo}${o.descricao?` · ${o.descricao}`:''}</div>
+        <div class="dash-exp-datas">
+          <span><span class="de-lbl">Planejada</span> ${fmtDataBR(o.data)}</span>
+          <span><span class="de-lbl">Início</span> ${o.iniciado?fmtDataBR(o.iniciado):'—'}</span>
+          <span><span class="de-lbl">Conclusão</span> ${o.data_conclusao?fmtDataBR(o.data_conclusao):'—'}</span>
+        </div>
+        ${o.produtos&&o.produtos.length?`<table class="prod-dose-mini" style="margin-top:6px">${o.produtos.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?(typeof p.dose==='number'?fmt(p.dose)+' '+(p.unidade||''):p.dose):''}</td></tr>`).join('')}</table>`:''}
+      </div>`).join('');
+
   document.getElementById('main-content').innerHTML = `
     <div class="cards-grid">
       <div class="card-resumo info">
         <div class="card-resumo-valor">${nPlanejadas}</div>
         <div class="card-resumo-label">📋 Operações Planejadas</div>
       </div>
-      <div class="card-resumo ${nExecucao>0?'alerta':''}">
+      <div class="card-resumo ${nExecucao>0?'alerta':''}" onclick="toggleDashCard('exec')" style="cursor:pointer">
         <div class="card-resumo-valor">${nExecucao}</div>
-        <div class="card-resumo-label">🚧 Em Execução</div>
+        <div class="card-resumo-label">🚧 Em Execução ${nExecucao>0?'<span id="seta-exec" style="font-size:11px">▾</span>':''}</div>
       </div>
-      <div class="card-resumo">
+      <div class="card-resumo ${nConcluidas>0?'':''}" onclick="toggleDashCard('exec-done')" style="cursor:pointer">
         <div class="card-resumo-valor">${nConcluidas}</div>
-        <div class="card-resumo-label">✅ Executadas</div>
+        <div class="card-resumo-label">✅ Executadas ${nConcluidas>0?'<span id="seta-exec-done" style="font-size:11px">▾</span>':''}</div>
       </div>
-      <div class="card-resumo ${atrasadas.length>0?'perigo':''}">
+      <div class="card-resumo ${atrasadas.length>0?'perigo':''}" onclick="toggleDashCard('atraso')" style="cursor:pointer">
         <div class="card-resumo-valor">${atrasadas.length}</div>
-        <div class="card-resumo-label">⚠️ Concluídas com atraso</div>
+        <div class="card-resumo-label">⚠️ Concluídas com atraso ${atrasadas.length>0?'<span id="seta-atraso" style="font-size:11px">▾</span>':''}</div>
       </div>
+    </div>
+
+    <div id="dashexp-exec" class="dash-exp" style="display:none">
+      <div class="dash-exp-tit">🚧 Operações Em Execução (${emExecucao.length})</div>
+      ${painelOps(emExecucao)}
+    </div>
+    <div id="dashexp-exec-done" class="dash-exp" style="display:none">
+      <div class="dash-exp-tit">✅ Operações Executadas (${executadas.length})</div>
+      ${painelOps(executadas)}
+    </div>
+    <div id="dashexp-atraso" class="dash-exp" style="display:none">
+      <div class="dash-exp-tit">⚠️ Concluídas com Atraso (${atrasadas.length})</div>
+      ${resumoAtraso?`<div style="font-size:13px;color:var(--cinza);margin-bottom:10px">${resumoAtraso}</div>`:''}
+      ${painelOps(atrasadas)}
     </div>
 
     ${atrasadas.length > 0 ? `
@@ -1509,6 +1573,22 @@ function renderDashboard() {
       <span style="font-size:20px">✅</span>
       <div style="color:#2f7a55;font-weight:600">Nenhuma operação concluída com atraso!</div>
     </div>`}
+
+    <div class="tabela-wrap" style="margin-bottom:24px">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">✅ Últimas 6 Operações Executadas</div>
+      <table>
+        <thead><tr><th>Data Execução</th><th>Operação</th><th>Fazenda</th><th>Talhão</th><th>Descrição</th></tr></thead>
+        <tbody>
+          ${ultimas6.length>0 ? ultimas6.map(o => `<tr>
+            <td style="font-weight:600">${o.data_conclusao?fmtDataBR(o.data_conclusao):'—'}</td>
+            <td>${o.icone} ${o.tipo}</td>
+            <td>${o.fazenda||'—'}</td>
+            <td>${o.talhao||'—'}</td>
+            <td>${o.descricao||o.desc||'—'}</td>
+          </tr>`).join('') : '<tr><td colspan="5" class="tabela-vazia">Nenhuma operação executada ainda</td></tr>'}
+        </tbody>
+      </table>
+    </div>
 
     <div class="tabela-wrap">
       <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">📅 Próximas 5 Operações Planejadas <span style="font-weight:400;font-size:12px;color:var(--cinza)">(clique para ver produtos)</span></div>
@@ -1538,6 +1618,22 @@ function renderDashboard() {
       </table>
     </div>`;
 }
+
+window.toggleDashCard = function(qual) {
+  const el = document.getElementById('dashexp-'+qual);
+  const seta = document.getElementById('seta-'+qual);
+  if (!el) return;
+  // fecha os outros
+  ['exec','exec-done','atraso'].forEach(q => {
+    if (q !== qual) {
+      const outro = document.getElementById('dashexp-'+q); if (outro) outro.style.display='none';
+      const s = document.getElementById('seta-'+q); if (s) s.textContent='▾';
+    }
+  });
+  const abrir = el.style.display === 'none';
+  el.style.display = abrir ? 'block' : 'none';
+  if (seta) seta.textContent = abrir ? '▴' : '▾';
+};
 
 window.toggleDashOp = function(idx) {
   const det = document.getElementById('dashdet-'+idx);
@@ -4292,21 +4388,23 @@ function blocoEventoTalhao(titulo, eventos) {
   if (!eventos.length) return '';
   const linhas = eventos.map(e => {
     const prodTab = e.produtos && e.produtos.length
-      ? `<table class="prod-dose-mini">${e.produtos.map(p=>`<tr><td class="pd-nome">${p.nome}</td><td class="pd-dose">${p.dose||''}</td></tr>`).join('')}</table>${e.descricao?`<div style="font-size:11px;color:var(--cinza);margin-top:3px">${e.descricao}</div>`:''}`
-      : '—';
-    return `<tr>
-      <td class="te-data">${fmtDataBR(e.dataPlan)}</td>
-      <td class="te-data">${e.dataExec?fmtDataBR(e.dataExec):'—'}</td>
-      <td>${prodTab}</td>
-      <td style="text-align:right">${badgeStatusCampo(e.status)}</td>
-    </tr>`;
+      ? `<table class="prod-dose-mini">${e.produtos.map(p=>`<tr><td class="pd-nome">${p.nome}</td><td class="pd-dose">${p.dose||''}</td></tr>`).join('')}</table>`
+      : '';
+    return `<div class="te-item">
+      <div class="te-topo">
+        <div class="te-datas">
+          <span><span class="te-lbl">Plan.</span> ${fmtDataBR(e.dataPlan)}</span>
+          ${e.dataExec?`<span><span class="te-lbl">Exec.</span> ${fmtDataBR(e.dataExec)}</span>`:''}
+        </div>
+        ${badgeStatusCampo(e.status)}
+      </div>
+      <div class="te-corpo">${prodTab||'—'}</div>
+      ${e.descricao?`<div class="te-desc">${e.descricao}</div>`:''}
+    </div>`;
   }).join('');
   return `<div class="talhao-secao">
     <div class="talhao-secao-titulo">${titulo}</div>
-    <table class="talhao-evento-tab">
-      <thead><tr><th>Data Plan.</th><th>Data Exec.</th><th>Produtos (dose)</th><th style="text-align:right">Status</th></tr></thead>
-      <tbody>${linhas}</tbody>
-    </table>
+    ${linhas}
   </div>`;
 }
 
