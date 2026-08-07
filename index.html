@@ -4752,14 +4752,22 @@ const MODELOS_CADERNO = {
     })
   },
   solido: { colecao: 'insumos_campo_adubacao', lista: () => adubacoes.filter(a => tipoDaAdubacao(a)==='solido'),
-    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Corretivo/Adubação)','Produto','Dose','Unidade','Observação'],
-    linhaExemplo: ['2026-08-20','Rodeio','Rod 1','Soja 26/27','Corretivo','Calcário','2','Ton','Exemplo'],
-    doExcel: (row) => ({
-      data: normalizarDataExcel(row['Data (AAAA-MM-DD)']||row['Data']||''), fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
-      safra: row['Safra']||'', categoria: row['Categoria (Corretivo/Adubação)']||row['Categoria']||'Corretivo',
-      produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
-      obs: row['Observação']||'', tipo_aplicacao: 'solido', vazao: '', status: 'planejado', criado_em: Timestamp.now()
-    }),
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Corretivo/Adubação)','Produto','Dose','Unidade','Regra de Data (fixa / DAP / DAA)','Dias','Observação'],
+    linhaExemplo: ['2026-08-20','Rodeio','Rod 1','Soja 26/27','Corretivo','Calcário','2','Ton','fixa','','Exemplo'],
+    doExcel: (row) => {
+      const regra = normalizar((row['Regra de Data (fixa / DAP / DAA)']||row['Regra de Data']||'fixa').toString());
+      const dias = parseFloat(row['Dias'])||0;
+      let modo_data = 'fixa';
+      if (regra.includes('dap') || regra.includes('plantio')) modo_data = 'plantio';
+      else if (regra.includes('daa') || regra.includes('aplica')) modo_data = 'aplicacao';
+      return {
+        data: normalizarDataExcel(row['Data (AAAA-MM-DD)']||row['Data']||''), fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
+        safra: row['Safra']||'', categoria: row['Categoria (Corretivo/Adubação)']||row['Categoria']||'Corretivo',
+        produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
+        modo_data, dias_apos: dias,
+        obs: row['Observação']||'', tipo_aplicacao: 'solido', vazao: '', status: 'planejado', criado_em: Timestamp.now()
+      };
+    },
     obrigatorios: ['fazenda','talhao','produto'],
     paraExportar: (a) => ({
       'Data': a.data||'', 'Fazenda': a.fazenda||'', 'Talhão': a.talhao||'', 'Safra': a.safra||'', 'Categoria': a.categoria||'',
@@ -4769,15 +4777,23 @@ const MODELOS_CADERNO = {
     })
   },
   pulverizacao: { colecao: 'insumos_campo_adubacao', lista: () => adubacoes.filter(a => tipoDaAdubacao(a)==='pulverizacao'),
-    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Herbicida/Fungicida/Inseticida)','Produto','Dose','Unidade','Vazão','Observação'],
-    linhaExemplo: ['2026-10-01','Rodeio','Rod 1','Soja 26/27','Herbicida','Glifosato','3','L','100 L/ha','Exemplo'],
-    doExcel: (row) => ({
-      data: normalizarDataExcel(row['Data (AAAA-MM-DD)']||row['Data']||''), fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
-      safra: row['Safra']||'', categoria: row['Categoria (Herbicida/Fungicida/Inseticida)']||row['Categoria']||'Herbicida',
-      produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
-      vazao: (row['Vazão']||row['Vazao']||'').toString().trim(),
-      obs: row['Observação']||'', tipo_aplicacao: 'pulverizacao', status: 'planejado', criado_em: Timestamp.now()
-    }),
+    colunas: ['Data (AAAA-MM-DD)','Fazenda','Talhão','Safra','Categoria (Herbicida/Fungicida/Inseticida)','Produto','Dose','Unidade','Vazão','Regra de Data (fixa / DAP / DAA)','Dias','Observação'],
+    linhaExemplo: ['2026-10-01','Rodeio','Rod 1','Soja 26/27','Herbicida','Glifosato','3','L','100 L/ha','fixa','','Exemplo'],
+    doExcel: (row) => {
+      const regra = normalizar((row['Regra de Data (fixa / DAP / DAA)']||row['Regra de Data']||'fixa').toString());
+      const dias = parseFloat(row['Dias'])||0;
+      let modo_data = 'fixa';
+      if (regra.includes('dap') || regra.includes('plantio')) modo_data = 'plantio';
+      else if (regra.includes('daa') || regra.includes('aplica')) modo_data = 'aplicacao';
+      return {
+        data: normalizarDataExcel(row['Data (AAAA-MM-DD)']||row['Data']||''), fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
+        safra: row['Safra']||'', categoria: row['Categoria (Herbicida/Fungicida/Inseticida)']||row['Categoria']||'Herbicida',
+        produto: row['Produto']||'', dose: parseFloat(row['Dose'])||0, unidade: row['Unidade']||'',
+        vazao: (row['Vazão']||row['Vazao']||'').toString().trim(),
+        modo_data, dias_apos: dias,
+        obs: row['Observação']||'', tipo_aplicacao: 'pulverizacao', status: 'planejado', criado_em: Timestamp.now()
+      };
+    },
     obrigatorios: ['fazenda','talhao','produto'],
     paraExportar: (a) => ({
       'Data': a.data||'', 'Fazenda': a.fazenda||'', 'Talhão': a.talhao||'', 'Safra': a.safra||'', 'Categoria': a.categoria||'',
@@ -4830,25 +4846,36 @@ window.importarPlanilha = function(input, tipo) {
       const novosLocais = [];
 
       if (tipo === 'solido' || tipo === 'pulverizacao') {
-        // Agrupa linhas por fazenda+talhão+data+vazão+safra -> uma aplicação com vários produtos.
+        // Agrupa linhas por fazenda+talhão+data+vazão+safra+regra -> uma aplicação com vários produtos.
         // A categoria fica em cada produto (uma aplicação pode ter herbicida, inseticida, óleo...).
         const grupos = {};
         linhas.forEach(row => {
           const reg = m.doExcel(row);
           if (!reg.fazenda || !reg.talhao || !reg.produto) { ignorados++; return; }
-          const k = [normalizar(reg.fazenda), normalizar(reg.talhao), reg.data||'', normalizar(reg.vazao||''), normalizar(reg.safra||'')].join('||');
+          const md = reg.modo_data||'fixa';
+          const k = [normalizar(reg.fazenda), normalizar(reg.talhao), reg.data||'', normalizar(reg.vazao||''), normalizar(reg.safra||''), md, reg.dias_apos||0].join('||');
           if (!grupos[k]) {
             grupos[k] = {
               data: reg.data, fazenda: reg.fazenda, talhao: reg.talhao, safra: reg.safra,
               vazao: reg.vazao||'', tipo_aplicacao: reg.tipo_aplicacao,
               obs: reg.obs||'', categoria: reg.categoria||'',
               produtos: [], status: 'planejado', criado_em: Timestamp.now(),
-              modo_data: 'fixa'
+              modo_data: md, dias_apos: reg.dias_apos||0
             };
           }
           grupos[k].produtos.push({ produto: reg.produto, dose: reg.dose||0, unidade: reg.unidade||'', categoria: reg.categoria||'' });
         });
         Object.values(grupos).forEach(g => {
+          // Datas relativas: calcula a data a partir do plantio (DAP) ou da 1ª aplicação (DAA) do mesmo talhão
+          if (g.modo_data === 'plantio') {
+            const pRef = plantios.find(p => normalizar(p.fazenda)===normalizar(g.fazenda) && normalizar(p.talhao)===normalizar(g.talhao));
+            if (pRef && pRef.data) { g.data = somarDias(dataBasePlantio(pRef), g.dias_apos); g.ref_plantio_id = pRef.id; }
+          } else if (g.modo_data === 'aplicacao') {
+            const aRef = adubacoes
+              .filter(a => normalizar(a.fazenda)===normalizar(g.fazenda) && normalizar(a.talhao)===normalizar(g.talhao) && a.data)
+              .sort((x,y)=>(x.data||'').localeCompare(y.data||''))[0];
+            if (aRef) { g.data = somarDias(aRef.data, g.dias_apos); g.ref_aplicacao_id = aRef.id; }
+          }
           // mantém produto/dose/unidade/categoria da 1ª linha para compatibilidade
           g.produto = g.produtos[0].produto;
           g.dose = g.produtos[0].dose;
