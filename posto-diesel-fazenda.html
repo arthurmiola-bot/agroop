@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.4";
+var APP_VERSION = "3.5";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -1042,10 +1042,13 @@ function Fuel(props){
 // ── PAINEL ───────────────────────────────────────────────────────────────────
 function Dash(props){
   var data=props.data;
+  var _period=useState(0), period=_period[0], setPeriod=_period[1]; // 0 = Tudo; senao numero de dias
   var totS=data.supplies.reduce(function(s,x){return s+x.liters;},0);
   var l30=data.fuelings.filter(function(x){if(!x.date)return false;return (Date.now()-new Date(String(x.date).replace(" ","T")).getTime())<30*86400000;}).reduce(function(s,x){return s+x.liters;},0);
+  var _nowP=Date.now();
+  function inPeriod(x){ if(!period) return true; if(!x.date) return false; return (_nowP-new Date(String(x.date).replace(" ","T")).getTime())<period*86400000; }
   var mc=data.machines.map(function(m){
-    var mf=data.fuelings.filter(function(x){return x.machineId===m.id;});
+    var mf=data.fuelings.filter(function(x){return x.machineId===m.id && inPeriod(x);});
     var tot=mf.reduce(function(s,x){return s+x.liters;},0);
     var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
     var df=sr.length>=2?sr[0].meter-sr[sr.length-1].meter:0;
@@ -1089,10 +1092,35 @@ function Dash(props){
           })}
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18}}>
+      <div style={{display:"flex",flexDirection:"column",gap:18}}>
         <div className="card">
-          <div className="sec" style={{fontSize:16}}>Consumo por Equipamento</div>
-          {mc.length===0?<div style={{color:MUT}}>Nenhum dado ainda.</div>:(
+          <div className="sec" style={{fontSize:16}}>Ultimos Abastecimentos</div>
+          {rec.length===0?<div style={{color:MUT}}>Nenhum registro ainda.</div>:rec.map(function(x){
+            var op=null,mc2=null,fa2=getFarm(data,x.farmId);
+            for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
+            for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc2=data.machines[i];break;}}
+            return (
+              <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"}{mc2&&getMachineDesc(mc2)?" "+getMachineDesc(mc2):""} - {op?op.name:"-"}</div>
+                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
+                </div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
+            <div className="sec" style={{fontSize:16,marginBottom:0}}>Consumo por Equipamento</div>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+            {[[7,"7 dias"],[15,"15 dias"],[30,"30 dias"],[60,"60 dias"],[0,"Tudo"]].map(function(p){
+              var active=period===p[0];
+              return <button key={p[0]} onClick={function(){setPeriod(p[0]);}} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid "+(active?GN:BDR),background:active?GN:"#fff",color:active?"#fff":TXT,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed'"}}>{p[1]}</button>;
+            })}
+          </div>
+          {mc.length===0?<div style={{color:MUT}}>Nenhum abastecimento neste periodo.</div>:(
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {mc.map(function(m){
                 return (
@@ -1114,23 +1142,6 @@ function Dash(props){
               })}
             </div>
           )}
-        </div>
-        <div className="card">
-          <div className="sec" style={{fontSize:16}}>Ultimos Abastecimentos</div>
-          {rec.length===0?<div style={{color:MUT}}>Nenhum registro ainda.</div>:rec.map(function(x){
-            var op=null,mc2=null,fa2=getFarm(data,x.farmId);
-            for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
-            for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){mc2=data.machines[i];break;}}
-            return (
-              <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"}{mc2&&getMachineDesc(mc2)?" "+getMachineDesc(mc2):""} - {op?op.name:"-"}</div>
-                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
-                </div>
-                <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>
@@ -1698,7 +1709,7 @@ function Rep(props){
           </div>
           <div className="fg"><div className="flbl">Maquina</div>
             <select value={fil.mc} onChange={function(e){sf("mc",e.target.value);}}>
-              <option value="">Todas</option>{data.machines.map(function(m){return <option key={m.id} value={m.id}>{m.code}</option>;})}
+              <option value="">Todas</option>{data.machines.map(function(m){return <option key={m.id} value={m.id}>{m.code}{getMachineDesc(m)?" - "+getMachineDesc(m):""}</option>;})}
             </select>
           </div>
           <div className="fg"><div className="flbl">Operador</div>
