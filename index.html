@@ -400,6 +400,7 @@
   .cal-solido { background:#faf3d8; color:#8a6d1a; }
   .cal-pulv { background:#e0edfb; color:#1e5aa8; }
   .cal-concluido { background:#d1fae5; color:#1f7a55; }
+  .cal-vencida { border:1.5px solid var(--vermelho); font-weight:700; }
   .cal-bola.cal-solido { background:#e3d49c; }
   .cal-bola.cal-pulv { background:#b4d0ec; }
   .cal-bola.cal-concluido { background:#6ee7b7; }
@@ -1522,6 +1523,11 @@ function renderDashboard() {
   const emExecucao = ops.filter(o => o.status==='execucao');
   const executadas = ops.filter(o => o.status==='concluido').sort((a,b)=>(b.data_conclusao||'').localeCompare(a.data_conclusao||''));
   const ultimas6 = executadas.slice(0,6);
+  // Pendentes vencidas: planejadas/em execução com data já passada e não concluídas
+  const pendentesVencidas = ops
+    .filter(o => o.status!=='concluido' && o.data && o.data < hojeStr)
+    .map(o => ({ ...o, diasVencida: diasEntre(o.data, hojeStr) }))
+    .sort((a,b)=> b.diasVencida - a.diasVencida);
 
   // Monta um painel de detalhes (lista de operações com fazenda, talhão, tipo e as 3 datas + produtos)
   const painelOps = (lista, corData) => lista.length===0
@@ -1559,6 +1565,10 @@ function renderDashboard() {
         <div class="card-resumo-valor">${atrasadas.length}</div>
         <div class="card-resumo-label">⚠️ Concluídas com atraso ${atrasadas.length>0?'<span id="seta-atraso" style="font-size:11px">▾</span>':''}</div>
       </div>
+      <div class="card-resumo ${pendentesVencidas.length>0?'perigo':''}" onclick="toggleDashCard('vencidas')" style="cursor:pointer">
+        <div class="card-resumo-valor">${pendentesVencidas.length}</div>
+        <div class="card-resumo-label">⏰ Pendentes vencidas ${pendentesVencidas.length>0?'<span id="seta-vencidas" style="font-size:11px">▾</span>':''}</div>
+      </div>
     </div>
 
     <div id="dashexp-exec" class="dash-exp" style="display:none">
@@ -1573,6 +1583,21 @@ function renderDashboard() {
       <div class="dash-exp-tit">⚠️ Concluídas com Atraso (${atrasadas.length})</div>
       ${resumoAtraso?`<div style="font-size:13px;color:var(--cinza);margin-bottom:10px">${resumoAtraso}</div>`:''}
       ${painelOps(atrasadas)}
+    </div>
+    <div id="dashexp-vencidas" class="dash-exp" style="display:none">
+      <div class="dash-exp-tit">⏰ Pendentes Vencidas (${pendentesVencidas.length}) <span style="font-weight:400;font-size:12px;color:var(--cinza)">— data passou e ainda não concluídas</span></div>
+      ${pendentesVencidas.length===0?'<div class="dash-exp-vazio">Nenhuma pendência vencida.</div>':pendentesVencidas.map(o=>`
+        <div class="dash-exp-item">
+          <div class="dash-exp-topo">
+            <div class="dash-exp-titulo">${o.icone} ${o.fazenda||'—'} · ${o.talhao||'—'}</div>
+            <span class="badge" style="background:#fee2e2;color:var(--vermelho)">${o.diasVencida} dia${o.diasVencida>1?'s':''} vencida</span>
+          </div>
+          <div class="dash-exp-sub">${o.tipo}${o.descricao?` · ${o.descricao}`:''}</div>
+          <div class="dash-exp-datas">
+            <span><span class="de-lbl">Planejada</span> ${fmtDataBR(o.data)}</span>
+            <span><span class="de-lbl">Status</span> ${o.status==='execucao'?'Em execução':'Planejada'}</span>
+          </div>
+        </div>`).join('')}
     </div>
 
     ${atrasadas.length > 0 ? `
@@ -1671,9 +1696,11 @@ function renderCalendarioDash() {
 
   // Junta aplicações por dia. Concluídas entram em VERDE na data de execução;
   // as demais entram na cor do tipo (amarelo=sólido, azul=pulverização) na data planejada.
-  const porDia = {}; // 'AAAA-MM-DD' -> [{talhao, classe}]
+  // Pendentes cuja data já passou recebem marca de vencida (borda vermelha).
+  const hojeCal = hoje();
+  const porDia = {}; // 'AAAA-MM-DD' -> [{talhao, classe, vencida}]
   adubacoes.forEach(a => {
-    let dref, classe;
+    let dref, classe, vencida = false;
     if (a.status === 'concluido' && a.data_conclusao) {
       dref = String(a.data_conclusao).slice(0,10);
       classe = 'cal-concluido';
@@ -1681,9 +1708,10 @@ function renderCalendarioDash() {
       if (!a.data) return;
       dref = String(a.data).slice(0,10);
       classe = tipoDaAdubacao(a)==='pulverizacao' ? 'cal-pulv' : 'cal-solido';
+      vencida = dref < hojeCal; // planejada/em execução com data já passada
     }
     if (!porDia[dref]) porDia[dref] = [];
-    porDia[dref].push({ talhao: a.talhao||'—', classe });
+    porDia[dref].push({ talhao: a.talhao||'—', classe, vencida });
   });
 
   const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -1698,7 +1726,7 @@ function renderCalendarioDash() {
     const iso = `${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
     const evs = porDia[iso] || [];
     const ehHoje = iso === hojeISO;
-    const tags = evs.map(e => `<span class="cal-tag ${e.classe}">${e.talhao}</span>`).join('');
+    const tags = evs.map(e => `<span class="cal-tag ${e.classe}${e.vencida?' cal-vencida':''}">${e.vencida?'⚠ ':''}${e.talhao}</span>`).join('');
     celulas += `<div class="cal-cel ${ehHoje?'cal-hoje':''}">
       <div class="cal-num">${dia}</div>
       <div class="cal-tags">${tags}</div>
@@ -1715,6 +1743,7 @@ function renderCalendarioDash() {
       <span><span class="cal-bola cal-solido"></span> Sólidos</span>
       <span><span class="cal-bola cal-pulv"></span> Pulverização</span>
       <span><span class="cal-bola cal-concluido"></span> Concluída</span>
+      <span><span class="cal-bola" style="background:#fff;border:2px solid var(--vermelho)"></span> Vencida</span>
     </div>
     <div class="cal-grid cal-cabecalho">
       ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
@@ -1727,7 +1756,7 @@ window.toggleDashCard = function(qual) {
   const seta = document.getElementById('seta-'+qual);
   if (!el) return;
   // fecha os outros
-  ['exec','exec-done','atraso'].forEach(q => {
+  ['exec','exec-done','atraso','vencidas'].forEach(q => {
     if (q !== qual) {
       const outro = document.getElementById('dashexp-'+q); if (outro) outro.style.display='none';
       const s = document.getElementById('seta-'+q); if (s) s.textContent='▾';
