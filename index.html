@@ -382,7 +382,25 @@
   .prod-dose-mini td { border: none !important; padding: 2px 0 !important; font-size: 13px; vertical-align: top; }
   .prod-dose-mini .pd-nome { padding-right: 14px !important; word-break: break-word; }
   .prod-dose-mini .pd-dose { text-align: right; white-space: nowrap; font-family: 'DM Mono', monospace; color: var(--verde); font-weight: 500; }
-  /* Painéis expansíveis do dashboard */
+  /* Calendário de aplicações no dashboard */
+  .cal-topo { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .cal-titulo { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; }
+  .cal-legenda { display:flex; gap:16px; justify-content:center; margin-bottom:12px; font-size:12px; color:var(--cinza); }
+  .cal-legenda span { display:flex; align-items:center; gap:6px; }
+  .cal-bola { width:12px; height:12px; border-radius:3px; display:inline-block; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .cal-cabecalho { margin-bottom:4px; }
+  .cal-dow { text-align:center; font-size:11px; font-weight:700; text-transform:uppercase; color:#9aa89f; padding:4px 0; }
+  .cal-cel { min-height:64px; border:1px solid #eef1ec; border-radius:8px; padding:4px; background:#fff; overflow:hidden; }
+  .cal-vazia { border:none; background:transparent; }
+  .cal-hoje { border-color:var(--verde); box-shadow:0 0 0 1px var(--verde) inset; }
+  .cal-num { font-size:12px; font-weight:600; color:#5b6b60; margin-bottom:3px; }
+  .cal-tags { display:flex; flex-direction:column; gap:2px; }
+  .cal-tag { font-size:10px; font-weight:600; padding:2px 4px; border-radius:4px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cal-solido { background:#faf3d8; color:#8a6d1a; }
+  .cal-pulv { background:#e0edfb; color:#1e5aa8; }
+  .cal-bola.cal-solido { background:#e3d49c; }
+  .cal-bola.cal-pulv { background:#b4d0ec; }
   .dash-exp { background:#fff; border:1px solid var(--creme-escuro); border-radius:var(--radius); padding:16px 18px; margin-bottom:20px; box-shadow:var(--sombra); }
   .dash-exp-tit { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; margin-bottom:12px; }
   .dash-exp-item { padding:12px 0; border-bottom:1px solid #f0f3ee; }
@@ -1621,7 +1639,76 @@ function renderDashboard() {
           }).join('') : '<tr><td colspan="6" class="tabela-vazia">Nenhuma operação planejada para o futuro</td></tr>'}
         </tbody>
       </table>
+    </div>
+
+    <div class="tabela-wrap" style="margin-top:24px">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;border-bottom:1px solid var(--creme-escuro)">📅 Calendário de Aplicações</div>
+      <div id="dash-calendario" style="padding:16px 12px"></div>
     </div>`;
+
+  renderCalendarioDash();
+}
+
+// ── Calendário mensal de aplicações no dashboard ──
+// Amarelo = sólidos, Azul = pulverização. Mostra só o talhão nos dias com aplicação.
+let calMesAtual = null; // {ano, mes} — mes 0-11
+window.mudarMesCalendario = function(delta) {
+  if (!calMesAtual) return;
+  let m = calMesAtual.mes + delta, a = calMesAtual.ano;
+  if (m < 0) { m = 11; a--; } else if (m > 11) { m = 0; a++; }
+  calMesAtual = { ano: a, mes: m };
+  renderCalendarioDash();
+};
+
+function renderCalendarioDash() {
+  const cont = document.getElementById('dash-calendario');
+  if (!cont) return;
+  // Mês inicial: o atual
+  if (!calMesAtual) { const h = new Date(); calMesAtual = { ano: h.getFullYear(), mes: h.getMonth() }; }
+  const { ano, mes } = calMesAtual;
+
+  // Junta aplicações (sólidos e pulverização) por dia da data planejada
+  const porDia = {}; // 'AAAA-MM-DD' -> [{talhao, tipo}]
+  adubacoes.forEach(a => {
+    if (!a.data) return;
+    const d = String(a.data).slice(0,10);
+    if (!porDia[d]) porDia[d] = [];
+    porDia[d].push({ talhao: a.talhao||'—', tipo: tipoDaAdubacao(a) });
+  });
+
+  const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const primeiroDia = new Date(ano, mes, 1).getDay(); // 0=domingo
+  const diasNoMes = new Date(ano, mes+1, 0).getDate();
+  const hojeISO = hoje();
+
+  let celulas = '';
+  // espaços vazios antes do dia 1
+  for (let i=0;i<primeiroDia;i++) celulas += `<div class="cal-cel cal-vazia"></div>`;
+  for (let dia=1; dia<=diasNoMes; dia++) {
+    const iso = `${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    const evs = porDia[iso] || [];
+    const ehHoje = iso === hojeISO;
+    const tags = evs.map(e => `<span class="cal-tag ${e.tipo==='pulverizacao'?'cal-pulv':'cal-solido'}">${e.talhao}</span>`).join('');
+    celulas += `<div class="cal-cel ${ehHoje?'cal-hoje':''}">
+      <div class="cal-num">${dia}</div>
+      <div class="cal-tags">${tags}</div>
+    </div>`;
+  }
+
+  cont.innerHTML = `
+    <div class="cal-topo">
+      <button class="btn btn-sm btn-secondary" onclick="mudarMesCalendario(-1)">◀</button>
+      <div class="cal-titulo">${nomesMeses[mes]} ${ano}</div>
+      <button class="btn btn-sm btn-secondary" onclick="mudarMesCalendario(1)">▶</button>
+    </div>
+    <div class="cal-legenda">
+      <span><span class="cal-bola cal-solido"></span> Sólidos</span>
+      <span><span class="cal-bola cal-pulv"></span> Pulverização</span>
+    </div>
+    <div class="cal-grid cal-cabecalho">
+      ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+    </div>
+    <div class="cal-grid">${celulas}</div>`;
 }
 
 window.toggleDashCard = function(qual) {
