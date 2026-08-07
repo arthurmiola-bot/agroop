@@ -2047,6 +2047,16 @@ window.abrirModalPedido = async function() {
           <div class="form-group"><label>Previsão de Entrega</label><input type="date" id="ped-entrega"></div>
         </div>
         <div class="form-group"><label>Observação</label><input type="text" id="ped-obs" placeholder="Opcional"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Vencimento — tipo</label>
+            <select id="ped-venc-tipo" onchange="mudarTipoVencPedido()">
+              <option value="">Sem vencimento</option>
+              <option value="data">Data fixa</option>
+              <option value="ddf">Prazo (dias após entrega)</option>
+            </select>
+          </div>
+          <div class="form-group" id="ped-venc-campo"></div>
+        </div>
         <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:10px">Itens do Pedido
           <span id="compendio-status" style="font-weight:400;font-size:11px;color:var(--cinza)"> (carregando sugestões...)</span></div>
         <datalist id="compendio-datalist"></datalist>
@@ -2083,6 +2093,19 @@ function renderItensPedido() {
       <button onclick="removeItemPedido(${i})" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--vermelho)">✕</button>
     </div>`).join('');
 }
+window.mudarTipoVencPedido = function() {
+  const tipo = document.getElementById('ped-venc-tipo').value;
+  const campo = document.getElementById('ped-venc-campo');
+  if (!campo) return;
+  if (tipo === 'data') {
+    campo.innerHTML = `<label>Data de vencimento</label><input type="date" id="ped-venc-data">`;
+  } else if (tipo === 'ddf') {
+    campo.innerHTML = `<label>Dias após a entrega</label><input type="number" id="ped-venc-dias" min="0" step="1" placeholder="Ex: 30">`;
+  } else {
+    campo.innerHTML = '';
+  }
+};
+
 window.itensPedidoTemp = itensPedidoTemp;
 window.addItemPedido = function() { itensPedidoTemp.push({ produto:'', quantidade:'', unidade:'L', preco_unit:'' }); renderItensPedido(); };
 window.removeItemPedido = function(i) { itensPedidoTemp.splice(i, 1); renderItensPedido(); };
@@ -2092,10 +2115,22 @@ window.salvarPedido = async function() {
   if (!fornecedor) { toast('Informe o fornecedor.', 'erro'); return; }
   const itensValidos = itensPedidoTemp.filter(i => i.produto && i.quantidade);
   if (itensValidos.length === 0) { toast('Adicione pelo menos um item.', 'erro'); return; }
+  // Vencimento do pedido (data fixa ou prazo em dias após a entrega)
+  const vencTipo = document.getElementById('ped-venc-tipo').value;
+  let vencData = '', vencDias = 0;
+  if (vencTipo === 'data') {
+    vencData = document.getElementById('ped-venc-data')?.value || '';
+    if (!vencData) { toast('Informe a data de vencimento.','erro'); return; }
+  } else if (vencTipo === 'ddf') {
+    vencDias = parseFloat(document.getElementById('ped-venc-dias')?.value)||0;
+    if (!vencDias) { toast('Informe os dias após a entrega.','erro'); return; }
+  }
   const itens = itensValidos.map(i => ({
     produto: i.produto.trim(), quantidade: parseFloat(i.quantidade)||0, quantidade_recebida: 0,
     unidade: i.unidade, preco_unit: parseFloat(i.preco_unit)||0,
-    total: (parseFloat(i.quantidade)||0)*(parseFloat(i.preco_unit)||0)
+    total: (parseFloat(i.quantidade)||0)*(parseFloat(i.preco_unit)||0),
+    // guarda a condição no item para gerar a conta no recebimento (DDF)
+    cond_tipo: vencTipo==='ddf' ? 'ddf' : '', cond_dias: vencTipo==='ddf' ? vencDias : 0
   }));
   const valor_total = itens.reduce((s,i) => s+i.total, 0);
   const pedido = {
@@ -2103,6 +2138,7 @@ window.salvarPedido = async function() {
     data_pedido: document.getElementById('ped-data').value,
     previsao_entrega: document.getElementById('ped-entrega').value,
     obs: document.getElementById('ped-obs').value,
+    venc_tipo: vencTipo, venc_data: vencData, venc_dias: vencDias,
     itens, valor_total, status: 'pendente',
     criado_em: Timestamp.now(), criado_por: usuarioAtual.uid
   };
@@ -2111,9 +2147,28 @@ window.salvarPedido = async function() {
     pedidos.unshift({id: ref.id, ...pedido});
     fecharModal('modal-pedido');
     toast('Pedido criado com sucesso!');
-    // ── MELHORIA 1: oferecer conta a pagar automática ──
-    if (valor_total > 0) abrirContaAutomatica(ref.id, fornecedor, valor_total);
-    else renderPedidos();
+    if (valor_total > 0 && vencTipo === 'data') {
+      // Data fixa: gera a conta a pagar direto com essa data
+      const conta = {
+        descricao: `Pedido ${fornecedor}`, fornecedor, categoria: 'Insumos',
+        valor_total, vencimento: Timestamp.fromDate(new Date(vencData+'T12:00:00')),
+        pago: false, pedido_id: ref.id, criado_em: Timestamp.now()
+      };
+      const cref = await addDoc(collection(db,'insumos_contas'), conta);
+      contas.push({id: cref.id, ...conta});
+      contas.sort((a,b) => (a.vencimento?.toDate?a.vencimento.toDate():new Date(a.vencimento)) - (b.vencimento?.toDate?b.vencimento.toDate():new Date(b.vencimento)));
+      toast('Conta a pagar gerada com vencimento em '+fmtDataBR(vencData)+'.');
+      renderPedidos();
+    } else if (vencTipo === 'ddf') {
+      // Prazo DDF: a conta será gerada automaticamente no recebimento
+      toast(`Conta será gerada no recebimento (${vencDias} dias após a entrega).`);
+      renderPedidos();
+    } else if (valor_total > 0) {
+      // Sem vencimento definido: oferece o fluxo de conta automática (parcelas)
+      abrirContaAutomatica(ref.id, fornecedor, valor_total);
+    } else {
+      renderPedidos();
+    }
   } catch(e) { toast('Erro ao salvar: ' + e.message, 'erro'); }
 };
 
