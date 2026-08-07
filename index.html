@@ -399,8 +399,10 @@
   .cal-tag { font-size:10px; font-weight:600; padding:2px 4px; border-radius:4px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cal-solido { background:#faf3d8; color:#8a6d1a; }
   .cal-pulv { background:#e0edfb; color:#1e5aa8; }
+  .cal-concluido { background:#d1fae5; color:#1f7a55; }
   .cal-bola.cal-solido { background:#e3d49c; }
   .cal-bola.cal-pulv { background:#b4d0ec; }
+  .cal-bola.cal-concluido { background:#6ee7b7; }
   .dash-exp { background:#fff; border:1px solid var(--creme-escuro); border-radius:var(--radius); padding:16px 18px; margin-bottom:20px; box-shadow:var(--sombra); }
   .dash-exp-tit { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; margin-bottom:12px; }
   .dash-exp-item { padding:12px 0; border-bottom:1px solid #f0f3ee; }
@@ -1667,13 +1669,21 @@ function renderCalendarioDash() {
   if (!calMesAtual) { const h = new Date(); calMesAtual = { ano: h.getFullYear(), mes: h.getMonth() }; }
   const { ano, mes } = calMesAtual;
 
-  // Junta aplicações (sólidos e pulverização) por dia da data planejada
-  const porDia = {}; // 'AAAA-MM-DD' -> [{talhao, tipo}]
+  // Junta aplicações por dia. Concluídas entram em VERDE na data de execução;
+  // as demais entram na cor do tipo (amarelo=sólido, azul=pulverização) na data planejada.
+  const porDia = {}; // 'AAAA-MM-DD' -> [{talhao, classe}]
   adubacoes.forEach(a => {
-    if (!a.data) return;
-    const d = String(a.data).slice(0,10);
-    if (!porDia[d]) porDia[d] = [];
-    porDia[d].push({ talhao: a.talhao||'—', tipo: tipoDaAdubacao(a) });
+    let dref, classe;
+    if (a.status === 'concluido' && a.data_conclusao) {
+      dref = String(a.data_conclusao).slice(0,10);
+      classe = 'cal-concluido';
+    } else {
+      if (!a.data) return;
+      dref = String(a.data).slice(0,10);
+      classe = tipoDaAdubacao(a)==='pulverizacao' ? 'cal-pulv' : 'cal-solido';
+    }
+    if (!porDia[dref]) porDia[dref] = [];
+    porDia[dref].push({ talhao: a.talhao||'—', classe });
   });
 
   const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -1688,7 +1698,7 @@ function renderCalendarioDash() {
     const iso = `${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
     const evs = porDia[iso] || [];
     const ehHoje = iso === hojeISO;
-    const tags = evs.map(e => `<span class="cal-tag ${e.tipo==='pulverizacao'?'cal-pulv':'cal-solido'}">${e.talhao}</span>`).join('');
+    const tags = evs.map(e => `<span class="cal-tag ${e.classe}">${e.talhao}</span>`).join('');
     celulas += `<div class="cal-cel ${ehHoje?'cal-hoje':''}">
       <div class="cal-num">${dia}</div>
       <div class="cal-tags">${tags}</div>
@@ -1704,6 +1714,7 @@ function renderCalendarioDash() {
     <div class="cal-legenda">
       <span><span class="cal-bola cal-solido"></span> Sólidos</span>
       <span><span class="cal-bola cal-pulv"></span> Pulverização</span>
+      <span><span class="cal-bola cal-concluido"></span> Concluída</span>
     </div>
     <div class="cal-grid cal-cabecalho">
       ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
