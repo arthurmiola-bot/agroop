@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "4.0";
+var APP_VERSION = "4.1";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -1114,10 +1114,7 @@ function Dash(props){
                   <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mcLabel(mc2):"-"} - {op?op.name:"-"}</div>
                   <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)}{mc2&&isProvider(mc2)?(x.provider?" - "+x.provider:""):" - "+fmtN(x.meter)+" "+mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
                 </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
-                  {avg>0&&<div style={{fontSize:11,color:AMB,fontWeight:600,whiteSpace:"nowrap"}}>{fmtR(avg)}/L - {fmtR(x.liters*avg)}</div>}
-                </div>
+                <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
               </div>
             );
           })}
@@ -1806,9 +1803,9 @@ function Rep(props){
       <div className="card">
         <div style={{overflowX:"auto"}}>
           <table>
-            <thead><tr><th>Data</th><th>Fazenda</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>R$/L</th><th>Origem</th></tr></thead>
+            <thead><tr><th>Data</th><th>Fazenda</th><th>Maquina</th><th>Operador</th><th>Medidor</th><th>Litros</th><th>R$/L</th><th>Custo Total</th><th>Origem</th></tr></thead>
             <tbody>
-              {rows.length===0?<tr><td colSpan={8} style={{textAlign:"center",color:MUT,padding:28}}>Nenhum registro encontrado</td></tr>
+              {rows.length===0?<tr><td colSpan={9} style={{textAlign:"center",color:MUT,padding:28}}>Nenhum registro encontrado</td></tr>
               :rows.map(function(x){
                 var op=null, mc=null, fa=getFarm(data,x.farmId);
                 for(var i=0;i<data.operators.length;i++){if(data.operators[i].id===x.operatorId){op=data.operators[i];break;}}
@@ -1830,6 +1827,7 @@ function Rep(props){
                     <td>{mc&&isProvider(mc)?(x.provider||"-"):fmtN(x.meter)+" "+mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
                     <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
                     <td style={{color:AMB,whiteSpace:"nowrap"}}>{avg>0?fmtR(avg):"--"}</td>
+                    <td style={{color:MUT,whiteSpace:"nowrap"}}>{avg>0?fmtR(x.liters*avg):"--"}</td>
                     <td><span className={"bdg "+(x.registeredBy==="ADMINISTRADOR"?"by":x.registeredBy==="ESCRITORIO"?"bb":"bg")} style={{fontSize:11}}>{x.registeredBy}</span></td>
                   </tr>
                 );
