@@ -1561,13 +1561,13 @@ function renderDashboard() {
         <div class="card-resumo-valor">${nConcluidas}</div>
         <div class="card-resumo-label">✅ Executadas ${nConcluidas>0?'<span id="seta-exec-done" style="font-size:11px">▾</span>':''}</div>
       </div>
-      <div class="card-resumo ${atrasadas.length>0?'perigo':''}" onclick="toggleDashCard('atraso')" style="cursor:pointer">
-        <div class="card-resumo-valor">${atrasadas.length}</div>
-        <div class="card-resumo-label">⚠️ Concluídas com atraso ${atrasadas.length>0?'<span id="seta-atraso" style="font-size:11px">▾</span>':''}</div>
-      </div>
       <div class="card-resumo ${pendentesVencidas.length>0?'perigo':''}" onclick="toggleDashCard('vencidas')" style="cursor:pointer">
         <div class="card-resumo-valor">${pendentesVencidas.length}</div>
         <div class="card-resumo-label">⏰ Pendentes vencidas ${pendentesVencidas.length>0?'<span id="seta-vencidas" style="font-size:11px">▾</span>':''}</div>
+      </div>
+      <div class="card-resumo ${atrasadas.length>0?'perigo':''}" onclick="toggleDashCard('atraso')" style="cursor:pointer">
+        <div class="card-resumo-valor">${atrasadas.length}</div>
+        <div class="card-resumo-label">⚠️ Concluídas com atraso ${atrasadas.length>0?'<span id="seta-atraso" style="font-size:11px">▾</span>':''}</div>
       </div>
     </div>
 
@@ -1579,11 +1579,6 @@ function renderDashboard() {
       <div class="dash-exp-tit">✅ Operações Executadas (${executadas.length})</div>
       ${painelOps(executadas)}
     </div>
-    <div id="dashexp-atraso" class="dash-exp" style="display:none">
-      <div class="dash-exp-tit">⚠️ Concluídas com Atraso (${atrasadas.length})</div>
-      ${resumoAtraso?`<div style="font-size:13px;color:var(--cinza);margin-bottom:10px">${resumoAtraso}</div>`:''}
-      ${painelOps(atrasadas)}
-    </div>
     <div id="dashexp-vencidas" class="dash-exp" style="display:none">
       <div class="dash-exp-tit">⏰ Pendentes Vencidas (${pendentesVencidas.length}) <span style="font-weight:400;font-size:12px;color:var(--cinza)">— data passou e ainda não concluídas</span></div>
       ${pendentesVencidas.length===0?'<div class="dash-exp-vazio">Nenhuma pendência vencida.</div>':pendentesVencidas.map(o=>`
@@ -1592,12 +1587,17 @@ function renderDashboard() {
             <div class="dash-exp-titulo">${o.icone} ${o.fazenda||'—'} · ${o.talhao||'—'}</div>
             <span class="badge" style="background:#fee2e2;color:var(--vermelho)">${o.diasVencida} dia${o.diasVencida>1?'s':''} vencida</span>
           </div>
-          <div class="dash-exp-sub">${o.tipo}${o.descricao?` · ${o.descricao}`:''}</div>
           <div class="dash-exp-datas">
             <span><span class="de-lbl">Planejada</span> ${fmtDataBR(o.data)}</span>
             <span><span class="de-lbl">Status</span> ${o.status==='execucao'?'Em execução':'Planejada'}</span>
           </div>
+          ${o.produtos&&o.produtos.length?`<table class="prod-dose-mini" style="margin-top:6px">${o.produtos.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?(typeof p.dose==='number'?fmt(p.dose)+' '+(p.unidade||''):p.dose):''}</td></tr>`).join('')}</table>`:''}
         </div>`).join('')}
+    </div>
+    <div id="dashexp-atraso" class="dash-exp" style="display:none">
+      <div class="dash-exp-tit">⚠️ Concluídas com Atraso (${atrasadas.length})</div>
+      ${resumoAtraso?`<div style="font-size:13px;color:var(--cinza);margin-bottom:10px">${resumoAtraso}</div>`:''}
+      ${painelOps(atrasadas)}
     </div>
 
     ${atrasadas.length > 0 ? `
