@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "3.7";
+var APP_VERSION = "3.8";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -342,10 +342,19 @@ function fmtR(n){ return Number(n).toLocaleString("pt-BR",{style:"currency",curr
 function getMachineDesc(m){ return m ? (m.desc || m.description || "") : ""; }
 function getMachineCode(m){ return m ? (m.code || "") : ""; }
 function getMachineMt(m){ return m ? (m.mt || m.meterType || "hourmeter") : "hourmeter"; }
-function mLbl(mt){ return mt==="odometer"?"Odometro (Km)":"Horimetro (horas)"; }
-function mUnit(mt){ return mt==="odometer"?"Km":"h"; }
+function isProvider(m){ return getMachineMt(m)==="provider"; }
+function mLbl(mt){ return mt==="provider"?"Identificacao do Prestador":mt==="odometer"?"Odometro (Km)":"Horimetro (horas)"; }
+function mUnit(mt){ return mt==="provider"?"":mt==="odometer"?"Km":"h"; }
 function eLbl(mt){ return mt==="odometer"?"Km/L":"L/h"; }
+function mcLabel(m){ var c=getMachineCode(m), d=getMachineDesc(m); return c?(d?c+" - "+d:c):(d||"(sem nome)"); }
+// Ordena maquinas por codigo, deixando o PRESTADOR DE SERVICO (sem codigo) sempre no final da lista.
+function sortMc(arr){ return (arr||[]).slice().sort(function(a,b){
+  var pa=isProvider(a)?1:0, pb=isProvider(b)?1:0;
+  if(pa!==pb) return pa-pb;
+  return String(getMachineCode(a)).localeCompare(String(getMachineCode(b)),"pt",{numeric:true});
+}); }
 function eCalc(L,d,mt){
+  if(mt==="provider") return null;
   if(!d||d<=0||L<=0) return null;
   return mt==="odometer"?(d/L).toFixed(2):(L/d).toFixed(2);
 }
@@ -487,6 +496,7 @@ function App(){
   var tmr=useRef(null), sav=useRef(null);
   var dataLoaded=useRef(false);
   var stockConverted=useRef(false);
+  var providerSeeded=useRef(false);
 
   // Monitor de conexao online/offline
   useEffect(function(){
@@ -599,6 +609,16 @@ function App(){
         });
         // marca que a conversao foi feita (nunca repete)
         if(window._fbSaveConfig) window._fbSaveConfig({stockConverted:true});
+      }
+
+      // SEED UNICO do equipamento PRESTADOR DE SERVICO (sem codigo; medidor tipo "provider").
+      // So roda uma vez (flag providerSeeded) e apenas quando ja existe config real com maquinas,
+      // para nunca sobrescrever a lista de maquinas do usuario.
+      if(s.config!==null && cfg.providerSeeded!==true && !providerSeeded.current && cfg.machines && cfg.machines.length){
+        providerSeeded.current=true;
+        var jaTem=cfg.machines.some(function(m){return (m.mt||m.meterType)==="provider";});
+        var novasMc = jaTem ? cfg.machines : cfg.machines.concat([{id:990000001, code:"", desc:"PRESTADOR DE SERVICO", mt:"provider", active:true}]);
+        if(window._fbSaveConfig) window._fbSaveConfig({machines:novasMc, providerSeeded:true});
       }
 
       // Lista permanente de IDs excluidos - registros com esses IDs sao sempre ignorados,
@@ -876,7 +896,7 @@ function Login(props){
 function Fuel(props){
   var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addFuel=props.addFuel, role=props.role, online=props.online, toast=props.toast;
   var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
-  var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""}), f=_f[0], setF=_f[1];
+  var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:"",prov:""}), f=_f[0], setF=_f[1];
   var _conf=useState(false), conf=_conf[0], setConf=_conf[1];
   var _success=useState(null), success=_success[0], setSuccess=_success[1];
 
@@ -886,12 +906,13 @@ function Fuel(props){
   var mc=null;
   for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===Number(f.mc)){mc=data.machines[i];break;}}
   var mt=mc?getMachineMt(mc):"hourmeter";
+  var isProv=mc&&isProvider(mc);
   var lastM=null;
-  if(f.mc){
+  if(f.mc&&!isProv){
     var mf=data.fuelings.filter(function(x){return x.machineId===Number(f.mc);}).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
     if(mf.length>0) lastM=mf[0].meter;
   }
-  var mOk=f.meter&&Number(f.meter)>0&&(!lastM||Number(f.meter)>=lastM);
+  var mOk=isProv?(f.prov&&f.prov.trim().length>0):(f.meter&&Number(f.meter)>0&&(!lastM||Number(f.meter)>=lastM));
   var ok=f.farm&&farm&&f.op&&f.mc&&mOk&&f.lts&&Number(f.lts)>0&&Number(f.lts)<=(farm?farm.tankStock:0);
 
   var submitting=useRef(false);
@@ -910,16 +931,17 @@ function Fuel(props){
     // captura os detalhes para a tela de sucesso ANTES de limpar
     var det={
       fazenda:farm.name,
-      maquina:mc?mc.code+" - "+getMachineDesc(mc):"",
+      maquina:mc?mcLabel(mc):"",
+      prov:isProv?f.prov.trim():"",
       operador:op?op.name:"",
       litros:litros,
-      medidor:fmtN(f.meter)+" "+mUnit(mt),
+      medidor:isProv?"":fmtN(f.meter)+" "+mUnit(mt),
       estoqueApos:novoEstoque
     };
     // adiciona o abastecimento como documento individual (sem sobrescrever nada)
     // O estoque e recalculado automaticamente a partir dos registros - nao precisa mais atualizar manualmente
-    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:Number(f.meter),liters:litros,date:tsNow(),registeredBy:role});
-    setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:""});
+    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:isProv?0:Number(f.meter),liters:litros,provider:isProv?f.prov.trim():"",date:tsNow(),registeredBy:role});
+    setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:"",prov:""});
     setConf(false);
     setSuccess(det);
     setTimeout(function(){submitting.current=false;},1500);
@@ -943,6 +965,12 @@ function Fuel(props){
               <span style={{color:"#d4f0a0",fontSize:15}}>Maquina</span>
               <strong style={{color:"#fff",fontSize:15,textAlign:"right",maxWidth:"60%"}}>{success.maquina}</strong>
             </div>
+            {success.prov&&(
+              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.2)"}}>
+                <span style={{color:"#d4f0a0",fontSize:15}}>Prestador</span>
+                <strong style={{color:"#fff",fontSize:15,textAlign:"right",maxWidth:"60%"}}>{success.prov}</strong>
+              </div>
+            )}
             <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.2)"}}>
               <span style={{color:"#d4f0a0",fontSize:15}}>Operador</span>
               <strong style={{color:"#fff",fontSize:15}}>{success.operador}</strong>
@@ -995,12 +1023,12 @@ function Fuel(props){
           </div>
           <div className="fg">
             <div className="flbl">Maquina / Equipamento</div>
-            <select value={f.mc} onChange={function(e){sf("mc",e.target.value);sf("meter","");}} style={{fontSize:16}}>
+            <select value={f.mc} onChange={function(e){var v=e.target.value;setF(function(p){return Object.assign({},p,{mc:v,meter:"",prov:""});});}} style={{fontSize:16}}>
               <option value="">Selecione a maquina</option>
-              {data.machines.filter(function(m){return m.active;}).map(function(m){return <option key={m.id} value={m.id}>{m.code} - {getMachineDesc(m)}</option>;})}
+              {sortMc(data.machines.filter(function(m){return m.active;})).map(function(m){return <option key={m.id} value={m.id}>{mcLabel(m)}</option>;})}
             </select>
           </div>
-          {mc&&(
+          {mc&&!isProv&&(
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
               <span className={"bdg "+(mt==="odometer"?"bp":"bb")}>{mt==="odometer"?"Odometro":"Horimetro"}</span>
               {lastM&&<div className="pill" style={{flex:1,display:"flex",justifyContent:"space-between",padding:"6px 12px"}}>
@@ -1008,12 +1036,20 @@ function Fuel(props){
               </div>}
             </div>
           )}
-          <div className="fg">
-            <div className="flbl">{mc?mLbl(mt):"Horimetro / Odometro"}</div>
-            <input type="number" placeholder={lastM?"Minimo: "+lastM:mt==="odometer"?"Ex: 46200":"Ex: 1350"}
-              value={f.meter} onChange={function(e){sf("meter",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
-            {f.meter&&lastM&&Number(f.meter)<lastM&&<div style={{color:RED,fontSize:12,marginTop:4}}>Valor menor que o ultimo registro ({fmtN(lastM)} {mUnit(mt)})</div>}
-          </div>
+          {mc&&isProv?(
+            <div className="fg">
+              <div className="flbl">Identificacao do Prestador de Servico</div>
+              <input type="text" placeholder="Nome ou empresa do prestador" value={f.prov} onChange={function(e){sf("prov",e.target.value);}} style={{fontSize:18,fontWeight:600}}/>
+              <div style={{fontSize:12,color:DIM,marginTop:4}}>Obrigatorio - usado no relatorio para acertar as contas por prestador.</div>
+            </div>
+          ):(
+            <div className="fg">
+              <div className="flbl">{mc?mLbl(mt):"Horimetro / Odometro"}</div>
+              <input type="number" placeholder={lastM?"Minimo: "+lastM:mt==="odometer"?"Ex: 46200":"Ex: 1350"}
+                value={f.meter} onChange={function(e){sf("meter",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
+              {f.meter&&lastM&&Number(f.meter)<lastM&&<div style={{color:RED,fontSize:12,marginTop:4}}>Valor menor que o ultimo registro ({fmtN(lastM)} {mUnit(mt)})</div>}
+            </div>
+          )}
           <div className="fg">
             <div className="flbl">Quantidade (Litros)</div>
             <input type="number" placeholder="Ex: 45" value={f.lts} onChange={function(e){sf("lts",e.target.value);}} style={{fontSize:22,fontWeight:700,textAlign:"center"}}/>
@@ -1027,8 +1063,8 @@ function Fuel(props){
           <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
             <Rw label="Fazenda" value={farm.name}/>
             <Rw label="Operador" value={function(){var o=data.operators.filter(function(o){return o.id===Number(f.op);})[0];return o?o.name:""}()}/>
-            <Rw label="Maquina" value={mc?mc.code+" - "+getMachineDesc(mc):""}/>
-            <Rw label={mLbl(mt)} value={fmtN(f.meter)+" "+mUnit(mt)}/>
+            <Rw label="Maquina" value={mc?mcLabel(mc):""}/>
+            {isProv?<Rw label="Prestador" value={f.prov}/>:<Rw label={mLbl(mt)} value={fmtN(f.meter)+" "+mUnit(mt)}/>}
             <Rw label="Quantidade" value={f.lts+" L"}/>
             <Rw label="Estoque apos" value={fmtN(farm.tankStock-Number(f.lts))+" L"}/>
           </div>
@@ -1046,8 +1082,6 @@ function Fuel(props){
 function Dash(props){
   var data=props.data;
   var _period=useState(0), period=_period[0], setPeriod=_period[1]; // 0 = Tudo; senao numero de dias
-  var totS=data.supplies.reduce(function(s,x){return s+x.liters;},0);
-  var l30=data.fuelings.filter(function(x){if(!x.date)return false;return (Date.now()-new Date(String(x.date).replace(" ","T")).getTime())<30*86400000;}).reduce(function(s,x){return s+x.liters;},0);
   var _nowP=Date.now();
   function inPeriod(x){ if(!period) return true; if(!x.date) return false; return (_nowP-new Date(String(x.date).replace(" ","T")).getTime())<period*86400000; }
   var mc=data.machines.map(function(m){
@@ -1060,40 +1094,12 @@ function Dash(props){
   var rec=data.fuelings.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).slice(0,5);
   var avg=data.avgCostPerLiter||0;
   var totalStock=farmTotalStock(data);
-  var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
   return (
     <div style={{display:"flex",flexDirection:"column",gap:22}}>
       <div className="sec">Painel Geral</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
         <div className="sbox"><div className="slbl">Estoque Total</div><div className="sval" style={{color:anyFarmLow(data)?RED:GN}}>{fmtN(totalStock)}<span className="sunit"> L</span></div></div>
-        <div className="sbox"><div className="slbl">Consumo 30 dias</div><div className="sval">{fmtN(l30)}<span className="sunit"> L</span></div></div>
         {avg>0&&<div className="sbox"><div className="slbl">Custo Medio/L</div><div className="sval" style={{fontSize:20,color:AMB}}>{fmtR(avg)}</div></div>}
-        {avg>0&&<div className="sbox"><div className="slbl">Valor em Estoque</div><div className="sval" style={{fontSize:18,color:AMB}}>{fmtR(totalStock*avg)}</div></div>}
-        <div className="sbox"><div className="slbl">Abastecimentos</div><div className="sval">{data.fuelings.length}</div></div>
-        <div className="sbox"><div className="slbl">Total Recebido</div><div className="sval">{fmtN(totS)}<span className="sunit"> L</span></div></div>
-      </div>
-      <div className="card">
-        <div className="sec" style={{fontSize:16}}>Estoque por Fazenda</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
-          {activeFarms.map(function(fa){
-            var stk=computeFarmStock(data,fa.id);
-            var pctF=Math.max(0,Math.min(100,(stk/fa.tankCapacity)*100));
-            var lowF=stk<=(fa.lowStockThreshold||1000);
-            var farmFuel=data.fuelings.filter(function(x){return x.farmId===fa.id;});
-            var farmConsumed=farmFuel.reduce(function(s,x){return s+x.liters;},0);
-            return (
-              <div key={fa.id} style={{background:"#f7faf7",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+BDR}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:16,color:GN}}>{fa.name}</span>
-                  {lowF&&<span className="bdg br" style={{fontSize:10}}>BAIXO</span>}
-                </div>
-                <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800,color:lowF?RED:TXT}}>{fmtN(stk)}<span style={{fontSize:13,color:MUT,fontWeight:400}}> / {fmtN(fa.tankCapacity)} L</span></div>
-                <div className="tbar" style={{height:10,marginTop:6}}><div className={"tfill"+(lowF?" low":"")} style={{width:pctF+"%"}}/></div>
-                <div style={{fontSize:11,color:DIM,marginTop:6}}>{farmFuel.length} abastecimentos - {fmtN(farmConsumed)} L consumidos</div>
-              </div>
-            );
-          })}
-        </div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:18}}>
         <div className="card">
@@ -1105,8 +1111,8 @@ function Dash(props){
             return (
               <div key={x.id} style={{padding:"9px 0",borderBottom:"1px solid "+BDR+"44",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mc2.code:"-"}{mc2&&getMachineDesc(mc2)?" "+getMachineDesc(mc2):""} - {op?op.name:"-"}</div>
-                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)} - {fmtN(x.meter)} {mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
+                  <div style={{fontWeight:600,fontFamily:"'Barlow Condensed'",fontSize:15}}>{mc2?mcLabel(mc2):"-"} - {op?op.name:"-"}</div>
+                  <div style={{fontSize:12,color:MUT}}>{fmtDateTime(x.date)}{mc2&&isProvider(mc2)?(x.provider?" - "+x.provider:""):" - "+fmtN(x.meter)+" "+mUnit(mc2?getMachineMt(mc2):"hourmeter")}{fa2?" - "+fa2.name:""}</div>
                 </div>
                 <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:19,color:GN}}>{x.liters}L</div>
               </div>
@@ -1130,9 +1136,9 @@ function Dash(props){
                   <div key={m.id}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
                       <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
-                        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{m.code}</span>
-                        {getMachineDesc(m)&&<span style={{fontSize:12,color:MUT}}>{getMachineDesc(m)}</span>}
-                        <span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{getMachineMt(m)==="odometer"?"ODO":"HOR"}</span>
+                        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{getMachineCode(m)||getMachineDesc(m)}</span>
+                        {getMachineCode(m)&&getMachineDesc(m)&&<span style={{fontSize:12,color:MUT}}>{getMachineDesc(m)}</span>}
+                        <span className={"bdg "+(isProvider(m)?"":getMachineMt(m)==="odometer"?"bp":"bb")} style={{fontSize:10,background:isProvider(m)?"#ede9fe":undefined,color:isProvider(m)?"#6b21a8":undefined}}>{isProvider(m)?"PREST":getMachineMt(m)==="odometer"?"ODO":"HOR"}</span>
                       </div>
                       <span style={{color:GN,fontWeight:600}}>{fmtN(m.tot)} L</span>
                     </div>
@@ -1469,15 +1475,18 @@ function Reg(props){
     toast(modal.item?"Operador atualizado":"Operador cadastrado");setModal(null);
   }
   function saveMc(){
-    if(!form.code||!form.code.trim()) return;
+    var prov=form.mt==="provider";
+    if(prov){ if(!form.desc||!form.desc.trim()) return; }
+    else { if(!form.code||!form.code.trim()) return; }
     if(modal.item) upd("machines",data.machines.map(function(m){
       if(m.id!==modal.item.id) return m;
       var nm=Object.assign({},m,form);
+      if(prov) nm.code="";
       // limpa campos antigos para evitar conflito
       delete nm.description; delete nm.meterType;
       return nm;
     }));
-    else upd("machines",data.machines.concat([{id:Date.now(),code:form.code,desc:form.desc||"",active:true,mt:form.mt||"hourmeter"}]));
+    else upd("machines",data.machines.concat([{id:Date.now(),code:prov?"":form.code,desc:form.desc||"",active:true,mt:form.mt||"hourmeter"}]));
     toast(modal.item?"Maquina atualizada":"Maquina cadastrada");setModal(null);
   }
   function tog(t,id){
@@ -1521,12 +1530,12 @@ function Reg(props){
             <Btn onClick={function(){openA("mc");}} style={{padding:"7px 14px",fontSize:13}}>+ Nova</Btn>
           </div>
           <table><thead><tr><th>Codigo</th><th>Descricao</th><th>Medidor</th><th>Status</th><th>Acoes</th></tr></thead>
-          <tbody>{data.machines.map(function(m){
+          <tbody>{sortMc(data.machines).map(function(m){
             return (
               <tr key={m.id}>
-                <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{m.code}</td>
+                <td style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{getMachineCode(m)||"—"}</td>
                 <td>{getMachineDesc(m)}</td>
-                <td><span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")}>{getMachineMt(m)==="odometer"?"Odometro":"Horimetro"}</span></td>
+                <td>{isProvider(m)?<span className="bdg" style={{background:"#ede9fe",color:"#6b21a8"}}>Prestador</span>:<span className={"bdg "+(getMachineMt(m)==="odometer"?"bp":"bb")}>{getMachineMt(m)==="odometer"?"Odometro":"Horimetro"}</span>}</td>
                 <td><span className={"bdg "+(m.active?"bg":"br")}>{m.active?"Ativa":"Inativa"}</span></td>
                 <td><div style={{display:"flex",gap:7}}>
                   <Btn onClick={function(){openE("mc",m);}} color={INP} style={{color:TXT,padding:"4px 11px",fontSize:13}}>Editar</Btn>
@@ -1549,19 +1558,20 @@ function Reg(props){
             </div>
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:13}}>
-              <Fld label="Codigo" value={form.code||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{code:v});});}} placeholder="Ex: CAM-02"/>
-              <Fld label="Descricao" value={form.desc||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder="Ex: Caminhao Ford F-350"/>
               <div className="fg">
-                <div className="flbl">Tipo de Medidor</div>
+                <div className="flbl">Tipo de Equipamento</div>
                 <div className="mtog">
-                  <button className={form.mt!=="odometer"?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"hourmeter"});});}}>Horimetro (horas)</button>
-                  <button className={form.mt==="odometer"?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"odometer"});});}}>Odometro (Km)</button>
+                  <button className={(!form.mt||form.mt==="hourmeter")?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"hourmeter"});});}}>Horimetro</button>
+                  <button className={form.mt==="odometer"?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"odometer"});});}}>Odometro</button>
+                  <button className={form.mt==="provider"?"on":""} onClick={function(){setForm(function(p){return Object.assign({},p,{mt:"provider",code:"",desc:(p.desc&&p.desc.trim())?p.desc:"PRESTADOR DE SERVICO"});});}}>Prestador</button>
                 </div>
-                <div style={{fontSize:12,color:DIM,marginTop:5}}>{form.mt==="odometer"?"Relatorio em Km/L":"Relatorio em L/h"}</div>
+                <div style={{fontSize:12,color:DIM,marginTop:5}}>{form.mt==="provider"?"Sem codigo. No abastecimento pede a identificacao do prestador em vez de medidor.":form.mt==="odometer"?"Relatorio em Km/L":"Relatorio em L/h"}</div>
               </div>
+              {form.mt!=="provider"&&<Fld label="Codigo" value={form.code||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{code:v});});}} placeholder="Ex: CAM-02"/>}
+              <Fld label={form.mt==="provider"?"Nome do Equipamento":"Descricao"} value={form.desc||""} onChange={function(v){setForm(function(p){return Object.assign({},p,{desc:v});});}} placeholder={form.mt==="provider"?"Ex: PRESTADOR DE SERVICO":"Ex: Caminhao Ford F-350"}/>
               <div style={{display:"flex",gap:10,marginTop:5}}>
                 <Btn full={true} onClick={function(){setModal(null);}} color={INP} style={{color:TXT}}>Cancelar</Btn>
-                <Btn full={true} onClick={saveMc} disabled={!form.code||!form.code.trim()}>Salvar</Btn>
+                <Btn full={true} onClick={saveMc} disabled={form.mt==="provider"?(!form.desc||!form.desc.trim()):(!form.code||!form.code.trim())}>Salvar</Btn>
               </div>
             </div>
           )}
@@ -1590,12 +1600,26 @@ function Rep(props){
   var avg=data.avgCostPerLiter||0;
 
   var mSt=data.machines.map(function(m){
+    if(isProvider(m)) return null;
     var mf=rows.filter(function(x){return x.machineId===m.id;});
     if(mf.length<2) return null;
     var tot=mf.reduce(function(s,x){return s+x.liters;},0);
     var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
     return Object.assign({},m,{tot:tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,getMachineMt(m)),cnt:mf.length});
   }).filter(function(x){return x!==null;});
+
+  // Consumo por prestador de servico (agrupa os abastecimentos de maquinas tipo "provider"
+  // pela identificacao do prestador, dentro dos filtros/periodo selecionados).
+  var provAgg={};
+  rows.forEach(function(x){
+    var m=null; for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){m=data.machines[i];break;}}
+    if(m&&isProvider(m)){
+      var key=(x.provider&&String(x.provider).trim())?String(x.provider).trim():"(sem identificacao)";
+      if(!provAgg[key]) provAgg[key]={liters:0,cnt:0};
+      provAgg[key].liters+=x.liters; provAgg[key].cnt+=1;
+    }
+  });
+  var provList=Object.keys(provAgg).map(function(k){return {name:k,tot:provAgg[k].liters,cnt:provAgg[k].cnt};}).sort(function(a,b){return b.tot-a.tot;});
 
   function exportExtrato(){
     var avg=data.avgCostPerLiter||0;
@@ -1643,9 +1667,9 @@ function Rep(props){
         fornecedor:"",
         nf:"",
         fazenda:fa?fa.name:"-",
-        maquina:mc?mc.code+"-"+getMachineDesc(mc):"",
+        maquina:mc?mcLabel(mc):"",
         operador:op?op.name:"",
-        medidor:x.meter?" "+fmtN(x.meter)+" "+mUnit(mc?getMachineMt(mc):"hourmeter"):"",
+        medidor:mc&&isProvider(mc)?(x.provider?" "+x.provider:""):(x.meter?" "+fmtN(x.meter)+" "+mUnit(mc?getMachineMt(mc):"hourmeter"):""),
         unidade:mUnit(mc?getMachineMt(mc):"hourmeter"),
         litros:-Number(x.liters),
         preco:avg,
@@ -1712,7 +1736,7 @@ function Rep(props){
           </div>
           <div className="fg"><div className="flbl">Maquina</div>
             <select value={fil.mc} onChange={function(e){sf("mc",e.target.value);}}>
-              <option value="">Todas</option>{data.machines.map(function(m){return <option key={m.id} value={m.id}>{m.code}{getMachineDesc(m)?" - "+getMachineDesc(m):""}</option>;})}
+              <option value="">Todas</option>{sortMc(data.machines).map(function(m){return <option key={m.id} value={m.id}>{mcLabel(m)}</option>;})}
             </select>
           </div>
           <div className="fg"><div className="flbl">Operador</div>
@@ -1754,6 +1778,28 @@ function Rep(props){
           </div>
         </div>
       )}
+      {provList.length>0&&(
+        <div className="card" style={{marginBottom:18}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:15,marginBottom:4}}>CONSUMO POR PRESTADOR DE SERVICO</div>
+          <div style={{fontSize:12,color:MUT,marginBottom:12}}>Litros abastecidos por cada prestador no periodo filtrado - para acertar as contas.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {provList.map(function(p){
+              return (
+                <div key={p.name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"#f7faf7",borderRadius:10,padding:"12px 15px",border:"1.5px solid "+BDR}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:16,color:GN,overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
+                    <div style={{fontSize:11,color:DIM}}>{p.cnt} abastecimento{p.cnt>1?"s":""}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:22,color:BLU}}>{fmtN(p.tot)} L</div>
+                    {avg>0&&<div style={{fontSize:12,color:AMB,fontWeight:600}}>{fmtR(p.tot*avg)}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="card">
         <div style={{overflowX:"auto"}}>
           <table>
@@ -1769,12 +1815,16 @@ function Rep(props){
                     <td style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDateTime(x.date)}</td>
                     <td style={{fontSize:12,color:MUT}}>{fa?fa.name:"-"}</td>
                     <td><div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
-                      <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
-                      {mc&&getMachineDesc(mc)&&<span style={{fontSize:12,color:MUT}}>{getMachineDesc(mc)}</span>}
-                      <span className={"bdg "+(mc&&getMachineMt(mc)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&getMachineMt(mc)==="odometer"?"ODO":"HOR"}</span>
+                      {mc&&isProvider(mc)?(
+                        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{getMachineDesc(mc)||"PRESTADOR"}</span>
+                      ):(<>
+                        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:GN}}>{mc?mc.code:"-"}</span>
+                        {mc&&getMachineDesc(mc)&&<span style={{fontSize:12,color:MUT}}>{getMachineDesc(mc)}</span>}
+                        <span className={"bdg "+(mc&&getMachineMt(mc)==="odometer"?"bp":"bb")} style={{fontSize:10}}>{mc&&getMachineMt(mc)==="odometer"?"ODO":"HOR"}</span>
+                      </>)}
                     </div></td>
                     <td>{op?op.name:"-"}</td>
-                    <td>{fmtN(x.meter)} {mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
+                    <td>{mc&&isProvider(mc)?(x.provider||"-"):fmtN(x.meter)+" "+mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
                     <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
                     <td style={{color:MUT}}>{avg>0?fmtR(x.liters*avg):"--"}</td>
                     <td><span className={"bdg "+(x.registeredBy==="ADMINISTRADOR"?"by":x.registeredBy==="ESCRITORIO"?"bb":"bg")} style={{fontSize:11}}>{x.registeredBy}</span></td>
@@ -1861,12 +1911,15 @@ function Adj(props){
   function saveE(){
     var newL=Number(ef.liters||em.liters);
     var newFarmId=Number(ef.farmId||em.farmId);
+    var newMcId=Number(ef.machineId||em.machineId);
+    var prov=false; for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===newMcId){prov=isProvider(data.machines[i]);break;}}
     // salva o registro atualizado. O estoque de todas as fazendas e recalculado automaticamente.
     addFuel(Object.assign({},em,{
       farmId:newFarmId,
       operatorId:Number(ef.operatorId||em.operatorId),
-      machineId:Number(ef.machineId||em.machineId),
-      meter:Number(ef.meter||em.meter),
+      machineId:newMcId,
+      meter:prov?0:Number(ef.meter||em.meter),
+      provider:prov?((ef.prov!==undefined?ef.prov:em.provider)||""):"",
       liters:newL,
       date:ef.date||(em.date||tsNow())
     }));
@@ -1917,7 +1970,7 @@ function Adj(props){
   }
 
   var emMc=null;
-  if(em){for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===em.machineId){emMc=data.machines[i];break;}}}
+  if(em){var _emid=Number(ef&&ef.machineId!==undefined&&ef.machineId!==""?ef.machineId:em.machineId);for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===_emid){emMc=data.machines[i];break;}}}
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:22}}>
