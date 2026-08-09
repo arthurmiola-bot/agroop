@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "4.1";
+var APP_VERSION = "4.2";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -745,7 +745,6 @@ function App(){
         {/* Linha 1: marca + sair */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
           <div style={{display:"flex",alignItems:"center",gap:11,minWidth:0}}>
-            <Logo size={44} white={true}/>
             <div style={{minWidth:0}}>
               <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:21,color:"#e6b800",letterSpacing:1.5,lineHeight:1,whiteSpace:"nowrap"}}>POSTO DIESEL</div>
               <div style={{fontSize:9.5,color:GN3,letterSpacing:2,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:3,opacity:0.9}}>Agropecuaria Corrego das Flores</div>
@@ -855,8 +854,8 @@ function Login(props){
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,background:GN}}>
       <style>{CSS}</style>
       <div style={{textAlign:"center",marginBottom:28}}>
-        <div style={{display:"flex",justifyContent:"center"}}><Logo size={138} white={true}/></div>
-        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:30,color:"#e6b800",letterSpacing:2,marginTop:8}}>POSTO DIESEL</div>
+        <div style={{display:"flex",justifyContent:"center"}}><Logo size={180} white={true}/></div>
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:30,color:"#e6b800",letterSpacing:2,marginTop:14}}>POSTO DIESEL</div>
       </div>
       <div className="card" style={{width:"100%",maxWidth:300,textAlign:"center"}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontSize:15,color:MUT,letterSpacing:1,textTransform:"uppercase",marginBottom:16}}>Digite seu PIN</div>
