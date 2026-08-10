@@ -5301,13 +5301,18 @@ function renderRelatorios() {
       </div>
       <div class="relatorio-card info" onclick="gerarRelatorio('safra_plantio')">
         <div class="relatorio-card-icon">🌱</div>
-        <div class="relatorio-card-titulo">Planejamento de Safra</div>
+        <div class="relatorio-card-titulo">Planejamento de Plantio</div>
         <div class="relatorio-card-desc">Plantio e colheita por talhão</div>
       </div>
       <div class="relatorio-card" onclick="gerarRelatorio('safra_aplicacoes')">
         <div class="relatorio-card-icon">💧</div>
         <div class="relatorio-card-titulo">Aplicações da Safra</div>
-        <div class="relatorio-card-desc">Cronograma de aplicações por talhão</div>
+        <div class="relatorio-card-desc">Pulverizações pós-plantio por talhão</div>
+      </div>
+      <div class="relatorio-card terra" onclick="gerarRelatorio('safra_completa')">
+        <div class="relatorio-card-icon">🗓️</div>
+        <div class="relatorio-card-titulo">Planejamento Safra</div>
+        <div class="relatorio-card-desc">Todas as operações por talhão</div>
       </div>
     </div>
     <div id="resultado-relatorio"></div>`;
@@ -5431,6 +5436,10 @@ window.gerarRelatorio = function(tipo) {
       html = gerarRelatorioSafraAplicacoes();
       break;
     }
+    case 'safra_completa': {
+      html = gerarRelatorioSafraCompleta();
+      break;
+    }
   }
   el.innerHTML = html;
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5484,18 +5493,18 @@ function gerarRelatorioSafraPlantio() {
       <td style="text-align:center">${l.area?fmt(l.area):'—'}</td>
       <td>${l.cultura||'—'}</td>
       <td style="white-space:nowrap">${l.cultivar||'—'}</td>
-      <td style="text-align:center">${l.dias?fmt(l.dias):'—'}</td>
-      <td style="text-align:center">${l.populacao?fmt(l.populacao):'—'}</td>
+      <td style="text-align:center">${l.dias?Math.round(l.dias):'—'}</td>
+      <td style="text-align:center">${l.populacao?Math.round(l.populacao).toLocaleString('pt-BR'):'—'}</td>
       ${celData(l.dvPlant)}
       ${celData(l.dvColh)}
     </tr>`).join('');
 
-  const titulo = 'Planejamento de Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
+  const titulo = 'Planejamento de Plantio' + (cadernoSafra?` — ${cadernoSafra}`:'');
   // guarda para exportar
   relatorioAtual = {
-    titulo: 'Planejamento_Safra',
+    titulo: 'Planejamento_Plantio',
     colunas: ['Ordem','Talhão','Área (ha)','Cultura','Cultivar','Dias','População','Plantio','Colheita'],
-    rows: linhas.map((l,i)=>[i+1, `${l.fazenda} · ${l.talhao}`, l.area||'', l.cultura, l.cultivar, l.dias||'', l.populacao||'', l.dvPlant.data?fmtDataBR(l.dvPlant.data):'', l.dvColh.data?fmtDataBR(l.dvColh.data):''])
+    rows: linhas.map((l,i)=>[i+1, `${l.fazenda} · ${l.talhao}`, l.area||'', l.cultura, l.cultivar, l.dias?Math.round(l.dias):'', l.populacao?Math.round(l.populacao):'', l.dvPlant.data?fmtDataBR(l.dvPlant.data):'', l.dvColh.data?fmtDataBR(l.dvColh.data):''])
   };
 
   return `
@@ -5529,11 +5538,14 @@ function gerarRelatorioSafraAplicacoes() {
     const dvPlant = dataViva(p);
     const cults = cultivaresDoPlantio(p);
     const cultivarNome = cults.map(c=>c.cultivar).filter(Boolean).join(', ') || (p.cultura||'');
-    // aplicações do mesmo talhão nesta safra, ordenadas pela data viva
+    // aplicações do mesmo talhão nesta safra, ordenadas pela data viva.
+    // Somente PULVERIZAÇÕES (exclui sólidos/corretivo) e apenas as feitas A PARTIR do plantio.
+    const dataPlantioRef = dvPlant.data || '';
     const aplics = adubacoes
       .filter(a => normalizar(a.fazenda)===normalizar(p.fazenda) && normalizar(a.talhao)===normalizar(p.talhao) && filtroCadernoSafra(a))
+      .filter(a => tipoDaAdubacao(a) === 'pulverizacao')
       .map(a => ({ ...a, _dv: dataViva(a) }))
-      .filter(a => a._dv.data)
+      .filter(a => a._dv.data && (!dataPlantioRef || a._dv.data >= dataPlantioRef))
       .sort((x,y)=> x._dv.data.localeCompare(y._dv.data));
     // colheita
     const colh = colheitas.filter(c => c.plantio_id === p.id)[0];
@@ -5567,7 +5579,7 @@ function gerarRelatorioSafraAplicacoes() {
     </tr>`;
   }).join('');
 
-  const titulo = 'Aplicações da Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
+  const titulo = 'Pulverizações da Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
   // exportação: cabeçalho dinâmico
   const colunasExp = ['Talhão','Cultivar','Plantio'];
   for (let i=1;i<=maxAplic;i++) colunasExp.push('Aplic '+i);
@@ -5596,6 +5608,90 @@ function gerarRelatorioSafraAplicacoes() {
           <th>Talhão</th><th>Cultivar</th><th style="text-align:center">Plantio</th>
           ${thsAplic.join('')}
           <th style="text-align:center">Colheita</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function gerarRelatorioSafraCompleta() {
+  const plantiosSafra = plantios.filter(filtroCadernoSafra);
+  if (plantiosSafra.length === 0) return '<div class="tabela-vazia" style="padding:30px;text-align:center">Nenhum plantio cadastrado' + (cadernoSafra?` para a safra ${cadernoSafra}`:'') + '.</div>';
+
+  // Para cada talhão (via plantio): Plantio | TODAS as operações (sólidos + pulverização) ordenadas por data | Colheita
+  const linhas = [];
+  let maxOps = 0;
+  plantiosSafra.forEach(p => {
+    const dvPlant = dataViva(p);
+    const cults = cultivaresDoPlantio(p);
+    const cultivarNome = cults.map(c=>c.cultivar).filter(Boolean).join(', ') || (p.cultura||'');
+    // TODAS as aplicações (sólidos e pulverização) do talhão nesta safra, ordenadas pela data viva
+    const ops = adubacoes
+      .filter(a => normalizar(a.fazenda)===normalizar(p.fazenda) && normalizar(a.talhao)===normalizar(p.talhao) && filtroCadernoSafra(a))
+      .map(a => ({ ...a, _dv: dataViva(a), _tipo: tipoDaAdubacao(a) }))
+      .filter(a => a._dv.data)
+      .sort((x,y)=> x._dv.data.localeCompare(y._dv.data));
+    const colh = colheitas.filter(c => c.plantio_id === p.id)[0];
+    const dvColh = dataViva(colh);
+    maxOps = Math.max(maxOps, ops.length);
+    linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, dvPlant, ops, dvColh, ordPlant: dvPlant.data||'9999' });
+  });
+  linhas.sort((a,b)=> a.ordPlant.localeCompare(b.ordPlant) || (a.fazenda+a.talhao).localeCompare(b.fazenda+b.talhao));
+
+  const thsOps = [];
+  for (let i=1;i<=maxOps;i++) thsOps.push(`<th style="text-align:center">Op ${i}</th>`);
+
+  const rows = linhas.map(l => {
+    const celsOps = [];
+    for (let i=0;i<maxOps;i++) {
+      const a = l.ops[i];
+      if (!a) { celsOps.push('<td style="text-align:center;color:#c9d1cc">—</td>'); continue; }
+      const bg = a._dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
+      const icone = a._tipo==='pulverizacao' ? '💧' : '🪨';
+      const desc = a.categoria || (a._tipo==='pulverizacao'?'Pulv.':'Sólido');
+      const prods = (produtosDaAplicacao(a)||[]).map(x=>x.produto).join(', ');
+      celsOps.push(`<td style="text-align:center;white-space:nowrap;${bg}" title="${desc}${prods?' — '+prods:''}">${fmtDataBR(a._dv.data)}<div style="font-size:9px;opacity:.8;font-weight:400">${icone} ${desc}</div></td>`);
+    }
+    return `<tr>
+      <td style="white-space:nowrap">${l.fazenda} · ${l.talhao}</td>
+      <td style="white-space:nowrap">${l.cultivar||'—'}</td>
+      ${celData(l.dvPlant)}
+      ${celsOps.join('')}
+      ${celData(l.dvColh)}
+    </tr>`;
+  }).join('');
+
+  const titulo = 'Planejamento Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
+  const colunasExp = ['Talhão','Cultivar','Plantio'];
+  for (let i=1;i<=maxOps;i++) colunasExp.push('Op '+i);
+  colunasExp.push('Colheita');
+  relatorioAtual = {
+    titulo: 'Planejamento_Safra', colunas: colunasExp,
+    rows: linhas.map(l => {
+      const r = [`${l.fazenda} · ${l.talhao}`, l.cultivar, l.dvPlant.data?fmtDataBR(l.dvPlant.data):''];
+      for (let i=0;i<maxOps;i++) {
+        const a = l.ops[i];
+        r.push(a ? `${fmtDataBR(a._dv.data)} (${a._tipo==='pulverizacao'?'Pulv':'Sólido'}${a.categoria?' '+a.categoria:''})` : '');
+      }
+      r.push(l.dvColh.data?fmtDataBR(l.dvColh.data):'');
+      return r;
+    })
+  };
+
+  return `
+    <div class="tabela-wrap" style="overflow-x:auto">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:16px;border-bottom:1px solid var(--creme-escuro);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>🗓️ ${titulo}</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportarRelatorioSafra()">⬇ Exportar Excel</button>
+      </div>
+      <div style="padding:10px 20px;font-size:12px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">
+        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; 🪨 sólido · 💧 pulverização &nbsp;·&nbsp; toque numa data para ver os produtos
+      </div>
+      <table class="rel-safra">
+        <thead><tr>
+          <th>Talhão</th><th>Cultivar</th><th style="text-align:center">🌱 Plantio</th>
+          ${thsOps.join('')}
+          <th style="text-align:center">🌾 Colheita</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
