@@ -5304,11 +5304,6 @@ function renderRelatorios() {
         <div class="relatorio-card-titulo">Planejamento de Plantio</div>
         <div class="relatorio-card-desc">Plantio e colheita por talhão</div>
       </div>
-      <div class="relatorio-card" onclick="gerarRelatorio('safra_aplicacoes')">
-        <div class="relatorio-card-icon">💧</div>
-        <div class="relatorio-card-titulo">Aplicações da Safra</div>
-        <div class="relatorio-card-desc">Pulverizações pós-plantio por talhão</div>
-      </div>
       <div class="relatorio-card terra" onclick="gerarRelatorio('safra_completa')">
         <div class="relatorio-card-icon">🗓️</div>
         <div class="relatorio-card-titulo">Planejamento Safra</div>
@@ -5432,10 +5427,6 @@ window.gerarRelatorio = function(tipo) {
       html = gerarRelatorioSafraPlantio();
       break;
     }
-    case 'safra_aplicacoes': {
-      html = gerarRelatorioSafraAplicacoes();
-      break;
-    }
     case 'safra_completa': {
       html = gerarRelatorioSafraCompleta();
       break;
@@ -5527,93 +5518,6 @@ function gerarRelatorioSafraPlantio() {
     </div>`;
 }
 
-function gerarRelatorioSafraAplicacoes() {
-  const plantiosSafra = plantios.filter(filtroCadernoSafra);
-  if (plantiosSafra.length === 0) return '<div class="tabela-vazia" style="padding:30px;text-align:center">Nenhum plantio cadastrado' + (cadernoSafra?` para a safra ${cadernoSafra}`:'') + '.</div>';
-
-  // Para cada talhão (via plantio), monta: Plantio | aplicações dinâmicas (ordenadas por data) | Colheita
-  const linhas = [];
-  let maxAplic = 0;
-  plantiosSafra.forEach(p => {
-    const dvPlant = dataViva(p);
-    const cults = cultivaresDoPlantio(p);
-    const cultivarNome = cults.map(c=>c.cultivar).filter(Boolean).join(', ') || (p.cultura||'');
-    // aplicações do mesmo talhão nesta safra, ordenadas pela data viva.
-    // Somente PULVERIZAÇÕES (exclui sólidos/corretivo) e apenas as feitas A PARTIR do plantio.
-    const dataPlantioRef = dvPlant.data || '';
-    const aplics = adubacoes
-      .filter(a => normalizar(a.fazenda)===normalizar(p.fazenda) && normalizar(a.talhao)===normalizar(p.talhao) && filtroCadernoSafra(a))
-      .filter(a => tipoDaAdubacao(a) === 'pulverizacao')
-      .map(a => ({ ...a, _dv: dataViva(a) }))
-      .filter(a => a._dv.data && (!dataPlantioRef || a._dv.data >= dataPlantioRef))
-      .sort((x,y)=> x._dv.data.localeCompare(y._dv.data));
-    // colheita
-    const colh = colheitas.filter(c => c.plantio_id === p.id)[0];
-    const dvColh = dataViva(colh);
-    maxAplic = Math.max(maxAplic, aplics.length);
-    linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, dvPlant, aplics, dvColh, ordPlant: dvPlant.data||'9999' });
-  });
-  linhas.sort((a,b)=> a.ordPlant.localeCompare(b.ordPlant) || (a.fazenda+a.talhao).localeCompare(b.fazenda+b.talhao));
-
-  // cabeçalho dinâmico: Aplic 1..maxAplic
-  const thsAplic = [];
-  for (let i=1;i<=maxAplic;i++) thsAplic.push(`<th style="text-align:center">Aplic ${i}</th>`);
-
-  const rows = linhas.map(l => {
-    const celsAplic = [];
-    for (let i=0;i<maxAplic;i++) {
-      const a = l.aplics[i];
-      if (!a) { celsAplic.push('<td style="text-align:center;color:#c9d1cc">—</td>'); continue; }
-      const bg = a._dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
-      // descrição curta: categoria (pulv) ou resumo; título ajuda a ver produtos
-      const desc = a.categoria || (tipoDaAdubacao(a)==='pulverizacao'?'Pulv.':'Sólido');
-      const prods = (produtosDaAplicacao(a)||[]).map(x=>x.produto).join(', ');
-      celsAplic.push(`<td style="text-align:center;white-space:nowrap;${bg}" title="${desc}${prods?' — '+prods:''}">${fmtDataBR(a._dv.data)}<div style="font-size:9px;opacity:.8;font-weight:400">${desc}</div></td>`);
-    }
-    return `<tr>
-      <td style="white-space:nowrap">${l.fazenda} · ${l.talhao}</td>
-      <td style="white-space:nowrap">${l.cultivar||'—'}</td>
-      ${celData(l.dvPlant)}
-      ${celsAplic.join('')}
-      ${celData(l.dvColh)}
-    </tr>`;
-  }).join('');
-
-  const titulo = 'Pulverizações da Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
-  // exportação: cabeçalho dinâmico
-  const colunasExp = ['Talhão','Cultivar','Plantio'];
-  for (let i=1;i<=maxAplic;i++) colunasExp.push('Aplic '+i);
-  colunasExp.push('Colheita');
-  relatorioAtual = {
-    titulo: 'Aplicacoes_Safra', colunas: colunasExp,
-    rows: linhas.map(l => {
-      const r = [`${l.fazenda} · ${l.talhao}`, l.cultivar, l.dvPlant.data?fmtDataBR(l.dvPlant.data):''];
-      for (let i=0;i<maxAplic;i++) r.push(l.aplics[i] ? fmtDataBR(l.aplics[i]._dv.data) : '');
-      r.push(l.dvColh.data?fmtDataBR(l.dvColh.data):'');
-      return r;
-    })
-  };
-
-  return `
-    <div class="tabela-wrap" style="overflow-x:auto">
-      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:16px;border-bottom:1px solid var(--creme-escuro);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-        <span>💧 ${titulo}</span>
-        <button class="btn btn-secondary btn-sm" onclick="exportarRelatorioSafra()">⬇ Exportar Excel</button>
-      </div>
-      <div style="padding:10px 20px;font-size:12px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">
-        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = aplicação já executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; toque numa data para ver os produtos
-      </div>
-      <table class="rel-safra">
-        <thead><tr>
-          <th>Talhão</th><th>Cultivar</th><th style="text-align:center">Plantio</th>
-          ${thsAplic.join('')}
-          <th style="text-align:center">Colheita</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
 function gerarRelatorioSafraCompleta() {
   const plantiosSafra = plantios.filter(filtroCadernoSafra);
   if (plantiosSafra.length === 0) return '<div class="tabela-vazia" style="padding:30px;text-align:center">Nenhum plantio cadastrado' + (cadernoSafra?` para a safra ${cadernoSafra}`:'') + '.</div>';
@@ -5691,11 +5595,10 @@ function gerarRelatorioSafraCompleta() {
       const ev = l.mapaSlot[slot];
       if (!ev) return '<td style="text-align:center;color:#c9d1cc">—</td>';
       const bg = ev.dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
-      const icone = ev.kind==='plantio' ? '🌱' : ev.kind==='colheita' ? '🌾' : (ev.a.tipo_aplicacao==='pulverizacao' ? '💧' : '🪨');
       let prods = '';
       if (ev.kind==='aplic') prods = (produtosDaAplicacao(ev.a)||[]).map(x=>x.produto).join(', ');
       else if (ev.kind==='plantio') prods = ev.a.cultura||'';
-      return `<td style="text-align:center;white-space:nowrap;${bg}" title="${slot}${prods?' — '+prods:''}">${fmtDataBR(ev.dv.data)}<div style="font-size:9px;opacity:.8;font-weight:400">${icone}</div></td>`;
+      return `<td style="text-align:center;white-space:nowrap;${bg}" title="${slot}${prods?' — '+prods:''}">${fmtDataBR(ev.dv.data)}</td>`;
     }).join('');
     return `<tr>
       <td style="white-space:nowrap">${l.fazenda} · ${l.talhao}</td>
@@ -5722,7 +5625,7 @@ function gerarRelatorioSafraCompleta() {
         <button class="btn btn-secondary btn-sm" onclick="exportarRelatorioSafra()">⬇ Exportar Excel</button>
       </div>
       <div style="padding:10px 20px;font-size:12px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">
-        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; 🌱 plantio · 🌾 colheita · 🪨 sólido · 💧 pulverização &nbsp;·&nbsp; cada operação na coluna do seu tipo
+        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; cada operação na coluna do seu tipo &nbsp;·&nbsp; toque numa data para ver os produtos
       </div>
       <table class="rel-safra">
         <thead><tr>
