@@ -5618,62 +5618,91 @@ function gerarRelatorioSafraCompleta() {
   const plantiosSafra = plantios.filter(filtroCadernoSafra);
   if (plantiosSafra.length === 0) return '<div class="tabela-vazia" style="padding:30px;text-align:center">Nenhum plantio cadastrado' + (cadernoSafra?` para a safra ${cadernoSafra}`:'') + '.</div>';
 
-  // Para cada talhão (via plantio): Plantio | TODAS as operações (sólidos + pulverização) ordenadas por data | Colheita
+  // Deriva um rótulo curto do tipo da operação a partir da categoria/descrição cadastrada.
+  // fungCount é o contador de fungicidas já vistos NAQUELE talhão (para numerar Fung 1, 2, 3...).
+  function rotuloEvento(ev, fungState) {
+    if (ev.kind === 'plantio') return 'Plantio';
+    if (ev.kind === 'colheita') return 'Colheita';
+    const txt = normalizar((ev.a.categoria || '') + ' ' + (ev.a.tipo_aplicacao==='pulverizacao'?'pulv':'solido'));
+    if (txt.includes('corretivo') || txt.includes('calcario') || txt.includes('gesso')) return 'Corretivo';
+    if (txt.includes('aduba') || txt.includes('npk') || txt.includes('mono') || txt.includes('map') || txt.includes('formulado')) return 'Adubação';
+    if (txt.includes('dessec')) return 'Dessecação';
+    if (txt.includes('pre') && txt.includes('emerg')) return 'Pré-emerg.';
+    if (txt.includes('pos') && txt.includes('emerg')) return 'Pós-emerg.';
+    if (txt.includes('fung')) { fungState.n++; return 'Fung ' + fungState.n; }
+    if (txt.includes('inset')) return 'Insetic.';
+    if (txt.includes('herb')) return 'Herbic.';
+    // fallback: sólido genérico vira "Sólido", pulverização genérica vira "Pulv."
+    return ev.a.tipo_aplicacao==='pulverizacao' ? 'Pulv.' : 'Sólido';
+  }
+
+  // Monta a linha do tempo de cada talhão: plantio + aplicações + colheita, tudo ordenado por data viva.
   const linhas = [];
-  let maxOps = 0;
+  let maxCols = 0;
   plantiosSafra.forEach(p => {
-    const dvPlant = dataViva(p);
     const cults = cultivaresDoPlantio(p);
     const cultivarNome = cults.map(c=>c.cultivar).filter(Boolean).join(', ') || (p.cultura||'');
-    // TODAS as aplicações (sólidos e pulverização) do talhão nesta safra, ordenadas pela data viva
-    const ops = adubacoes
+    const eventos = [];
+    // plantio
+    const dvP = dataViva(p);
+    if (dvP.data) eventos.push({ kind:'plantio', dv:dvP, a:p });
+    // aplicações (sólidos + pulverização)
+    adubacoes
       .filter(a => normalizar(a.fazenda)===normalizar(p.fazenda) && normalizar(a.talhao)===normalizar(p.talhao) && filtroCadernoSafra(a))
-      .map(a => ({ ...a, _dv: dataViva(a), _tipo: tipoDaAdubacao(a) }))
-      .filter(a => a._dv.data)
-      .sort((x,y)=> x._dv.data.localeCompare(y._dv.data));
+      .forEach(a => { const dv = dataViva(a); if (dv.data) eventos.push({ kind:'aplic', dv, a }); });
+    // colheita
     const colh = colheitas.filter(c => c.plantio_id === p.id)[0];
-    const dvColh = dataViva(colh);
-    maxOps = Math.max(maxOps, ops.length);
-    linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, dvPlant, ops, dvColh, ordPlant: dvPlant.data||'9999' });
+    if (colh) { const dvC = dataViva(colh); if (dvC.data) eventos.push({ kind:'colheita', dv:dvC, a:colh }); }
+    // ordena cronologicamente pela data viva
+    eventos.sort((x,y)=> x.dv.data.localeCompare(y.dv.data));
+    // atribui rótulos (numerando fungicidas na sequência do talhão)
+    const fungState = { n:0 };
+    eventos.forEach(ev => { ev.rotulo = rotuloEvento(ev, fungState); });
+    maxCols = Math.max(maxCols, eventos.length);
+    linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, eventos, ordPlant: dvP.data||'9999' });
   });
   linhas.sort((a,b)=> a.ordPlant.localeCompare(b.ordPlant) || (a.fazenda+a.talhao).localeCompare(b.fazenda+b.talhao));
 
-  const thsOps = [];
-  for (let i=1;i<=maxOps;i++) thsOps.push(`<th style="text-align:center">Op ${i}</th>`);
+  // Cabeçalho de cada coluna = rótulo mais frequente naquela posição entre todos os talhões.
+  const cabecalhos = [];
+  for (let i=0;i<maxCols;i++) {
+    const cont = {};
+    linhas.forEach(l => { const ev = l.eventos[i]; if (ev) cont[ev.rotulo] = (cont[ev.rotulo]||0)+1; });
+    const nome = Object.entries(cont).sort((a,b)=>b[1]-a[1])[0];
+    cabecalhos.push(nome ? nome[0] : `Op ${i+1}`);
+  }
+
+  const thsCols = cabecalhos.map(c => `<th style="text-align:center">${c}</th>`).join('');
 
   const rows = linhas.map(l => {
-    const celsOps = [];
-    for (let i=0;i<maxOps;i++) {
-      const a = l.ops[i];
-      if (!a) { celsOps.push('<td style="text-align:center;color:#c9d1cc">—</td>'); continue; }
-      const bg = a._dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
-      const icone = a._tipo==='pulverizacao' ? '💧' : '🪨';
-      const desc = a.categoria || (a._tipo==='pulverizacao'?'Pulv.':'Sólido');
-      const prods = (produtosDaAplicacao(a)||[]).map(x=>x.produto).join(', ');
-      celsOps.push(`<td style="text-align:center;white-space:nowrap;${bg}" title="${desc}${prods?' — '+prods:''}">${fmtDataBR(a._dv.data)}<div style="font-size:9px;opacity:.8;font-weight:400">${icone} ${desc}</div></td>`);
+    const cels = [];
+    for (let i=0;i<maxCols;i++) {
+      const ev = l.eventos[i];
+      if (!ev) { cels.push('<td style="text-align:center;color:#c9d1cc">—</td>'); continue; }
+      const bg = ev.dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
+      const icone = ev.kind==='plantio' ? '🌱' : ev.kind==='colheita' ? '🌾' : (ev.a.tipo_aplicacao==='pulverizacao' ? '💧' : '🪨');
+      let prods = '';
+      if (ev.kind==='aplic') prods = (produtosDaAplicacao(ev.a)||[]).map(x=>x.produto).join(', ');
+      else if (ev.kind==='plantio') prods = ev.a.cultura||'';
+      cels.push(`<td style="text-align:center;white-space:nowrap;${bg}" title="${ev.rotulo}${prods?' — '+prods:''}">${fmtDataBR(ev.dv.data)}<div style="font-size:9px;opacity:.8;font-weight:400">${icone} ${ev.rotulo}</div></td>`);
     }
     return `<tr>
       <td style="white-space:nowrap">${l.fazenda} · ${l.talhao}</td>
       <td style="white-space:nowrap">${l.cultivar||'—'}</td>
-      ${celData(l.dvPlant)}
-      ${celsOps.join('')}
-      ${celData(l.dvColh)}
+      ${cels.join('')}
     </tr>`;
   }).join('');
 
   const titulo = 'Planejamento Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
-  const colunasExp = ['Talhão','Cultivar','Plantio'];
-  for (let i=1;i<=maxOps;i++) colunasExp.push('Op '+i);
-  colunasExp.push('Colheita');
+  const colunasExp = ['Talhão','Cultivar', ...cabecalhos];
   relatorioAtual = {
     titulo: 'Planejamento_Safra', colunas: colunasExp,
     rows: linhas.map(l => {
-      const r = [`${l.fazenda} · ${l.talhao}`, l.cultivar, l.dvPlant.data?fmtDataBR(l.dvPlant.data):''];
-      for (let i=0;i<maxOps;i++) {
-        const a = l.ops[i];
-        r.push(a ? `${fmtDataBR(a._dv.data)} (${a._tipo==='pulverizacao'?'Pulv':'Sólido'}${a.categoria?' '+a.categoria:''})` : '');
+      const r = [`${l.fazenda} · ${l.talhao}`, l.cultivar];
+      for (let i=0;i<maxCols;i++) {
+        const ev = l.eventos[i];
+        r.push(ev ? fmtDataBR(ev.dv.data) : '');
       }
-      r.push(l.dvColh.data?fmtDataBR(l.dvColh.data):'');
       return r;
     })
   };
@@ -5685,13 +5714,12 @@ function gerarRelatorioSafraCompleta() {
         <button class="btn btn-secondary btn-sm" onclick="exportarRelatorioSafra()">⬇ Exportar Excel</button>
       </div>
       <div style="padding:10px 20px;font-size:12px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">
-        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; 🪨 sólido · 💧 pulverização &nbsp;·&nbsp; toque numa data para ver os produtos
+        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; 🌱 plantio · 🌾 colheita · 🪨 sólido · 💧 pulverização &nbsp;·&nbsp; colunas em ordem cronológica &nbsp;·&nbsp; toque numa data para ver os produtos
       </div>
       <table class="rel-safra">
         <thead><tr>
-          <th>Talhão</th><th>Cultivar</th><th style="text-align:center">🌱 Plantio</th>
-          ${thsOps.join('')}
-          <th style="text-align:center">🌾 Colheita</th>
+          <th>Talhão</th><th>Cultivar</th>
+          ${thsCols}
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
