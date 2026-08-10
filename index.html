@@ -421,6 +421,10 @@
   .dash-exp-vazio { color:var(--cinza); font-size:13px; padding:8px 0; }
   .te-corpo .prod-dose-mini { table-layout: fixed; }
   .te-corpo .prod-dose-mini .pd-dose { width: 42%; }
+  /* Coluna de produtos no Caderno de Campo: larga o suficiente para o nome não quebrar letra a letra */
+  .prod-dose-caderno { min-width: 260px; }
+  .prod-dose-caderno .pd-nome { white-space: nowrap; word-break: normal; padding-right: 18px !important; }
+  .prod-dose-caderno .pd-dose { min-width: 90px; }
   .prod-dose-mini tr:hover td { background: transparent !important; }
   th.th-ord:hover { background: rgba(255,255,255,0.08); }
   .th-seta { font-size: 10px; opacity: .9; }
@@ -4248,7 +4252,7 @@ function renderAdubacao(tipo) {
         ${thOrd(tipo,'data_conclusao','Data Execução')}
         ${thOrd(tipo,'fazenda','Fazenda')}
         ${thOrd(tipo,'talhao','Talhão')}
-        <th>Produtos (dose)</th>
+        <th style="min-width:280px">Produtos (dose)</th>
         ${ehPulv?thOrd(tipo,'vazao','Vazão'):''}
         ${ehPulv?`<th>Descrição</th>`:''}
         ${thOrd(tipo,'status','Status')}
@@ -4262,7 +4266,7 @@ function renderAdubacao(tipo) {
         }).map(a=>{
           const prods = produtosDaAplicacao(a);
           // Cada produto numa linha, com a dose alinhada à direita na mesma altura do nome
-          const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
+          const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini prod-dose-caderno">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
           return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}${ehPulv?`<td>${a.categoria||'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
