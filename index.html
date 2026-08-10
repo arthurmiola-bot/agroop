@@ -382,7 +382,12 @@
   .prod-dose-mini td { border: none !important; padding: 2px 0 !important; font-size: 13px; vertical-align: top; }
   .prod-dose-mini .pd-nome { padding-right: 14px !important; word-break: break-word; }
   .prod-dose-mini .pd-dose { text-align: right; white-space: nowrap; font-family: 'DM Mono', monospace; color: var(--verde); font-weight: 500; }
-  /* Calendário de aplicações no dashboard */
+  /* Relatórios de safra (plantio/colheita e aplicações) */
+  .rel-safra { width:100%; border-collapse:collapse; font-size:13px; }
+  .rel-safra th { background:var(--verde); color:#fff; padding:10px 12px; font-family:'Syne',sans-serif; font-weight:600; font-size:12px; white-space:nowrap; text-align:left; border:1px solid rgba(255,255,255,.15); }
+  .rel-safra td { padding:9px 12px; border:1px solid var(--creme-escuro); }
+  .rel-safra tbody tr:nth-child(even) { background:#faf8f4; }
+  .btn-sm { padding:6px 12px; font-size:13px; }
   .cal-topo { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
   .cal-titulo { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; }
   .cal-legenda { display:flex; gap:16px; justify-content:center; margin-bottom:12px; font-size:12px; color:var(--cinza); }
@@ -2717,7 +2722,8 @@ function renderSubabaEstoque() {
   el.innerHTML = `
     <div class="sec-header">
       <div style="font-size:14px;color:var(--cinza)">Estoque de insumos</div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary" onclick="abrirImportarNF()">📄 Importar NF (XML)</button>
         <button class="btn btn-secondary" onclick="abrirEntradaManual()">+ Entrada Manual</button>
         <button class="btn btn-primary" onclick="abrirModalRetirada()">− Retirada</button>
       </div>
@@ -2908,6 +2914,175 @@ window.salvarEntrada = async function() {
     toast('Entrada registrada no ACF Estoque!');
     renderEstoque();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ══════════════ IMPORTAÇÃO DE NF-e (XML) → ENTRADA DE INSUMOS ══════════════
+let nfItensTemp = [];   // itens lidos do XML, prontos para conferência
+let nfDadosTemp = {};   // { numero, emitente, data }
+
+window.abrirImportarNF = function() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="modal-overlay ativo" id="modal-nf">
+      <div class="modal" style="max-width:640px">
+        <div class="modal-titulo">📄 Importar NF-e (XML)</div>
+        <div style="font-size:13px;color:var(--cinza);margin-bottom:14px;line-height:1.5">
+          Selecione o arquivo <b>XML</b> da nota fiscal (baixado do portal da SEFAZ, do seu emissor ou enviado pelo fornecedor).
+          O app vai ler os produtos, quantidades e valores para você conferir antes de dar entrada no estoque.
+        </div>
+        <div class="form-group">
+          <label>Arquivo XML da NF-e</label>
+          <input type="file" id="nf-arquivo" accept=".xml,text/xml" onchange="processarXmlNF()">
+        </div>
+        <div id="nf-conferencia"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="fecharModal('modal-nf')">Cancelar</button>
+          <button class="btn btn-primary" id="nf-btn-confirmar" onclick="confirmarImportacaoNF()" style="display:none">Confirmar Entrada</button>
+        </div>
+      </div>
+    </div>`);
+  carregarCompendio(); // garante compêndio carregado para casar produtos
+};
+
+window.processarXmlNF = function() {
+  const inp = document.getElementById('nf-arquivo');
+  const file = inp.files && inp.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      await carregarCompendio(); // garante compêndio para casar produtos
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(e.target.result, 'text/xml');
+      if (xml.querySelector('parsererror')) { toast('Arquivo XML inválido.', 'erro'); return; }
+      // pega elemento por nome de tag ignorando namespace
+      const tag = (root, nome) => { const els = root.getElementsByTagName(nome); return els.length? els[0] : null; };
+      const txt = (root, nome) => { const el = tag(root, nome); return el ? el.textContent.trim() : ''; };
+
+      // Cabeçalho: número da NF e emitente
+      const ide = xml.getElementsByTagName('ide')[0];
+      const emit = xml.getElementsByTagName('emit')[0];
+      nfDadosTemp = {
+        numero: ide ? txt(ide, 'nNF') : '',
+        data: ide ? (txt(ide,'dhEmi')||txt(ide,'dEmi')).slice(0,10) : '',
+        emitente: emit ? (txt(emit,'xNome')||txt(emit,'xFant')) : ''
+      };
+
+      // Itens: cada <det> tem um <prod>
+      const dets = xml.getElementsByTagName('det');
+      nfItensTemp = [];
+      for (let i=0;i<dets.length;i++) {
+        const prod = dets[i].getElementsByTagName('prod')[0];
+        if (!prod) continue;
+        const nome = txt(prod,'xProd');
+        const qtd = parseFloat(txt(prod,'qCom')) || 0;
+        const und = (txt(prod,'uCom')||'').toUpperCase();
+        const vUn = parseFloat(txt(prod,'vUnCom')) || 0;
+        // tenta casar com o compêndio pelo nome
+        const match = (compendioDetalhado||[]).find(c => normalizar(c.nome||'') === normalizar(nome));
+        nfItensTemp.push({
+          nomeXml: nome,
+          produto: match ? match.nome : nome,  // nome final (editável)
+          matchId: match ? match.id : '',
+          cat: match ? (match.cat||'') : '',
+          ia: match ? (match.ia||'') : '',
+          qtd, unidade: normalizarUnidadeNF(und), custo: vUn,
+          casado: !!match
+        });
+      }
+      if (nfItensTemp.length === 0) { toast('Nenhum produto encontrado no XML.', 'erro'); return; }
+      renderConferenciaNF();
+    } catch(err) {
+      toast('Erro ao ler o XML: '+err.message, 'erro');
+    }
+  };
+  reader.readAsText(file);
+};
+
+// Converte unidade da NF (ex: KG, LT, TON, UN, CX) para as unidades do app
+function normalizarUnidadeNF(u) {
+  const map = { 'KG':'kg','QUILO':'kg','QUILOS':'kg','L':'L','LT':'L','LITRO':'L','LITROS':'L','LTS':'L',
+    'SC':'sc','SACA':'sc','SACAS':'sc','UN':'un','UND':'un','UNID':'un','PC':'un','PÇ':'un',
+    'CX':'cx','CAIXA':'cx','G':'g','GR':'g','GRAMA':'g','ML':'mL','TON':'ton','TONELADA':'ton','T':'ton' };
+  return map[u] || (UNIDADES.includes(u) ? u : 'un');
+}
+
+function renderConferenciaNF() {
+  const div = document.getElementById('nf-conferencia');
+  if (!div) return;
+  const totalNF = nfItensTemp.reduce((s,it)=> s + it.qtd*it.custo, 0);
+  div.innerHTML = `
+    <div style="background:var(--creme);border-radius:10px;padding:12px 14px;margin:14px 0;font-size:13px">
+      <div><b>NF nº:</b> ${nfDadosTemp.numero||'—'} &nbsp;·&nbsp; <b>Emitente:</b> ${nfDadosTemp.emitente||'—'}</div>
+      ${nfDadosTemp.data?`<div style="color:var(--cinza);margin-top:2px">Emissão: ${fmtDataBR(nfDadosTemp.data)}</div>`:''}
+    </div>
+    <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:8px">Itens da nota (${nfItensTemp.length}) — confira antes de confirmar</div>
+    <div style="font-size:12px;color:var(--cinza);margin-bottom:10px">🟢 = produto encontrado no compêndio · 🟡 = novo (será criado como digitado). Você pode ajustar quantidade, unidade e custo.</div>
+    <div style="max-height:340px;overflow-y:auto">
+      ${nfItensTemp.map((it,idx)=>`
+        <div style="border:1px solid var(--creme-escuro);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span title="${it.casado?'Encontrado no compêndio':'Produto novo'}">${it.casado?'🟢':'🟡'}</span>
+            <input type="text" value="${(it.produto||'').replace(/"/g,'&quot;')}" oninput="editarItemNF(${idx},'produto',this.value)" style="flex:1;font-weight:600" list="compendio-datalist-nf">
+          </div>
+          <div style="font-size:11px;color:var(--cinza);margin-bottom:8px">No XML: ${it.nomeXml}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <div><label style="font-size:11px;color:var(--cinza)">Qtd</label><input type="number" value="${it.qtd}" step="0.01" min="0" oninput="editarItemNF(${idx},'qtd',this.value)"></div>
+            <div><label style="font-size:11px;color:var(--cinza)">Unid.</label><select onchange="editarItemNF(${idx},'unidade',this.value)">${UNIDADES.map(u=>`<option ${u===it.unidade?'selected':''}>${u}</option>`).join('')}</select></div>
+            <div><label style="font-size:11px;color:var(--cinza)">Custo unit. R$</label><input type="number" value="${it.custo}" step="0.01" min="0" oninput="editarItemNF(${idx},'custo',this.value)"></div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <datalist id="compendio-datalist-nf"></datalist>
+    <div style="text-align:right;font-weight:700;margin-top:8px">Total da NF: R$ ${fmt(totalNF)}</div>`;
+  document.getElementById('nf-btn-confirmar').style.display = 'inline-flex';
+  // popula datalist do compêndio para facilitar correções
+  carregarCompendio().then(lista => {
+    const dl = document.getElementById('compendio-datalist-nf');
+    if (dl) dl.innerHTML = [...new Set([...estoque.map(e=>e.produto), ...lista])].sort().map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('');
+  });
+}
+
+window.editarItemNF = function(idx, campo, valor) {
+  if (!nfItensTemp[idx]) return;
+  if (campo==='qtd' || campo==='custo') nfItensTemp[idx][campo] = parseFloat(valor)||0;
+  else nfItensTemp[idx][campo] = valor;
+  if (campo==='produto') {
+    const match = (compendioDetalhado||[]).find(c => normalizar(c.nome||'') === normalizar(valor));
+    nfItensTemp[idx].matchId = match ? match.id : '';
+    nfItensTemp[idx].cat = match ? (match.cat||'') : '';
+    nfItensTemp[idx].ia = match ? (match.ia||'') : '';
+    nfItensTemp[idx].casado = !!match;
+  }
+  // recalcula total sem re-renderizar tudo (mantém foco); atualiza só o total
+  const totalNF = nfItensTemp.reduce((s,it)=> s + it.qtd*it.custo, 0);
+  const el = document.querySelector('#nf-conferencia > div:last-child');
+  if (el) el.textContent = 'Total da NF: R$ ' + fmt(totalNF);
+};
+
+window.confirmarImportacaoNF = async function() {
+  const validos = nfItensTemp.filter(it => it.produto && it.qtd > 0);
+  if (validos.length === 0) { toast('Nenhum item válido para importar.', 'erro'); return; }
+  const btn = document.getElementById('nf-btn-confirmar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    const dtNF = nfDadosTemp.data ? Timestamp.fromDate(new Date(nfDadosTemp.data+'T12:00:00')) : Timestamp.now();
+    for (const it of validos) {
+      const novaEntrada = {
+        cat: it.cat||'', dt: dtNF, forn: nfDadosTemp.emitente||'', funcId:'', funcNome:'',
+        ia: it.ia||'', nf: nfDadosTemp.numero||'', preco: it.custo||0, prodId: it.matchId||'',
+        prodNome: it.produto, qtd: it.qtd, unid: it.unidade
+      };
+      const ref = await addDoc(collection(db,'estoque_ins_entradas'), novaEntrada);
+      entradasRaw.push({ id: ref.id, ...novaEntrada });
+    }
+    recalcularEstoque();
+    fecharModal('modal-nf');
+    toast(`${validos.length} ${validos.length>1?'itens importados':'item importado'} da NF ${nfDadosTemp.numero||''}!`);
+    renderEstoque();
+  } catch(e) {
+    toast('Erro ao importar: '+e.message, 'erro');
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirmar Entrada'; }
+  }
 };
 
 // ══════════════ RETIRADAS ══════════════
@@ -5120,6 +5295,16 @@ function renderRelatorios() {
         <div class="relatorio-card-titulo">Custo por Fazenda</div>
         <div class="relatorio-card-desc">Comparativo entre propriedades</div>
       </div>
+      <div class="relatorio-card info" onclick="gerarRelatorio('safra_plantio')">
+        <div class="relatorio-card-icon">🌱</div>
+        <div class="relatorio-card-titulo">Planejamento de Safra</div>
+        <div class="relatorio-card-desc">Plantio e colheita por talhão</div>
+      </div>
+      <div class="relatorio-card" onclick="gerarRelatorio('safra_aplicacoes')">
+        <div class="relatorio-card-icon">💧</div>
+        <div class="relatorio-card-titulo">Aplicações da Safra</div>
+        <div class="relatorio-card-desc">Cronograma de aplicações por talhão</div>
+      </div>
     </div>
     <div id="resultado-relatorio"></div>`;
 }
@@ -5234,9 +5419,192 @@ window.gerarRelatorio = function(tipo) {
       relatorioAtual = { titulo:'Custo_por_Fazenda', colunas:['Fazenda','Retiradas','Área Total (ha)','Custo Total (R$)','Custo/ha (R$)'], rows };
       break;
     }
+    case 'safra_plantio': {
+      html = gerarRelatorioSafraPlantio();
+      break;
+    }
+    case 'safra_aplicacoes': {
+      html = gerarRelatorioSafraAplicacoes();
+      break;
+    }
   }
   el.innerHTML = html;
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+// ══════════ RELATÓRIOS DE SAFRA (datas vivas: planejada → executada) ══════════
+// Retorna a data "viva" de um registro: se concluído, a data de execução; senão, a planejada.
+// Também informa se está executado (para pintar de verde).
+function dataViva(reg) {
+  if (!reg) return { data:'', executado:false };
+  if (reg.status === 'concluido' && reg.data_conclusao)
+    return { data: String(reg.data_conclusao).slice(0,10), executado:true };
+  return { data: reg.data ? String(reg.data).slice(0,10) : '', executado:false };
+}
+function celData(dv) {
+  if (!dv.data) return '<td style="text-align:center;color:#c9d1cc">—</td>';
+  const bg = dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
+  return `<td style="text-align:center;white-space:nowrap;${bg}">${fmtDataBR(dv.data)}</td>`;
+}
+
+function gerarRelatorioSafraPlantio() {
+  const lista = plantios.filter(filtroCadernoSafra);
+  if (lista.length === 0) return '<div class="tabela-vazia" style="padding:30px;text-align:center">Nenhum plantio cadastrado' + (cadernoSafra?` para a safra ${cadernoSafra}`:'') + '.</div>';
+  // Uma linha por cultivar de cada plantio (para casar área/população/ciclo)
+  const linhas = [];
+  lista.forEach(p => {
+    const dvPlant = dataViva(p);
+    const cults = cultivaresDoPlantio(p);
+    // colheitas ligadas a este plantio
+    const colhsPlant = colheitas.filter(c => c.plantio_id === p.id);
+    (cults.length?cults:[{cultivar:p.cultura||'',area_ha:0,ciclo_dias:0,populacao:0}]).forEach(cv => {
+      // acha a colheita correspondente ao cultivar
+      const colh = colhsPlant.find(c => normalizar(c.cultivar||'') === normalizar(cv.cultivar||'')) || colhsPlant[0];
+      const dvColh = dataViva(colh);
+      linhas.push({
+        fazenda: p.fazenda||'', talhao: p.talhao||'',
+        area: cv.area_ha>0 ? cv.area_ha : areaDoTalhao(p.fazenda, p.talhao),
+        cultura: p.cultura||'', cultivar: cv.cultivar||'',
+        dias: cv.ciclo_dias||0, populacao: cv.populacao||0,
+        dvPlant, dvColh,
+        ordPlant: dvPlant.data||'9999'
+      });
+    });
+  });
+  linhas.sort((a,b)=> a.ordPlant.localeCompare(b.ordPlant) || (a.fazenda+a.talhao).localeCompare(b.fazenda+b.talhao));
+
+  const rows = linhas.map((l,i) => `
+    <tr>
+      <td style="text-align:center">${i+1}</td>
+      <td style="white-space:nowrap">${l.fazenda} · ${l.talhao}</td>
+      <td style="text-align:center">${l.area?fmt(l.area):'—'}</td>
+      <td>${l.cultura||'—'}</td>
+      <td style="white-space:nowrap">${l.cultivar||'—'}</td>
+      <td style="text-align:center">${l.dias?fmt(l.dias):'—'}</td>
+      <td style="text-align:center">${l.populacao?fmt(l.populacao):'—'}</td>
+      ${celData(l.dvPlant)}
+      ${celData(l.dvColh)}
+    </tr>`).join('');
+
+  const titulo = 'Planejamento de Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
+  // guarda para exportar
+  relatorioAtual = {
+    titulo: 'Planejamento_Safra',
+    colunas: ['Ordem','Talhão','Área (ha)','Cultura','Cultivar','Dias','População','Plantio','Colheita'],
+    rows: linhas.map((l,i)=>[i+1, `${l.fazenda} · ${l.talhao}`, l.area||'', l.cultura, l.cultivar, l.dias||'', l.populacao||'', l.dvPlant.data?fmtDataBR(l.dvPlant.data):'', l.dvColh.data?fmtDataBR(l.dvColh.data):''])
+  };
+
+  return `
+    <div class="tabela-wrap" style="overflow-x:auto">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:16px;border-bottom:1px solid var(--creme-escuro);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>🌱 ${titulo}</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportarRelatorioSafra()">⬇ Exportar Excel</button>
+      </div>
+      <div style="padding:10px 20px;font-size:12px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">
+        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Data em verde = operação já executada &nbsp;·&nbsp; sem cor = data planejada
+      </div>
+      <table class="rel-safra">
+        <thead><tr>
+          <th style="text-align:center">Ordem</th><th>Talhão</th><th style="text-align:center">Área (ha)</th>
+          <th>Cultura</th><th>Cultivar</th><th style="text-align:center">Dias</th><th style="text-align:center">População</th>
+          <th style="text-align:center">Plantio</th><th style="text-align:center">Colheita</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function gerarRelatorioSafraAplicacoes() {
+  const plantiosSafra = plantios.filter(filtroCadernoSafra);
+  if (plantiosSafra.length === 0) return '<div class="tabela-vazia" style="padding:30px;text-align:center">Nenhum plantio cadastrado' + (cadernoSafra?` para a safra ${cadernoSafra}`:'') + '.</div>';
+
+  // Para cada talhão (via plantio), monta: Plantio | aplicações dinâmicas (ordenadas por data) | Colheita
+  const linhas = [];
+  let maxAplic = 0;
+  plantiosSafra.forEach(p => {
+    const dvPlant = dataViva(p);
+    const cults = cultivaresDoPlantio(p);
+    const cultivarNome = cults.map(c=>c.cultivar).filter(Boolean).join(', ') || (p.cultura||'');
+    // aplicações do mesmo talhão nesta safra, ordenadas pela data viva
+    const aplics = adubacoes
+      .filter(a => normalizar(a.fazenda)===normalizar(p.fazenda) && normalizar(a.talhao)===normalizar(p.talhao) && filtroCadernoSafra(a))
+      .map(a => ({ ...a, _dv: dataViva(a) }))
+      .filter(a => a._dv.data)
+      .sort((x,y)=> x._dv.data.localeCompare(y._dv.data));
+    // colheita
+    const colh = colheitas.filter(c => c.plantio_id === p.id)[0];
+    const dvColh = dataViva(colh);
+    maxAplic = Math.max(maxAplic, aplics.length);
+    linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, dvPlant, aplics, dvColh, ordPlant: dvPlant.data||'9999' });
+  });
+  linhas.sort((a,b)=> a.ordPlant.localeCompare(b.ordPlant) || (a.fazenda+a.talhao).localeCompare(b.fazenda+b.talhao));
+
+  // cabeçalho dinâmico: Aplic 1..maxAplic
+  const thsAplic = [];
+  for (let i=1;i<=maxAplic;i++) thsAplic.push(`<th style="text-align:center">Aplic ${i}</th>`);
+
+  const rows = linhas.map(l => {
+    const celsAplic = [];
+    for (let i=0;i<maxAplic;i++) {
+      const a = l.aplics[i];
+      if (!a) { celsAplic.push('<td style="text-align:center;color:#c9d1cc">—</td>'); continue; }
+      const bg = a._dv.executado ? 'background:#4a9d5f;color:#fff;font-weight:600' : '';
+      // descrição curta: categoria (pulv) ou resumo; título ajuda a ver produtos
+      const desc = a.categoria || (tipoDaAdubacao(a)==='pulverizacao'?'Pulv.':'Sólido');
+      const prods = (produtosDaAplicacao(a)||[]).map(x=>x.produto).join(', ');
+      celsAplic.push(`<td style="text-align:center;white-space:nowrap;${bg}" title="${desc}${prods?' — '+prods:''}">${fmtDataBR(a._dv.data)}<div style="font-size:9px;opacity:.8;font-weight:400">${desc}</div></td>`);
+    }
+    return `<tr>
+      <td style="white-space:nowrap">${l.fazenda} · ${l.talhao}</td>
+      <td style="white-space:nowrap">${l.cultivar||'—'}</td>
+      ${celData(l.dvPlant)}
+      ${celsAplic.join('')}
+      ${celData(l.dvColh)}
+    </tr>`;
+  }).join('');
+
+  const titulo = 'Aplicações da Safra' + (cadernoSafra?` — ${cadernoSafra}`:'');
+  // exportação: cabeçalho dinâmico
+  const colunasExp = ['Talhão','Cultivar','Plantio'];
+  for (let i=1;i<=maxAplic;i++) colunasExp.push('Aplic '+i);
+  colunasExp.push('Colheita');
+  relatorioAtual = {
+    titulo: 'Aplicacoes_Safra', colunas: colunasExp,
+    rows: linhas.map(l => {
+      const r = [`${l.fazenda} · ${l.talhao}`, l.cultivar, l.dvPlant.data?fmtDataBR(l.dvPlant.data):''];
+      for (let i=0;i<maxAplic;i++) r.push(l.aplics[i] ? fmtDataBR(l.aplics[i]._dv.data) : '');
+      r.push(l.dvColh.data?fmtDataBR(l.dvColh.data):'');
+      return r;
+    })
+  };
+
+  return `
+    <div class="tabela-wrap" style="overflow-x:auto">
+      <div style="padding:16px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:16px;border-bottom:1px solid var(--creme-escuro);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <span>💧 ${titulo}</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportarRelatorioSafra()">⬇ Exportar Excel</button>
+      </div>
+      <div style="padding:10px 20px;font-size:12px;color:var(--cinza);border-bottom:1px solid var(--creme-escuro)">
+        <span style="display:inline-block;width:14px;height:14px;background:#4a9d5f;border-radius:3px;vertical-align:middle;margin-right:5px"></span> Verde = aplicação já executada &nbsp;·&nbsp; sem cor = planejada &nbsp;·&nbsp; toque numa data para ver os produtos
+      </div>
+      <table class="rel-safra">
+        <thead><tr>
+          <th>Talhão</th><th>Cultivar</th><th style="text-align:center">Plantio</th>
+          ${thsAplic.join('')}
+          <th style="text-align:center">Colheita</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+window.exportarRelatorioSafra = function() {
+  if (!relatorioAtual.rows || relatorioAtual.rows.length===0) { toast('Nada para exportar.','erro'); return; }
+  const dados = [relatorioAtual.colunas, ...relatorioAtual.rows];
+  const ws = XLSX.utils.aoa_to_sheet(dados);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Safra');
+  XLSX.writeFile(wb, `${relatorioAtual.titulo}_${hoje()}.xlsx`);
 };
 
 function tabelaRelatorio(titulo, colunas, rows, rodape) {
