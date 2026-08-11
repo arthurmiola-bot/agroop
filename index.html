@@ -3858,6 +3858,89 @@ function renderSubabaCaderno() {
 }
 
 // ── PLANTIO ──
+// ══════════ SELEÇÃO MÚLTIPLA (excluir vários planejamentos de uma vez) ══════════
+// Guarda os IDs selecionados por tipo de aba do caderno.
+const selecaoCaderno = { plantio: new Set(), solido: new Set(), pulverizacao: new Set() };
+
+window.toggleSelCaderno = function(tipo, id) {
+  const s = selecaoCaderno[tipo];
+  if (s.has(id)) s.delete(id); else s.add(id);
+  atualizarBarraSelecao(tipo);
+};
+
+window.toggleSelTodosCaderno = function(tipo, marcar) {
+  const s = selecaoCaderno[tipo];
+  document.querySelectorAll(`input[data-selcad="${tipo}"]`).forEach(cb => {
+    cb.checked = marcar;
+    if (marcar) s.add(cb.value); else s.delete(cb.value);
+  });
+  atualizarBarraSelecao(tipo);
+};
+
+function atualizarBarraSelecao(tipo) {
+  const barra = document.getElementById(`sel-barra-${tipo}`);
+  const n = selecaoCaderno[tipo].size;
+  if (barra) {
+    barra.style.display = n>0 ? 'flex' : 'none';
+    const cont = document.getElementById(`sel-cont-${tipo}`);
+    if (cont) cont.textContent = n;
+  }
+  // sincroniza o "selecionar tudo"
+  const todos = document.querySelectorAll(`input[data-selcad="${tipo}"]`);
+  const master = document.getElementById(`sel-todos-${tipo}`);
+  if (master && todos.length) master.checked = (n === todos.length && n > 0);
+}
+
+// Coluna de checkbox (cabeçalho e célula)
+function thSelCaderno(tipo) {
+  return `<th style="width:34px;text-align:center"><input type="checkbox" id="sel-todos-${tipo}" onchange="toggleSelTodosCaderno('${tipo}',this.checked)" title="Selecionar todos"></th>`;
+}
+function tdSelCaderno(tipo, id) {
+  const marcado = selecaoCaderno[tipo].has(id) ? 'checked' : '';
+  return `<td style="text-align:center"><input type="checkbox" data-selcad="${tipo}" value="${id}" ${marcado} onchange="toggleSelCaderno('${tipo}','${id}')"></td>`;
+}
+// Barra de ações em massa (aparece quando há itens selecionados)
+function barraSelCaderno(tipo, colecao) {
+  return `<div id="sel-barra-${tipo}" style="display:none;align-items:center;gap:12px;background:#fdecea;border:1px solid #f5c6c2;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <span style="font-size:14px;color:var(--vermelho);font-weight:600"><span id="sel-cont-${tipo}">0</span> selecionado(s)</span>
+    <button class="btn btn-sm" style="background:var(--vermelho);color:#fff" onclick="excluirSelecionadosCaderno('${tipo}','${colecao}')">🗑 Excluir selecionados</button>
+    <button class="btn btn-sm btn-secondary" onclick="limparSelecaoCaderno('${tipo}')">Cancelar</button>
+  </div>`;
+}
+window.limparSelecaoCaderno = function(tipo) {
+  selecaoCaderno[tipo].clear();
+  document.querySelectorAll(`input[data-selcad="${tipo}"]`).forEach(cb => cb.checked=false);
+  const master = document.getElementById(`sel-todos-${tipo}`); if (master) master.checked=false;
+  atualizarBarraSelecao(tipo);
+};
+
+window.excluirSelecionadosCaderno = async function(tipo, colecao) {
+  const ids = [...selecaoCaderno[tipo]];
+  if (ids.length === 0) return;
+  const ok = await window.exigirMaster();
+  if (!ok) return;
+  if (!confirm(`Excluir ${ids.length} planejamento(s) selecionado(s)? Esta ação não pode ser desfeita.`)) return;
+  let apagados = 0;
+  for (const id of ids) {
+    try {
+      await deleteDoc(doc(db, colecao, id));
+      // remove do array local correspondente
+      if (colecao === 'insumos_campo_plantio') {
+        const idx = plantios.findIndex(x=>x.id===id);
+        if (idx>=0) { removerColheitasDoPlantio(id); plantios.splice(idx,1); }
+      } else if (colecao === 'insumos_campo_adubacao') {
+        const idx = adubacoes.findIndex(x=>x.id===id); if (idx>=0) adubacoes.splice(idx,1);
+      }
+      apagados++;
+    } catch(e) { /* continua os demais */ }
+  }
+  selecaoCaderno[tipo].clear();
+  toast(`${apagados} planejamento(s) excluído(s).`);
+  // re-renderiza a aba certa
+  if (tipo==='plantio') renderPlantio();
+  else renderAdubacao(tipo);
+};
+
 function renderPlantio() {
   const el = document.getElementById('caderno-conteudo');
   const lista = plantios.filter(filtroCadernoSafra);
@@ -3870,8 +3953,9 @@ function renderPlantio() {
         <button class="btn btn-secondary btn-sm" onclick="exportarCaderno('plantio')">📥 Exportar Excel</button>
         <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button>
       </div></div>
-    <div class="tabela-wrap"><table>
+    <div class="tabela-wrap">${barraSelCaderno('plantio','insumos_campo_plantio')}<table>
       <thead><tr>
+        ${thSelCaderno('plantio')}
         ${thOrd('plantio','data','Data Planejada')}
         ${thOrd('plantio','data_conclusao','Data Execução')}
         ${thOrd('plantio','fazenda','Fazenda')}
@@ -3885,7 +3969,7 @@ function renderPlantio() {
         <th class="col-acoes">Ações</th>
       </tr></thead>
       <tbody>
-        ${lista.length===0?'<tr><td colspan="11" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
+        ${lista.length===0?'<tr><td colspan="12" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
         ordenarLista(lista,'plantio',(p,c)=>{
           if(c==='ciclo_dias') return parseFloat(p.ciclo_dias)||0;
           return p[c]||'';
@@ -3894,7 +3978,7 @@ function renderPlantio() {
           const cultCell = cs.length===0 ? '—' : cs.map(c=>`${c.cultivar||'—'}${c.area_ha>0?` <span style="font-size:11px;color:var(--cinza)">(${fmt(c.area_ha)} ha)</span>`:''}`).join('<br>');
           const cicloCell = cs.length===0 ? '—' : cs.map(c=>c.ciclo_dias>0?fmt(c.ciclo_dias)+'d':'—').join('<br>');
           const prevCell = cs.length===0 ? '—' : cs.map(c=>fmtDataBR(c.data_prevista_colheita)).join('<br>');
-          return `<tr><td>${fmtDataBR(p.data)}</td><td>${p.data_conclusao?fmtDataBR(p.data_conclusao):'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
+          return `<tr>${tdSelCaderno('plantio',p.id)}<td>${fmtDataBR(p.data)}</td><td>${p.data_conclusao?fmtDataBR(p.data_conclusao):'—'}</td><td>${p.fazenda||'—'}</td><td>${p.talhao||'—'}</td><td>${p.cultura||'—'}</td>
         <td>${p.safra||'—'}</td><td>${cultCell}</td><td>${cicloCell}</td>
         <td>${prevCell}</td><td>${badgeStatusCampo(p.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
@@ -4246,8 +4330,9 @@ function renderAdubacao(tipo) {
         <button class="btn btn-primary" onclick="abrirModalAdubacao(null,'${tipo}')">+ Novo Planejamento</button>
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
-    <div class="tabela-wrap"><table>
+    <div class="tabela-wrap">${barraSelCaderno(tipo,'insumos_campo_adubacao')}<table>
       <thead><tr>
+        ${thSelCaderno(tipo)}
         ${thOrd(tipo,'data','Data Planejada')}
         ${thOrd(tipo,'data_conclusao','Data Execução')}
         ${thOrd(tipo,'fazenda','Fazenda')}
@@ -4259,7 +4344,7 @@ function renderAdubacao(tipo) {
         <th class="col-acoes">Ações</th>
       </tr></thead>
       <tbody>
-        ${lista.length===0?`<tr><td colspan="${ehPulv?9:7}" class="tabela-vazia">Nenhum registro</td></tr>`:
+        ${lista.length===0?`<tr><td colspan="${ehPulv?10:8}" class="tabela-vazia">Nenhum registro</td></tr>`:
         ordenarLista(lista,tipo,(a,c)=>{
           if(c==='dose') return parseFloat(a.dose)||0;
           return a[c]||'';
@@ -4267,7 +4352,7 @@ function renderAdubacao(tipo) {
           const prods = produtosDaAplicacao(a);
           // Cada produto numa linha, com a dose alinhada à direita na mesma altura do nome
           const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini prod-dose-caderno">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
-          return `<tr><td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}${ehPulv?`<td>${a.categoria||'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
+          return `<tr>${tdSelCaderno(tipo,a.id)}<td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}${ehPulv?`<td>${a.categoria||'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
