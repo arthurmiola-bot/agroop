@@ -5727,28 +5727,37 @@ function gerarRelatorioSafraCompleta() {
 
     // marca posição do plantio para separar Dessecação (antes) de Dessec. Soja (depois)
     const idxPlantio = eventos.findIndex(e => e.kind==='plantio');
-    // contadores por tipo para numerar repetidos (Corretivo 1, 2; Adubação 1,2,3; Fung 1,2,3...)
-    const cont = {};
     const mapaSlot = {}; // slot -> evento (um evento por slot dentro do talhão)
+    const numeraveis = ['Corretivo','Adubação','Fung','Sólido','Pulv.','Insetic.','Herbic.'];
+
+    // 1º passo: define a base de cada evento (e separa Dessec. Soja)
     eventos.forEach((ev, idx) => {
       let base = tipoBase(ev);
-      // Dessecação após o plantio é a "Dessec. Soja" (pré-colheita)
       if (base==='Dessecação' && idxPlantio>=0 && idx>idxPlantio) base = 'Dessec. Soja';
-      // define o slot: tipos que se repetem recebem número.
-      // Prioriza o número que o usuário escreveu na descrição (ex: "Fungicida 4" -> Fung 4);
-      // se não houver, usa um contador sequencial.
-      const numeraveis = ['Corretivo','Adubação','Fung','Sólido','Pulv.','Insetic.','Herbic.'];
-      let slot, num;
+      ev.base = base;
+    });
+
+    // 2º passo: numera os tipos que se repetem, SEM colisão.
+    // Agrupa por base; dentro do grupo, ordena por data e atribui números 1,2,3... na ordem cronológica.
+    // (A numeração cronológica é sempre consistente, mesmo que as descrições estejam misturadas.)
+    const porBase = {};
+    eventos.forEach(ev => { (porBase[ev.base] = porBase[ev.base] || []).push(ev); });
+    Object.entries(porBase).forEach(([base, evs]) => {
       if (numeraveis.includes(base)) {
-        const numDesc = numeroNaDescricao(ev);
-        if (numDesc != null) { num = numDesc; }
-        else { cont[base]=(cont[base]||0)+1; num = cont[base]; }
-        slot = `${base} ${num}`;
-      } else { slot = base; num = 0; }
-      ev.slot = slot; ev.base = base;
-      mapaSlot[slot] = ev;
-      // registra rank do slot (base rank * 100 + número, para ordenar Fung 1 antes de Fung 2)
-      slotsUsados[slot] = rankSlot(base)*100 + num;
+        evs.sort((x,y)=> x.dv.data.localeCompare(y.dv.data));
+        evs.forEach((ev,i) => { ev.slot = `${base} ${i+1}`; ev.num = i+1; });
+      } else {
+        // tipos únicos (Plantio, Colheita, Dessecação, Pré-emerg., Pós-emerg., Dessec. Soja)
+        // se houver mais de um por engano, numera para não sobrescrever
+        if (evs.length === 1) { evs[0].slot = base; evs[0].num = 0; }
+        else { evs.sort((x,y)=> x.dv.data.localeCompare(y.dv.data)); evs.forEach((ev,i)=>{ ev.slot = i===0?base:`${base} ${i+1}`; ev.num = i; }); }
+      }
+    });
+
+    // 3º passo: registra cada evento no mapa e no ranking de colunas
+    eventos.forEach(ev => {
+      mapaSlot[ev.slot] = ev;
+      slotsUsados[ev.slot] = rankSlot(ev.base)*100 + (ev.num||0);
     });
     linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, mapaSlot, ordPlant: dvP.data||'9999' });
   });
