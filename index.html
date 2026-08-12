@@ -4352,7 +4352,7 @@ function renderAdubacao(tipo) {
           const prods = produtosDaAplicacao(a);
           // Cada produto numa linha, com a dose alinhada à direita na mesma altura do nome
           const prodCell = prods.length===0 ? '—' : `<table class="prod-dose-mini prod-dose-caderno">${prods.map(p=>`<tr><td class="pd-nome">${p.produto||'—'}</td><td class="pd-dose">${p.dose?fmt(p.dose)+' '+(p.unidade||''):'—'}</td></tr>`).join('')}</table>`;
-          return `<tr>${tdSelCaderno(tipo,a.id)}<td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}${ehPulv?`<td>${a.categoria||'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
+          return `<tr>${tdSelCaderno(tipo,a.id)}<td>${fmtDataBR(a.data)}${a.modo_data==='plantio'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após plantio</div>`:a.modo_data==='aplicacao'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após outra aplic.</div>`:a.modo_data==='pulv_anterior'?`<div style="font-size:11px;color:var(--cinza)">${fmt(a.dias_apos)}d após pulv. anterior</div>`:''}</td><td>${a.data_conclusao?fmtDataBR(a.data_conclusao):'—'}</td><td>${a.fazenda||'—'}</td><td>${a.talhao||'—'}</td><td>${prodCell}</td>${ehPulv?`<td>${a.vazao?a.vazao:'—'}</td>`:''}${ehPulv?`<td>${a.categoria||'—'}</td>`:''}<td>${badgeStatusCampo(a.status)}</td>
         <td class="col-acoes"><div class="acoes-wrap">
           ${a.status==='planejado'?`<button class="btn btn-sm btn-laranja" onclick="liberarParaCampo('${a.id}')" title="Disponibiliza para execução no modo Aplicações">🚜 Liberar p/ Campo</button>
           <button class="btn btn-sm btn-primary" onclick="concluirDireto('${a.id}')" title="Registrar como já concluída">✅</button>`:''}
@@ -4379,6 +4379,13 @@ function renderModoDataCampos(valores) {
         <div class="form-group"><label>Plantio de referência</label>
           <select id="ad-ref-plantio">${opcoes.map(p=>`<option value="${p.id}" ${p.id===valores.ref_plantio_id?'selected':''}>${p.cultura||'Plantio'} — ${p.data} (${p.cultivar||''})</option>`).join('')}</select></div>
         <div class="form-group"><label>Dias após o plantio</label><input type="number" id="ad-dias-apos" value="${valores.dias_apos!=null?valores.dias_apos:''}" min="0" step="1"></div>
+      </div>`;
+  }
+  if (modo === 'pulv_anterior') {
+    return `
+      <div class="form-group"><label>Dias após a pulverização anterior</label>
+        <input type="number" id="ad-dias-apos" value="${valores.dias_apos!=null?valores.dias_apos:''}" min="0" step="1" placeholder="Ex: 14">
+        <div style="font-size:11px;color:var(--cinza);margin-top:4px">A data será calculada a partir da última pulverização (por data) nesse talhão. Ex: Fung 2 conta a partir do Fung 1, Fung 3 a partir do Fung 2, e assim por diante.</div>
       </div>`;
   }
   if (modo === 'aplicacao') {
@@ -4441,7 +4448,8 @@ window.abrirModalAdubacao = function(id, tipo) {
           <select id="ad-modo-data" onchange="atualizarModoDataAdubacao()">
             <option value="fixa" ${modoInicial==='fixa'?'selected':''}>Data fixa</option>
             <option value="plantio" ${modoInicial==='plantio'?'selected':''}>X dias após o plantio</option>
-            <option value="aplicacao" ${modoInicial==='aplicacao'?'selected':''}>X dias após outra aplicação já planejada</option>
+            <option value="pulv_anterior" ${modoInicial==='pulv_anterior'?'selected':''}>X dias após a pulverização anterior (automático)</option>
+            <option value="aplicacao" ${modoInicial==='aplicacao'?'selected':''}>X dias após outra aplicação específica</option>
           </select></div>
         <div id="ad-modo-data-campos"></div>
         <div class="form-group"><label>Observação</label><input type="text" id="ad-obs" value="${a?.obs||''}" placeholder="Opcional"></div>
@@ -4623,6 +4631,12 @@ window.salvarAdubacao = async function(id) {
     const aRef = adubacoes.find(x=>x.id===ref_aplicacao_id);
     if (!aRef) { toast('Selecione a aplicação de referência.','erro'); return; }
     dataFinal = somarDias(aRef.data, dias_apos);
+  } else if (modo_data === 'pulv_anterior') {
+    dias_apos = parseFloat(document.getElementById('ad-dias-apos')?.value)||0;
+    // encontra a pulverização anterior (por data) no mesmo talhão; se não houver, deixa a data em branco (recalcula depois)
+    const dataRefAnterior = dataPulvAnterior(fazenda, talhao, id, '');
+    dataFinal = dataRefAnterior ? somarDias(dataRefAnterior, dias_apos) : '';
+    if (!dataFinal) toast('Sem pulverização anterior ainda — crie a anterior e use o botão 🔄 para calcular.', 'aviso');
   }
 
   const tipo_aplicacao = document.getElementById('ad-tipo')?.value || 'solido';
@@ -4672,9 +4686,55 @@ window.salvarAdubacao = async function(id) {
       toast('Planejamento salvo!');
     }
     fecharModal('modal-adubacao');
+    // Se for pulverização, recalcula a cadeia DAA do talhão (propaga Fung1→Fung2→Fung3...)
+    if (tipo_aplicacao === 'pulverizacao') {
+      await recalcularCadeiaDAA(fazenda, talhao);
+    }
     renderSubabaCaderno();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
+
+// Encontra a DATA da pulverização imediatamente anterior (por data) no mesmo talhão.
+// Considera só pulverizações; ignora a própria aplicação (idAtual) e as sem data.
+// dataLimite (opcional) = considerar só pulverizações ANTES desta data; se vazio, pega a última de todas.
+function dataPulvAnterior(fazenda, talhao, idAtual, dataLimite) {
+  const cands = adubacoes
+    .filter(x => tipoDaAdubacao(x)==='pulverizacao'
+      && normalizar(x.fazenda||'')===normalizar(fazenda)
+      && normalizar(x.talhao||'')===normalizar(talhao)
+      && x.id !== idAtual
+      && x.data)
+    .map(x => String(x.data).slice(0,10))
+    .filter(d => !dataLimite || d < dataLimite)
+    .sort((a,b)=> a.localeCompare(b));
+  return cands.length ? cands[cands.length-1] : '';
+}
+
+// Recalcula toda a cadeia DAA de um talhão, em ordem cronológica, para a propagação funcionar
+// (Fung 2 depende de Fung 1; ao recalcular Fung 1, o Fung 2 também precisa recalcular).
+async function recalcularCadeiaDAA(fazenda, talhao) {
+  // Roda várias passadas: cada uma resolve o próximo elo da cadeia (Fung1 vazio → depois Fung2 acha Fung1, etc.)
+  for (let passada=0; passada<8; passada++) {
+    let mudou = false;
+    const doTalhao = adubacoes
+      .filter(a => tipoDaAdubacao(a)==='pulverizacao'
+        && normalizar(a.fazenda||'')===normalizar(fazenda)
+        && normalizar(a.talhao||'')===normalizar(talhao))
+      .sort((a,b)=> String(a.data||'9999').localeCompare(String(b.data||'9999')));
+    for (const a of doTalhao) {
+      if (a.modo_data === 'pulv_anterior') {
+        const ref = dataPulvAnterior(fazenda, talhao, a.id, String(a.data||'').slice(0,10) || '') || dataPulvAnterior(fazenda, talhao, a.id, '');
+        if (ref) {
+          const nova = somarDias(ref, a.dias_apos||0);
+          if (nova && nova !== a.data) {
+            try { await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { data: nova }); a.data = nova; mudou = true; } catch(e){}
+          }
+        }
+      }
+    }
+    if (!mudou) break; // estabilizou
+  }
+}
 
 // Recalcula a data de um item "X dias após..." com base no valor atual da referência
 // (útil se a data do plantio ou da aplicação-base mudou depois que este item foi criado)
@@ -4690,6 +4750,12 @@ window.recalcularDataAdubacao = async function(id) {
     const ref = adubacoes.find(x=>x.id===a.ref_aplicacao_id);
     if (!ref) { toast('Aplicação de referência não encontrada (pode ter sido excluída).','erro'); return; }
     novaData = somarDias(ref.data, a.dias_apos);
+  } else if (a.modo_data==='pulv_anterior') {
+    // recalcula a cadeia inteira do talhão (propaga Fung1→Fung2→Fung3...) e re-renderiza
+    await recalcularCadeiaDAA(a.fazenda, a.talhao);
+    toast('Cadeia de datas recalculada.');
+    renderSubabaCaderno();
+    return;
   }
   if (novaData === a.data) { toast('A data já está atualizada.'); return; }
   try {
@@ -5150,7 +5216,7 @@ const MODELOS_CADERNO = {
       const dias = parseFloat(row['Dias'])||0;
       let modo_data = 'fixa';
       if (regra.includes('dap') || regra.includes('plantio')) modo_data = 'plantio';
-      else if (regra.includes('daa') || regra.includes('aplica')) modo_data = 'aplicacao';
+      else if (regra.includes('daa') || regra.includes('aplica')) modo_data = 'pulv_anterior';
       return {
         data: normalizarDataExcel(row['Data (AAAA-MM-DD)']||row['Data']||''), fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
         safra: row['Safra']||'', categoria: row['Categoria (Corretivo/Adubação)']||row['Categoria']||'Corretivo',
@@ -5175,7 +5241,7 @@ const MODELOS_CADERNO = {
       const dias = parseFloat(row['Dias'])||0;
       let modo_data = 'fixa';
       if (regra.includes('dap') || regra.includes('plantio')) modo_data = 'plantio';
-      else if (regra.includes('daa') || regra.includes('aplica')) modo_data = 'aplicacao';
+      else if (regra.includes('daa') || regra.includes('aplica')) modo_data = 'pulv_anterior';
       return {
         data: normalizarDataExcel(row['Data (AAAA-MM-DD)']||row['Data']||''), fazenda: row['Fazenda']||'', talhao: row['Talhão']||'',
         safra: row['Safra']||'', categoria: row['Categoria (Herbicida/Fungicida/Inseticida)']||row['Categoria']||'Herbicida',
@@ -5267,6 +5333,7 @@ window.importarPlanilha = function(input, tipo) {
               .sort((x,y)=>(x.data||'').localeCompare(y.data||''))[0];
             if (aRef) { g.data = somarDias(aRef.data, g.dias_apos); g.ref_aplicacao_id = aRef.id; }
           }
+          // pulv_anterior: a data será calculada em cadeia após salvar tudo (recalcularCadeiaDAA)
           // mantém produto/dose/unidade/categoria da 1ª linha para compatibilidade
           g.produto = g.produtos[0].produto;
           g.dose = g.produtos[0].dose;
@@ -5299,6 +5366,14 @@ window.importarPlanilha = function(input, tipo) {
       }
       if (tipo==='solido' || tipo==='pulverizacao') adubacoes.unshift(...novosLocais);
       if (tipo==='colheita') colheitas.unshift(...novosLocais);
+      // Após importar pulverizações, recalcula a cadeia DAA de cada talhão (Fung1→Fung2→Fung3...)
+      if (tipo==='pulverizacao') {
+        const talhoesUnicos = [...new Set(novosLocais.map(a => normalizar(a.fazenda||'')+'||'+normalizar(a.talhao||'')))];
+        for (const chave of talhoesUnicos) {
+          const amostra = novosLocais.find(a => normalizar(a.fazenda||'')+'||'+normalizar(a.talhao||'') === chave);
+          if (amostra) await recalcularCadeiaDAA(amostra.fazenda, amostra.talhao);
+        }
+      }
       const msgAgrup = (tipo==='solido'||tipo==='pulverizacao') ? ' (linhas do mesmo talhão/data/vazão agrupadas numa aplicação)' : '';
       toast(`${importados} registro(s) importado(s)${msgAgrup}${ignorados>0?`, ${ignorados} ignorado(s)`:''}.`);
       renderSubabaCaderno();
