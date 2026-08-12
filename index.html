@@ -5738,17 +5738,26 @@ function gerarRelatorioSafraCompleta() {
     });
 
     // 2º passo: numera os tipos que se repetem, SEM colisão.
-    // Agrupa por base; dentro do grupo, ordena por data e atribui números 1,2,3... na ordem cronológica.
-    // (A numeração cronológica é sempre consistente, mesmo que as descrições estejam misturadas.)
+    // Prioriza o número escrito na descrição ("Fungicida 4" -> Fung 4). Se dois caírem no mesmo
+    // número (ou não tiverem número), resolve por ordem cronológica preenchendo os slots livres.
     const porBase = {};
     eventos.forEach(ev => { (porBase[ev.base] = porBase[ev.base] || []).push(ev); });
     Object.entries(porBase).forEach(([base, evs]) => {
       if (numeraveis.includes(base)) {
+        // ordena por data para dar sequência estável
         evs.sort((x,y)=> x.dv.data.localeCompare(y.dv.data));
-        evs.forEach((ev,i) => { ev.slot = `${base} ${i+1}`; ev.num = i+1; });
+        const usados = new Set();
+        // 1ª volta: quem tem número na descrição e o slot está livre, fica com ele
+        evs.forEach(ev => {
+          const n = numeroNaDescricao(ev);
+          if (n != null && !usados.has(n)) { ev.num = n; usados.add(n); }
+        });
+        // 2ª volta: quem ainda não tem número recebe o menor número livre (1,2,3...)
+        evs.forEach(ev => {
+          if (ev.num == null) { let n=1; while (usados.has(n)) n++; ev.num = n; usados.add(n); }
+          ev.slot = `${base} ${ev.num}`;
+        });
       } else {
-        // tipos únicos (Plantio, Colheita, Dessecação, Pré-emerg., Pós-emerg., Dessec. Soja)
-        // se houver mais de um por engano, numera para não sobrescrever
         if (evs.length === 1) { evs[0].slot = base; evs[0].num = 0; }
         else { evs.sort((x,y)=> x.dv.data.localeCompare(y.dv.data)); evs.forEach((ev,i)=>{ ev.slot = i===0?base:`${base} ${i+1}`; ev.num = i; }); }
       }
