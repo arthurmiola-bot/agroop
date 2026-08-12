@@ -5697,6 +5697,11 @@ function gerarRelatorioSafraCompleta() {
     if (txt.includes('herb')) return 'Herbic.';
     return ev.a.tipo_aplicacao==='pulverizacao' ? 'Pulv.' : 'Sólido';
   }
+  // Extrai o número que o usuário escreveu na descrição (ex: "Fungicida 4" -> 4), se houver.
+  function numeroNaDescricao(ev) {
+    const m = normalizar(ev.a.categoria || '').match(/(\d+)/);
+    return m ? parseInt(m[1]) : null;
+  }
 
   // Ordem canônica de exibição das colunas (calendário típico da safra).
   // Tipos com posição fixa; os que se repetem (Corretivo, Adubação, Fung...) são numerados e
@@ -5729,15 +5734,20 @@ function gerarRelatorioSafraCompleta() {
       let base = tipoBase(ev);
       // Dessecação após o plantio é a "Dessec. Soja" (pré-colheita)
       if (base==='Dessecação' && idxPlantio>=0 && idx>idxPlantio) base = 'Dessec. Soja';
-      // define o slot: tipos que se repetem recebem número sequencial
+      // define o slot: tipos que se repetem recebem número.
+      // Prioriza o número que o usuário escreveu na descrição (ex: "Fungicida 4" -> Fung 4);
+      // se não houver, usa um contador sequencial.
       const numeraveis = ['Corretivo','Adubação','Fung','Sólido','Pulv.','Insetic.','Herbic.'];
-      let slot;
-      if (numeraveis.includes(base)) { cont[base]=(cont[base]||0)+1; slot = `${base} ${cont[base]}`; }
-      else slot = base;
+      let slot, num;
+      if (numeraveis.includes(base)) {
+        const numDesc = numeroNaDescricao(ev);
+        if (numDesc != null) { num = numDesc; }
+        else { cont[base]=(cont[base]||0)+1; num = cont[base]; }
+        slot = `${base} ${num}`;
+      } else { slot = base; num = 0; }
       ev.slot = slot; ev.base = base;
       mapaSlot[slot] = ev;
-      // registra rank do slot (base rank * 100 + número, para ordenar Corretivo 1 antes de Corretivo 2)
-      const num = numeraveis.includes(base) ? cont[base] : 0;
+      // registra rank do slot (base rank * 100 + número, para ordenar Fung 1 antes de Fung 2)
       slotsUsados[slot] = rankSlot(base)*100 + num;
     });
     linhas.push({ fazenda:p.fazenda, talhao:p.talhao, cultivar:cultivarNome, mapaSlot, ordPlant: dvP.data||'9999' });
