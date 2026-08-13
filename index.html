@@ -508,6 +508,10 @@ if ('serviceWorker' in navigator) {
         <span style="font-size:22px">🚜</span>
         <div style="text-align:left"><div style="font-weight:700">Aplicações</div><div style="font-size:12px;opacity:.75;font-weight:400">Executar aplicações no campo</div></div>
       </button>
+      <button class="btn-login" onclick="escolherModo('plantio')" style="background:var(--branco);color:var(--verde);border:2px solid var(--verde);display:flex;align-items:center;justify-content:center;gap:10px;padding:16px">
+        <span style="font-size:22px">🌱</span>
+        <div style="text-align:left"><div style="font-weight:700">Plantio</div><div style="font-size:12px;opacity:.75;font-weight:400">Planejamento e plantabilidade</div></div>
+      </button>
     </div>
 
     <div id="modo-senha" style="display:none;margin-top:22px;flex-direction:column;gap:12px">
@@ -838,6 +842,7 @@ let masterDestravado = false;  // true depois de digitar a senha MASTER na sess�
 
 window.sair = async function() {
   modoAtual = null;
+  modoOperador = 'aplicacoes';
   masterDestravado = false;
   location.reload();
 };
@@ -847,6 +852,11 @@ window.escolherModo = function(modo) {
   document.getElementById('login-erro').textContent = '';
   if (modo === 'aplicacoes') {
     modoAtual = 'aplicacoes';
+    iniciarSessao();
+  } else if (modo === 'plantio') {
+    // modo plantio: sem senha, abre direto a plantabilidade
+    modoAtual = 'aplicacoes';
+    modoOperador = 'plantabilidade';
     iniciarSessao();
   } else {
     // pede senha do modo gestão
@@ -976,26 +986,20 @@ let plantMedidas = [];             // distâncias entre sementes digitadas na av
 
 window.renderModoAplicacoes = function() {
   const el = document.getElementById('main-content');
-  // Seletor de sub-modo do operador: Aplicações ou Plantabilidade
-  const topo = `
-    <div style="display:flex;gap:8px;margin-bottom:16px">
-      <button class="btn ${modoOperador==='aplicacoes'?'btn-primary':'btn-secondary'}" style="flex:1" onclick="mudarModoOperador('aplicacoes')">🧪 Aplicações</button>
-      <button class="btn ${modoOperador==='plantabilidade'?'btn-primary':'btn-secondary'}" style="flex:1" onclick="mudarModoOperador('plantabilidade')">🌱 Plantabilidade</button>
-    </div>`;
-
+  // Se entrou pelo botão "Plantio" da tela inicial, mostra só a plantabilidade (sem alternador)
   if (modoOperador === 'plantabilidade') {
-    el.innerHTML = topo + '<div id="plant-conteudo"></div>';
+    document.getElementById('header-nome').textContent = 'Plantio';
+    el.innerHTML = '<div id="plant-conteudo"></div>';
     renderPlantabilidade();
     atualizarIndicadorOffline();
     return;
   }
-
   const cont = {
     pendentes: adubacoes.filter(a => a.status==='planejado' || a.status==='enviado_operador').length,
     execucao: adubacoes.filter(a => a.status==='execucao').length,
     concluidas: adubacoes.filter(a => a.status==='concluido').length
   };
-  el.innerHTML = topo + `
+  el.innerHTML = `
     <div class="sec-titulo" style="margin-bottom:16px">🚜 Aplicações no Campo</div>
     <div id="offline-indicador" class="offline-ind" style="display:none"></div>
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
@@ -1693,7 +1697,7 @@ window.aplicConcluir = async function(id, emLote, obsOperador) {
 
 // ── DADOS ──
 async function carregarDados() {
-  const [pSnap, enSnap, rSnap, cSnap, tSnap, sSnap, fSnap, cuSnap, plSnap, adSnap, colSnap, pdSnap, avSnap] = await Promise.all([
+  const [pSnap, enSnap, rSnap, cSnap, tSnap, sSnap, fSnap, cuSnap, plSnap, adSnap, colSnap] = await Promise.all([
     getDocs(query(collection(db, 'insumos_pedidos'), orderBy('criado_em', 'desc'))),
     getDocs(collection(db, 'estoque_ins_entradas')),
     getDocs(query(collection(db, 'insumos_retiradas'), orderBy('data', 'desc'))),
@@ -1704,10 +1708,18 @@ async function carregarDados() {
     getDocs(query(collection(db, 'insumos_culturas'), orderBy('nome'))),
     getDocs(query(collection(db, 'insumos_campo_plantio'), orderBy('data', 'desc'))),
     getDocs(query(collection(db, 'insumos_campo_adubacao'), orderBy('data', 'desc'))),
-    getDocs(query(collection(db, 'insumos_campo_colheita'), orderBy('data', 'desc'))),
-    getDocs(query(collection(db, 'insumos_plantadeiras'), orderBy('nome'))),
-    getDocs(collection(db, 'insumos_plantabilidade'))
+    getDocs(query(collection(db, 'insumos_campo_colheita'), orderBy('data', 'desc')))
   ]);
+  // Coleções novas (plantabilidade): carregadas à parte para que, se ainda não existirem
+  // ou falharem, NÃO derrubem o carregamento dos dados principais.
+  try {
+    const pdSnap = await getDocs(collection(db, 'insumos_plantadeiras'));
+    plantadeiras = pdSnap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  } catch(e) { plantadeiras = plantadeiras.length ? plantadeiras : []; }
+  try {
+    const avSnap = await getDocs(collection(db, 'insumos_plantabilidade'));
+    avaliacoesPlant = avSnap.docs.map(d => ({id: d.id, ...d.data()}));
+  } catch(e) { avaliacoesPlant = avaliacoesPlant.length ? avaliacoesPlant : []; }
   pedidos = pSnap.docs.map(d => ({id: d.id, ...d.data()}));
   entradasRaw = enSnap.docs.map(d => ({id: d.id, ...d.data()}));
   retiradas = rSnap.docs.map(d => ({id: d.id, ...d.data()}));
@@ -1719,8 +1731,6 @@ async function carregarDados() {
   plantios = plSnap.docs.map(d => ({id: d.id, ...d.data()}));
   adubacoes = adSnap.docs.map(d => ({id: d.id, ...d.data()}));
   colheitas = colSnap.docs.map(d => ({id: d.id, ...d.data()}));
-  plantadeiras = pdSnap.docs.map(d => ({id: d.id, ...d.data()}));
-  avaliacoesPlant = avSnap.docs.map(d => ({id: d.id, ...d.data()}));
   // Fallback: se ainda não cadastrou fazendas, usa as 3 conhecidas como sugestão inicial
   if (fazendas.length === 0) {
     fazendas = [{id:'_tmp1',nome:'Rodeio'},{id:'_tmp2',nome:'Córrego das Flores'},{id:'_tmp3',nome:'Palmeiras'}];
