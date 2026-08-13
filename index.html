@@ -4710,25 +4710,54 @@ function dataPulvAnterior(fazenda, talhao, idAtual, dataLimite) {
   return cands.length ? cands[cands.length-1] : '';
 }
 
-// Recalcula toda a cadeia DAA de um talhão, em ordem cronológica, para a propagação funcionar
-// (Fung 2 depende de Fung 1; ao recalcular Fung 1, o Fung 2 também precisa recalcular).
+// Extrai um número da categoria/descrição (ex: "Fungicida 3" -> 3) para ordenar a sequência.
+function numeroCategoria(a) {
+  const m = normalizar(a.categoria||'').match(/(\d+)/);
+  return m ? parseInt(m[1]) : null;
+}
+
+// Recalcula toda a cadeia DAA de um talhão. Cada pulverização "pulv_anterior" conta a partir da
+// pulverização imediatamente anterior NA SEQUÊNCIA (ordenada por: data conhecida → número da
+// categoria → ordem de criação). Isso funciona mesmo quando as datas ainda estão vazias.
 async function recalcularCadeiaDAA(fazenda, talhao) {
-  // Roda várias passadas: cada uma resolve o próximo elo da cadeia (Fung1 vazio → depois Fung2 acha Fung1, etc.)
-  for (let passada=0; passada<8; passada++) {
+  for (let passada=0; passada<12; passada++) {
     let mudou = false;
-    const doTalhao = adubacoes
+    // sequência ordenada de TODAS as pulverizações do talhão
+    const seq = adubacoes
       .filter(a => tipoDaAdubacao(a)==='pulverizacao'
         && normalizar(a.fazenda||'')===normalizar(fazenda)
         && normalizar(a.talhao||'')===normalizar(talhao))
-      .sort((a,b)=> String(a.data||'9999').localeCompare(String(b.data||'9999')));
-    for (const a of doTalhao) {
-      if (a.modo_data === 'pulv_anterior') {
-        const ref = dataPulvAnterior(fazenda, talhao, a.id, String(a.data||'').slice(0,10) || '') || dataPulvAnterior(fazenda, talhao, a.id, '');
-        if (ref) {
-          const nova = somarDias(ref, a.dias_apos||0);
-          if (nova && nova !== a.data) {
-            try { await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { data: nova }); a.data = nova; mudou = true; } catch(e){}
-          }
+      .map((a, ordemCriacao) => ({ a, ordemCriacao }))
+      .sort((x, y) => {
+        // 1º critério: quem já tem data vai pela data
+        const dx = x.a.data ? String(x.a.data).slice(0,10) : '';
+        const dy = y.a.data ? String(y.a.data).slice(0,10) : '';
+        if (dx && dy && dx !== dy) return dx.localeCompare(dy);
+        if (dx && !dy) return -1;
+        if (!dx && dy) return 1;
+        // 2º critério: número da categoria (Fungicida 1 < Fungicida 2 < ...)
+        const nx = numeroCategoria(x.a), ny = numeroCategoria(y.a);
+        if (nx != null && ny != null && nx !== ny) return nx - ny;
+        if (nx != null && ny == null) return -1;
+        if (nx == null && ny != null) return 1;
+        // 3º critério: ordem de criação
+        return x.ordemCriacao - y.ordemCriacao;
+      })
+      .map(o => o.a);
+
+    // cada pulv_anterior aponta para o item ANTERIOR na sequência que já tenha data
+    for (let i = 0; i < seq.length; i++) {
+      const a = seq[i];
+      if (a.modo_data !== 'pulv_anterior') continue;
+      // acha o anterior (i-1, i-2...) que tenha data
+      let ref = '';
+      for (let j = i-1; j >= 0; j--) {
+        if (seq[j].data) { ref = String(seq[j].data).slice(0,10); break; }
+      }
+      if (ref) {
+        const nova = somarDias(ref, a.dias_apos||0);
+        if (nova && nova !== a.data) {
+          try { await updateDoc(doc(db,'insumos_campo_adubacao',a.id), { data: nova }); a.data = nova; mudou = true; } catch(e){}
         }
       }
     }
@@ -5303,14 +5332,15 @@ window.importarPlanilha = function(input, tipo) {
       const novosLocais = [];
 
       if (tipo === 'solido' || tipo === 'pulverizacao') {
-        // Agrupa linhas por fazenda+talhão+data+vazão+safra+regra -> uma aplicação com vários produtos.
-        // A categoria fica em cada produto (uma aplicação pode ter herbicida, inseticida, óleo...).
+        // Agrupa linhas por fazenda+talhão+data+vazão+safra+regra+CATEGORIA -> uma aplicação com vários produtos.
+        // A categoria (ex: "Fungicida 1", "Fungicida 2") identifica a aplicação: linhas com categorias
+        // diferentes são aplicações diferentes, mesmo que coincidam fazenda/talhão/data/vazão.
         const grupos = {};
         linhas.forEach(row => {
           const reg = m.doExcel(row);
           if (!reg.fazenda || !reg.talhao || !reg.produto) { ignorados++; return; }
           const md = reg.modo_data||'fixa';
-          const k = [normalizar(reg.fazenda), normalizar(reg.talhao), reg.data||'', normalizar(reg.vazao||''), normalizar(reg.safra||''), md, reg.dias_apos||0].join('||');
+          const k = [normalizar(reg.fazenda), normalizar(reg.talhao), reg.data||'', normalizar(reg.vazao||''), normalizar(reg.safra||''), md, reg.dias_apos||0, normalizar(reg.categoria||'')].join('||');
           if (!grupos[k]) {
             grupos[k] = {
               data: reg.data, fazenda: reg.fazenda, talhao: reg.talhao, safra: reg.safra,
@@ -5677,6 +5707,24 @@ function gerarRelatorioSafraPlantio() {
       </table>
     </div>`;
 }
+
+window.diagnosticoPulv = function() {
+  // Lista todas as pulverizações agrupadas por talhão, mostrando categoria e data exatas.
+  const linhas = [];
+  const porTalhao = {};
+  adubacoes.filter(a => tipoDaAdubacao(a)==='pulverizacao' && filtroCadernoSafra(a)).forEach(a => {
+    const k = `${a.fazenda} · ${a.talhao}`;
+    (porTalhao[k] = porTalhao[k]||[]).push(a);
+  });
+  Object.entries(porTalhao).forEach(([talhao, aps]) => {
+    aps.sort((x,y)=>String(x.data||'').localeCompare(String(y.data||'')));
+    linhas.push(`\n📍 ${talhao} (${aps.length} pulverizações):`);
+    aps.forEach(a => linhas.push(`   • categoria="${a.categoria||'(vazio)'}" | data=${a.data||'(sem data)'} | status=${a.status||''}`));
+  });
+  const texto = linhas.join('\n') || 'Nenhuma pulverização.';
+  console.log(texto);
+  alert(texto.slice(0, 3000)); // mostra na tela (limitado)
+};
 
 function gerarRelatorioSafraCompleta() {
   const plantiosSafra = plantios.filter(filtroCadernoSafra);
