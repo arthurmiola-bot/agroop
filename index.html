@@ -1059,11 +1059,14 @@ function renderPlantabilidade() {
   const el = document.getElementById('plant-conteudo');
   if (!el) return;
   el.innerHTML = `
-    <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
-      <button class="nav-btn ${plantAba==='planejamento'?'ativo':''}" onclick="mudarPlantAba('planejamento')">📋 Planejamento</button>
-      <button class="nav-btn ${plantAba==='avaliar'?'ativo':''}" onclick="mudarPlantAba('avaliar')">🌱 Plantabilidade</button>
-    </div>
-    <div id="plant-aba-conteudo"></div>`;
+    <div style="max-width:640px;margin:0 auto;padding:0 4px">
+      <div class="sec-titulo" style="margin-bottom:16px">🌱 Plantio</div>
+      <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
+        <button class="nav-btn ${plantAba==='planejamento'?'ativo':''}" onclick="mudarPlantAba('planejamento')">📋 Planejamento</button>
+        <button class="nav-btn ${plantAba==='avaliar'?'ativo':''}" onclick="mudarPlantAba('avaliar')">🌱 Plantabilidade</button>
+      </div>
+      <div id="plant-aba-conteudo"></div>
+    </div>`;
   if (plantAba === 'planejamento') renderPlantPlanejamento();
   else renderPlantAvaliar();
 }
@@ -1139,7 +1142,7 @@ function renderPlantAvaliar() {
         <label>Plantadeira</label>
         <select id="pav-plantadeira" onchange="selecionarPlantadeira()">
           <option value="">Selecione a plantadeira</option>
-          ${plantadeiras.map(pd=>`<option value="${pd.id}">${pd.nome} (${fmt(pd.espacamento_linha)} cm)</option>`).join('')}
+          ${plantadeiras.map(pd=>`<option value="${pd.id}">${pd.nome}</option>`).join('')}
         </select>
       </div>
       <div id="pav-cultivar-area"></div>
@@ -1153,14 +1156,22 @@ window.selecionarTalhaoPlant = function() {
   const area = document.getElementById('pav-cultivar-area');
   if (!v) { area.innerHTML = ''; return; }
   const [fazenda, talhao] = v.split('||');
-  // acha os plantios desse talhão na safra e os cultivares
+  // acha os plantios desse talhão na safra, os cultivares e o espaçamento entre linhas
   const cults = [];
+  let espacamentoPlantio = 0;
   plantios.filter(p => normalizar(p.fazenda)===normalizar(fazenda) && normalizar(p.talhao)===normalizar(talhao) && (!plantSafra||p.safra===plantSafra))
-    .forEach(p => cultivaresDoPlantio(p).forEach(cv => { if (cv.cultivar) cults.push({cultivar:cv.cultivar, populacao:cv.populacao||0}); }));
+    .forEach(p => {
+      if (p.espacamento && !espacamentoPlantio) espacamentoPlantio = parseFloat(p.espacamento)||0;
+      cultivaresDoPlantio(p).forEach(cv => { if (cv.cultivar) cults.push({cultivar:cv.cultivar, populacao:cv.populacao||0}); });
+    });
   if (cults.length === 0) {
     area.innerHTML = '<div style="color:var(--vermelho);font-size:13px">Nenhum cultivar cadastrado para este talhão.</div>';
     return;
   }
+  const espacInfo = espacamentoPlantio > 0
+    ? `<div style="font-size:13px;color:var(--cinza)">Espaçamento entre linhas (do plantio): <b>${fmt(espacamentoPlantio)} cm</b></div>`
+    : `<div style="font-size:13px;color:var(--vermelho)">⚠ O plantio deste talhão não tem espaçamento entre linhas cadastrado. Cadastre no plantio para calcular.</div>`;
+  const hiddenEspac = `<input type="hidden" id="pav-espacamento" value="${espacamentoPlantio}">`;
   if (cults.length === 1) {
     // 1 cultivar: já seleciona automaticamente
     area.innerHTML = `
@@ -1169,8 +1180,10 @@ window.selecionarTalhaoPlant = function() {
         <input type="text" value="${cults[0].cultivar}" readonly style="background:var(--creme)">
         <input type="hidden" id="pav-cultivar" value="${cults[0].cultivar}">
         <input type="hidden" id="pav-populacao" value="${cults[0].populacao}">
+        ${hiddenEspac}
       </div>
-      <div style="font-size:13px;color:var(--cinza)">População: <b>${cults[0].populacao?Math.round(cults[0].populacao).toLocaleString('pt-BR'):'—'}</b> sementes/ha</div>`;
+      <div style="font-size:13px;color:var(--cinza)">População: <b>${cults[0].populacao?Math.round(cults[0].populacao).toLocaleString('pt-BR'):'—'}</b> sementes/ha</div>
+      ${espacInfo}`;
   } else {
     // vários cultivares: operador escolhe
     area.innerHTML = `
@@ -1182,8 +1195,10 @@ window.selecionarTalhaoPlant = function() {
         </select>
         <input type="hidden" id="pav-cultivar" value="">
         <input type="hidden" id="pav-populacao" value="">
+        ${hiddenEspac}
       </div>
-      <div id="pav-pop-info"></div>`;
+      <div id="pav-pop-info"></div>
+      ${espacInfo}`;
   }
   renderMedidasArea();
 };
@@ -1213,8 +1228,8 @@ function renderMedidasArea() {
     <div style="background:var(--branco);border-radius:var(--radius);padding:16px;box-shadow:var(--sombra);margin-bottom:16px">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px;margin-bottom:10px">📏 Distâncias entre sementes (cm)</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <input type="number" id="pav-nova-medida" min="0" step="0.1" placeholder="Ex: 5.5" style="flex:1" onkeydown="if(event.key==='Enter'){adicionarMedida();event.preventDefault();}">
-        <button class="btn btn-primary" onclick="adicionarMedida()">+ Adicionar</button>
+        <input type="number" inputmode="decimal" id="pav-nova-medida" min="0" step="0.1" placeholder="Ex: 5.5" style="flex:1;min-width:0" onkeydown="if(event.key==='Enter'){adicionarMedida();event.preventDefault();}">
+        <button class="btn btn-primary" style="white-space:nowrap;flex-shrink:0" onclick="adicionarMedida()">+ Adicionar</button>
       </div>
       <div id="pav-lista-medidas" style="display:flex;flex-wrap:wrap;gap:6px">
         ${plantMedidas.map((m,i)=>`<span style="background:var(--creme);border:1px solid var(--creme-escuro);border-radius:8px;padding:5px 10px;font-family:'DM Mono',monospace;font-size:13px">${m} <span onclick="removerMedida(${i})" style="color:var(--vermelho);cursor:pointer;font-weight:700;margin-left:4px">✕</span></span>`).join('')}
@@ -1243,38 +1258,51 @@ function renderResultado() {
   const area = document.getElementById('pav-resultado-area');
   if (!area) return;
   const pop = parseFloat(document.getElementById('pav-populacao')?.value)||0;
+  const espac = parseFloat(document.getElementById('pav-espacamento')?.value)||0;
   const pdId = document.getElementById('pav-plantadeira')?.value;
-  const pd = plantadeiras.find(x=>x.id===pdId);
-  if (!pd || !pop || plantMedidas.length < 2) {
-    area.innerHTML = plantMedidas.length===1 ? '<div style="font-size:13px;color:var(--cinza);text-align:center;padding:10px">Adicione pelo menos 2 medidas para calcular.</div>' : '';
+  if (!pdId || !pop || !espac || plantMedidas.length < 2) {
+    let msg = '';
+    if (pop && espac && pdId && plantMedidas.length===1) msg = 'Adicione pelo menos 2 medidas para calcular.';
+    else if (pop && !espac && pdId) msg = 'O plantio deste talhão não tem espaçamento entre linhas. Cadastre no plantio para calcular.';
+    area.innerHTML = msg ? `<div style="font-size:13px;color:var(--cinza);text-align:center;padding:10px">${msg}</div>` : '';
     return;
   }
-  const r = calcularPlantabilidade(pop, pd.espacamento_linha, plantMedidas);
+  const r = calcularPlantabilidade(pop, espac, plantMedidas);
+  // Alertas: falha/dupla acima de 5% = alerta (⚠️)
+  const alertaFalha = r.pctFalhas > 5;
+  const alertaDupla = r.pctDuplas > 5;
+  // CV: <20 desejável (verde), 20-30 tolerável (amarelo), >30 fora (vermelho)
+  let cvCor, cvBg, cvLabel;
+  if (r.cv < 20) { cvCor = '#1f7a55'; cvBg = '#e8f3ec'; cvLabel = 'desejável'; }
+  else if (r.cv <= 30) { cvCor = '#b7791f'; cvBg = '#fff4e0'; cvLabel = 'tolerável'; }
+  else { cvCor = 'var(--vermelho)'; cvBg = '#fdecea'; cvLabel = 'fora do ideal'; }
+
   area.innerHTML = `
     <div style="background:var(--branco);border-radius:var(--radius);padding:18px;box-shadow:var(--sombra);margin-bottom:16px">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:14px">📊 Resultado da avaliação</div>
-      <div style="font-size:12px;color:var(--cinza);margin-bottom:14px">Distância ideal entre sementes: <b>${fmt(r.distIdeal)} cm</b> · ${r.n} medidas</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:8px">📊 Resultado da avaliação</div>
+      <div style="font-size:12px;color:var(--cinza);margin-bottom:16px">Distância ideal: <b>${fmt(r.distIdeal)} cm</b> · Espaç. linha: <b>${fmt(espac)} cm</b> · ${r.n} medidas</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center">
-        <div style="background:#fdecea;border-radius:10px;padding:12px">
-          <div style="font-size:26px;font-weight:700;color:var(--vermelho)">${fmt(r.pctFalhas)}%</div>
-          <div style="font-size:12px;color:var(--cinza);margin-top:2px">Falhas</div>
-          <div style="font-size:12px;color:var(--cinza)">${r.falhas} de ${r.n}</div>
+        <div style="background:${alertaFalha?'#fdecea':'#f2f7f3'};border-radius:12px;padding:14px 8px;${alertaFalha?'border:1.5px solid #f5b0aa':''}">
+          <div style="font-size:24px;font-weight:700;color:${alertaFalha?'var(--vermelho)':'var(--verde)'}">${alertaFalha?'⚠️ ':''}${fmt(r.pctFalhas)}%</div>
+          <div style="font-size:12px;color:var(--cinza);margin-top:4px">Falhas</div>
+          <div style="font-size:11px;color:var(--cinza)">${r.falhas} de ${r.n}</div>
         </div>
-        <div style="background:#fff4e0;border-radius:10px;padding:12px">
-          <div style="font-size:26px;font-weight:700;color:var(--laranja)">${fmt(r.pctDuplas)}%</div>
-          <div style="font-size:12px;color:var(--cinza);margin-top:2px">Duplas</div>
-          <div style="font-size:12px;color:var(--cinza)">${r.duplas} de ${r.n}</div>
+        <div style="background:${alertaDupla?'#fff4e0':'#f2f7f3'};border-radius:12px;padding:14px 8px;${alertaDupla?'border:1.5px solid #e8c98a':''}">
+          <div style="font-size:24px;font-weight:700;color:${alertaDupla?'var(--laranja)':'var(--verde)'}">${alertaDupla?'⚠️ ':''}${fmt(r.pctDuplas)}%</div>
+          <div style="font-size:12px;color:var(--cinza);margin-top:4px">Duplas</div>
+          <div style="font-size:11px;color:var(--cinza)">${r.duplas} de ${r.n}</div>
         </div>
-        <div style="background:#e8f3ec;border-radius:10px;padding:12px">
-          <div style="font-size:26px;font-weight:700;color:var(--verde)">${fmt(r.cv)}%</div>
-          <div style="font-size:12px;color:var(--cinza);margin-top:2px">CV</div>
-          <div style="font-size:12px;color:var(--cinza)">variação</div>
+        <div style="background:${cvBg};border-radius:12px;padding:14px 8px">
+          <div style="font-size:24px;font-weight:700;color:${cvCor}">${fmt(r.cv)}%</div>
+          <div style="font-size:12px;color:var(--cinza);margin-top:4px">CV</div>
+          <div style="font-size:11px;color:${cvCor};font-weight:600">${cvLabel}</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center;margin-top:10px;font-size:12px;color:var(--cinza)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center;margin-top:12px;font-size:12px;color:var(--cinza)">
         <div>✅ Normais: <b>${r.normais}</b> (${fmt(r.pctNormais)}%)</div>
         <div>📏 Espaç. médio: <b>${fmt(r.media)} cm</b></div>
       </div>
+      ${(alertaFalha||alertaDupla||r.cv>30)?`<div style="margin-top:12px;padding:10px;background:#fdecea;border-radius:8px;font-size:12px;color:var(--vermelho)">⚠️ ${[alertaFalha?'Falhas acima de 5%':'',alertaDupla?'Duplas acima de 5%':'',r.cv>30?'CV acima de 30%':''].filter(Boolean).join(' · ')} — verifique a regulagem da plantadeira.</div>`:''}
       <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="salvarAvaliacaoPlant()">💾 Salvar avaliação</button>
     </div>`;
 }
@@ -1284,13 +1312,14 @@ window.salvarAvaliacaoPlant = async function() {
   const pdId = document.getElementById('pav-plantadeira')?.value;
   const cultivar = document.getElementById('pav-cultivar')?.value;
   const pop = parseFloat(document.getElementById('pav-populacao')?.value)||0;
-  if (!v || !pdId || !cultivar || plantMedidas.length < 2) { toast('Complete a avaliação antes de salvar.','erro'); return; }
+  const espac = parseFloat(document.getElementById('pav-espacamento')?.value)||0;
+  if (!v || !pdId || !cultivar || !espac || plantMedidas.length < 2) { toast('Complete a avaliação antes de salvar.','erro'); return; }
   const [fazenda, talhao] = v.split('||');
   const pd = plantadeiras.find(x=>x.id===pdId);
-  const r = calcularPlantabilidade(pop, pd.espacamento_linha, plantMedidas);
+  const r = calcularPlantabilidade(pop, espac, plantMedidas);
   const registro = {
     safra: plantSafra||'', fazenda, talhao, cultivar, populacao: pop,
-    plantadeira_id: pdId, plantadeira_nome: pd.nome, espacamento_linha: pd.espacamento_linha,
+    plantadeira_id: pdId, plantadeira_nome: pd?pd.nome:'', espacamento_linha: espac,
     medidas: plantMedidas.slice(), n: r.n, dist_ideal: r.distIdeal,
     falhas: r.falhas, duplas: r.duplas, normais: r.normais,
     pct_falhas: r.pctFalhas, pct_duplas: r.pctDuplas, cv: r.cv,
@@ -3842,26 +3871,30 @@ function renderCadastros() {
           <button class="btn btn-primary btn-sm" onclick="abrirModalPlantadeira()">+ Nova</button>
         </div>
         <div class="tabela-wrap"><table>
-          <thead><tr><th>Plantadeira</th><th>Espaç. linha (cm)</th><th></th></tr></thead>
+          <thead><tr><th>Plantadeira</th><th style="text-align:right">Ações</th></tr></thead>
           <tbody>
-            ${plantadeiras.length === 0 ? '<tr><td colspan="3" class="tabela-vazia">Nenhuma plantadeira cadastrada</td></tr>' :
-            plantadeiras.map(pd => `<tr><td><strong>${pd.nome}</strong></td><td>${pd.espacamento_linha?fmt(pd.espacamento_linha):'—'}</td>
-            <td style="text-align:right"><button class="btn btn-sm btn-secondary" onclick="excluirPlantadeira('${pd.id}')">✕</button></td></tr>`).join('')}
+            ${plantadeiras.length === 0 ? '<tr><td colspan="2" class="tabela-vazia">Nenhuma plantadeira cadastrada</td></tr>' :
+            plantadeiras.map(pd => `<tr><td><strong>${pd.nome}</strong></td>
+            <td style="text-align:right;white-space:nowrap">
+              <button class="btn btn-sm btn-secondary" onclick="abrirModalPlantadeira('${pd.id}')">✏️</button>
+              <button class="btn btn-sm btn-secondary" onclick="excluirPlantadeira('${pd.id}')">✕</button>
+            </td></tr>`).join('')}
           </tbody>
         </table></div>
-        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 O espaçamento entre linhas da plantadeira é usado no cálculo de plantabilidade (falhas, duplas e CV).</p>
+        <p style="font-size:12px;color:var(--cinza);margin-top:8px">💡 O espaçamento entre linhas usado no cálculo de plantabilidade vem do planejamento de plantio de cada talhão.</p>
       </div>
     </div>
     <style>@media (max-width:700px){ #cadastros-grid { grid-template-columns:1fr !important; } }</style>`;
 }
 
-window.abrirModalPlantadeira = function() {
+window.abrirModalPlantadeira = function(id) {
+  const pd = id ? plantadeiras.find(x=>x.id===id) : null;
   document.body.insertAdjacentHTML('beforeend', `
     <div class="modal-overlay ativo" id="modal-plantadeira">
       <div class="modal" style="max-width:420px">
-        <div class="modal-titulo">🚜 Nova Plantadeira</div>
-        <div class="form-group"><label>Nome / identificação *</label><input type="text" id="pd-nome" placeholder="Ex: John Deere 2110 - Talhão"></div>
-        <div class="form-group"><label>Espaçamento entre linhas (cm) *</label><input type="number" id="pd-espac" min="0" step="0.1" placeholder="Ex: 50"></div>
+        <div class="modal-titulo">🚜 ${pd?'Editar':'Nova'} Plantadeira</div>
+        <div class="form-group"><label>Nome / identificação *</label><input type="text" id="pd-nome" value="${pd?(pd.nome||'').replace(/"/g,'&quot;'):''}" placeholder="Ex: John Deere 2110"></div>
+        <input type="hidden" id="pd-id" value="${pd?pd.id:''}">
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-plantadeira')">Cancelar</button>
           <button class="btn btn-primary" onclick="salvarPlantadeira()">Salvar</button>
@@ -3872,15 +3905,20 @@ window.abrirModalPlantadeira = function() {
 
 window.salvarPlantadeira = async function() {
   const nome = document.getElementById('pd-nome').value.trim();
-  const espac = parseFloat(document.getElementById('pd-espac').value)||0;
+  const id = document.getElementById('pd-id').value;
   if (!nome) { toast('Informe o nome.','erro'); return; }
-  if (espac <= 0) { toast('Informe o espaçamento entre linhas.','erro'); return; }
   try {
-    const ref = await addDoc(collection(db,'insumos_plantadeiras'), { nome, espacamento_linha: espac });
-    plantadeiras.push({ id: ref.id, nome, espacamento_linha: espac });
+    if (id) {
+      // edição
+      await updateDoc(doc(db,'insumos_plantadeiras',id), { nome });
+      const pd = plantadeiras.find(x=>x.id===id); if (pd) pd.nome = nome;
+    } else {
+      const ref = await addDoc(collection(db,'insumos_plantadeiras'), { nome });
+      plantadeiras.push({ id: ref.id, nome });
+    }
     plantadeiras.sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
     fecharModal('modal-plantadeira');
-    toast('Plantadeira cadastrada!');
+    toast(id?'Plantadeira atualizada!':'Plantadeira cadastrada!');
     renderCadastros();
   } catch(e) { toast('Erro: '+e.message,'erro'); }
 };
@@ -6302,11 +6340,15 @@ function gerarRelatorioPlantabilidade() {
       <table class="rel-safra">
         <thead><tr>
           <th>Data / Hora</th><th>Safra</th><th>Fazenda</th><th>Talhão</th><th>Cultivar</th><th>Plantadeira</th>
-          <th style="text-align:center">Medidas</th><th style="text-align:center">Falhas</th><th style="text-align:center">Duplas</th><th style="text-align:center">CV</th>
+          <th style="text-align:center">Medidas</th><th style="text-align:center">Falhas</th><th style="text-align:center">Duplas</th><th style="text-align:center">CV</th><th style="text-align:center">Ação</th>
         </tr></thead>
         <tbody>
-          ${lista.length===0?'<tr><td colspan="10" class="tabela-vazia">Nenhuma avaliação de plantabilidade registrada'+(relPlantSafra?` para a safra ${relPlantSafra}`:'')+'.</td></tr>':
-          lista.map(a=>`<tr>
+          ${lista.length===0?'<tr><td colspan="11" class="tabela-vazia">Nenhuma avaliação de plantabilidade registrada'+(relPlantSafra?` para a safra ${relPlantSafra}`:'')+'.</td></tr>':
+          lista.map(a=>{
+            const alertaF = (a.pct_falhas||0) > 5, alertaD = (a.pct_duplas||0) > 5;
+            const cvVal = a.cv||0;
+            const cvCor = cvVal<20?'#1f7a55':cvVal<=30?'#b7791f':'var(--vermelho)';
+            return `<tr>
             <td style="white-space:nowrap">${fmtDataHoraAv(a.criado_em)}</td>
             <td>${a.safra||'—'}</td>
             <td>${a.fazenda||'—'}</td>
@@ -6314,14 +6356,26 @@ function gerarRelatorioPlantabilidade() {
             <td>${a.cultivar||'—'}</td>
             <td>${a.plantadeira_nome||'—'}</td>
             <td style="text-align:center">${a.n||0}</td>
-            <td style="text-align:center;color:var(--vermelho);font-weight:600">${a.falhas||0} <span style="font-weight:400;color:var(--cinza)">(${fmt(a.pct_falhas||0)}%)</span></td>
-            <td style="text-align:center;color:var(--laranja);font-weight:600">${a.duplas||0} <span style="font-weight:400;color:var(--cinza)">(${fmt(a.pct_duplas||0)}%)</span></td>
-            <td style="text-align:center;font-weight:600">${fmt(a.cv||0)}%</td>
-          </tr>`).join('')}
+            <td style="text-align:center;color:${alertaF?'var(--vermelho)':'inherit'};font-weight:600">${alertaF?'⚠️ ':''}${a.falhas||0} <span style="font-weight:400;color:var(--cinza)">(${fmt(a.pct_falhas||0)}%)</span></td>
+            <td style="text-align:center;color:${alertaD?'var(--laranja)':'inherit'};font-weight:600">${alertaD?'⚠️ ':''}${a.duplas||0} <span style="font-weight:400;color:var(--cinza)">(${fmt(a.pct_duplas||0)}%)</span></td>
+            <td style="text-align:center;font-weight:700;color:${cvCor}">${fmt(cvVal)}%</td>
+            <td style="text-align:center"><button class="btn btn-sm btn-secondary" onclick="excluirAvaliacaoPlant('${a.id}')">✕</button></td>
+          </tr>`;}).join('')}
         </tbody>
       </table>
     </div>`;
 }
+
+window.excluirAvaliacaoPlant = async function(id) {
+  const ok = await window.exigirMaster(); if (!ok) return;
+  if (!confirm('Excluir esta avaliação de plantabilidade?')) return;
+  try {
+    await deleteDoc(doc(db,'insumos_plantabilidade',id));
+    const idx = avaliacoesPlant.findIndex(x=>x.id===id); if (idx>=0) avaliacoesPlant.splice(idx,1);
+    toast('Avaliação excluída.');
+    const c = document.getElementById('resultado-relatorio'); if (c) c.innerHTML = gerarRelatorioPlantabilidade();
+  } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
 
 window.exportarRelatorioSafra = function() {
   if (!relatorioAtual.rows || relatorioAtual.rows.length===0) { toast('Nada para exportar.','erro'); return; }
