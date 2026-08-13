@@ -1076,19 +1076,14 @@ window.mudarPlantAba = function(aba) {
   renderPlantabilidade();
 };
 
-// ── ABA 1: Planejamento (tabela safra, talhão, cultivar, população) ──
+// ── ABA 1: Planejamento (safra, talhão, cultivar, população, vazão, produtos no sulco) ──
 function renderPlantPlanejamento() {
   const el = document.getElementById('plant-aba-conteudo');
   if (!el) return;
   const safrasOpts = safrasDisponiveis();
-  // monta linhas: uma por cultivar de cada plantio
-  const linhas = [];
-  plantios.filter(p => !plantSafra || p.safra === plantSafra).forEach(p => {
-    cultivaresDoPlantio(p).forEach(cv => {
-      linhas.push({ safra:p.safra||'—', fazenda:p.fazenda||'', talhao:p.talhao||'', cultivar:cv.cultivar||'—', populacao:cv.populacao||0 });
-    });
-  });
-  linhas.sort((a,b)=> (a.fazenda+a.talhao).localeCompare(b.fazenda+b.talhao));
+  // um card por plantio (agrupa cultivares e mostra vazão + produtos no sulco)
+  const lista = plantios.filter(p => !plantSafra || p.safra === plantSafra)
+    .sort((a,b)=> (`${a.fazenda}${a.talhao}`).localeCompare(`${b.fazenda}${b.talhao}`));
   el.innerHTML = `
     <div class="form-group" style="max-width:320px">
       <label>Safra</label>
@@ -1097,13 +1092,35 @@ function renderPlantPlanejamento() {
         ${safrasOpts.map(s=>`<option value="${s}" ${plantSafra===s?'selected':''}>${s}</option>`).join('')}
       </select>
     </div>
-    <div class="tabela-wrap"><table>
-      <thead><tr><th>Safra</th><th>Fazenda</th><th>Talhão</th><th>Cultivar</th><th>População</th></tr></thead>
-      <tbody>
-        ${linhas.length===0?'<tr><td colspan="5" class="tabela-vazia">Nenhum plantio cadastrado para esta safra</td></tr>':
-        linhas.map(l=>`<tr><td>${l.safra}</td><td>${l.fazenda}</td><td>${l.talhao}</td><td>${l.cultivar}</td><td>${l.populacao?Math.round(l.populacao).toLocaleString('pt-BR'):'—'}</td></tr>`).join('')}
-      </tbody>
-    </table></div>`;
+    ${lista.length===0?'<div class="tabela-vazia" style="padding:24px;text-align:center;background:var(--branco);border-radius:var(--radius)">Nenhum plantio cadastrado para esta safra</div>':
+    lista.map(p => {
+      const cults = cultivaresDoPlantio(p);
+      const sulco = Array.isArray(p.produtos_sulco) ? p.produtos_sulco : [];
+      return `
+      <div style="background:var(--branco);border-radius:var(--radius);padding:16px;box-shadow:var(--sombra);margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">${p.fazenda||'—'} · ${p.talhao||'—'}</div>
+          <div style="font-size:12px;color:var(--cinza)">${p.safra||''}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:8px">
+          ${cults.map(cv=>`<tr>
+            <td style="padding:3px 0"><b>${cv.cultivar||'—'}</b></td>
+            <td style="padding:3px 0;text-align:right;color:var(--verde);font-family:'DM Mono',monospace">${cv.populacao?Math.round(cv.populacao).toLocaleString('pt-BR')+' sem/ha':'—'}</td>
+          </tr>`).join('')}
+        </table>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--cinza);border-top:1px solid var(--creme-escuro);padding-top:8px">
+          ${p.espacamento?`<span>📏 Espaç.: <b>${fmt(p.espacamento)} cm</b></span>`:''}
+          ${p.vazao?`<span>💧 Vazão: <b>${p.vazao}</b></span>`:''}
+        </div>
+        ${sulco.length>0?`
+          <div style="margin-top:10px">
+            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">🌱 Produtos no sulco</div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              ${sulco.map(s=>`<tr><td style="padding:2px 0">${s.produto}</td><td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${s.dose?fmt(s.dose)+' '+(s.unidade||''):''}</td></tr>`).join('')}
+            </table>
+          </div>`:''}
+      </div>`;
+    }).join('')}`;
 }
 
 window.filtrarPlantSafra = function(s) {
@@ -4454,6 +4471,12 @@ window.abrirModalPlantio = function(id) {
           <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaCultivar()">+ Adicionar cultivar</button>
         </div>
         <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" value="${p?.espacamento||''}" min="0" step="0.1" placeholder="Geral do plantio"></div>
+        <div class="form-group"><label>Vazão (L/ha)</label><input type="text" id="pl-vazao" value="${p?.vazao||''}" placeholder="Ex: 100 L/ha"></div>
+        <div class="form-group">
+          <label>Produtos no sulco de plantio <span style="font-weight:400;text-transform:none;color:var(--cinza)">(fertilizantes, inseticidas de sulco, etc.)</span></label>
+          <div id="pl-sulco-lista"></div>
+          <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaSulco()">+ Adicionar produto</button>
+        </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-plantio')">Cancelar</button>
           <button class="btn btn-primary" onclick="salvarPlantio(${p?`'${id}'`:'null'})">Salvar</button>
@@ -4464,8 +4487,31 @@ window.abrirModalPlantio = function(id) {
   const cultivaresIniciais = p ? cultivaresDoPlantio(p) : [];
   window._plCultivares = cultivaresIniciais.length ? cultivaresIniciais : [{cultivar:'',area_ha:'',ciclo_dias:'',populacao:'',obs:''}];
   renderLinhasCultivar();
+  // Inicializa produtos no sulco
+  window._plSulco = (p && Array.isArray(p.produtos_sulco) && p.produtos_sulco.length) ? p.produtos_sulco.slice() : [];
+  renderLinhasSulco();
   if (p?.fazenda) { atualizarTalhoesCampo('pl'); setTimeout(()=>{ const s=document.getElementById('pl-talhao'); if(s) s.value=p.talhao||''; },0); }
 };
+
+// Linhas de produtos no sulco de plantio
+function renderLinhasSulco() {
+  const div = document.getElementById('pl-sulco-lista');
+  if (!div) return;
+  if (window._plSulco.length === 0) {
+    div.innerHTML = '<div style="font-size:12px;color:var(--cinza)">Nenhum produto no sulco. Toque em "+ Adicionar produto" se usar.</div>';
+    return;
+  }
+  div.innerHTML = window._plSulco.map((s,i)=>`
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <input type="text" placeholder="Produto" value="${(s.produto||'').replace(/"/g,'&quot;')}" oninput="atualizarLinhaSulco(${i},'produto',this.value)" style="flex:2;min-width:0">
+      <input type="number" placeholder="Dose" value="${s.dose||''}" step="0.01" min="0" oninput="atualizarLinhaSulco(${i},'dose',this.value)" style="flex:1;min-width:0">
+      <select onchange="atualizarLinhaSulco(${i},'unidade',this.value)" style="flex:1;min-width:0">${UNIDADES.map(u=>`<option ${u===(s.unidade||'kg')?'selected':''}>${u}</option>`).join('')}</select>
+      <button type="button" onclick="removerLinhaSulco(${i})" style="background:none;border:none;color:var(--vermelho);font-weight:700;cursor:pointer;font-size:16px">✕</button>
+    </div>`).join('');
+}
+window.adicionarLinhaSulco = function() { window._plSulco.push({produto:'',dose:'',unidade:'kg'}); renderLinhasSulco(); };
+window.removerLinhaSulco = function(i) { window._plSulco.splice(i,1); renderLinhasSulco(); };
+window.atualizarLinhaSulco = function(i,campo,val) { if(window._plSulco[i]) window._plSulco[i][campo] = (campo==='dose')?(parseFloat(val)||''):val; };
 
 // Renderiza as linhas de cultivar preservando o que foi digitado
 function renderLinhasCultivar() {
@@ -4564,7 +4610,9 @@ window.salvarPlantio = async function(id) {
     data_prevista_colheita: cultivares[0].data_prevista_colheita,
     populacao: cultivares[0].populacao,
     obs: cultivares[0].obs,
-    espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0
+    espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
+    vazao: (document.getElementById('pl-vazao')?.value||'').trim(),
+    produtos_sulco: (window._plSulco||[]).filter(s=>s.produto && s.produto.trim()).map(s=>({produto:s.produto.trim(), dose:parseFloat(s.dose)||0, unidade:s.unidade||'kg'}))
   };
   try {
     if (id) {
