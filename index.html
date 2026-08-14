@@ -590,7 +590,7 @@ let compendio = null;     // cache de nomes de estoque_ins_produtos (carrega sob
 let compendioDetalhado = null; // cache com todos os campos do compêndio
 let entradasRaw = [];     // entradas reais da coleção estoque_ins_entradas (ACF Estoque)
 let aplicacoesAgroOp = null; // (legado) cache não mais usado após integração interna
-const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton'];
+const UNIDADES = ['kg', 'L', 'sc', 'un', 'cx', 'g', 'mL', 'ton', 'dose'];
 function nomesFazendas() { return fazendas.map(f=>f.nome); }
 
 // ══════════════ OFFLINE (modo Aplicações) ══════════════
@@ -1076,58 +1076,64 @@ window.mudarPlantAba = function(aba) {
   renderPlantabilidade();
 };
 
-// ── ABA 1: Planejamento (safra, talhão, cultivar, população, vazão, produtos no sulco) ──
+// ── ABA 1: Planejamento (operador seleciona safra; mostra data, sem/m, tratamento fazenda, sulco) ──
 function renderPlantPlanejamento() {
   const el = document.getElementById('plant-aba-conteudo');
   if (!el) return;
   const safrasOpts = safrasDisponiveis();
-  // um card por plantio (agrupa cultivares e mostra vazão + produtos no sulco)
-  const lista = plantios.filter(p => !plantSafra || p.safra === plantSafra)
-    .sort((a,b)=> (`${a.fazenda}${a.talhao}`).localeCompare(`${b.fazenda}${b.talhao}`));
-  el.innerHTML = `
-    <div class="form-group" style="max-width:320px">
-      <label>Safra</label>
-      <select onchange="filtrarPlantSafra(this.value)">
-        <option value="">Todas as safras</option>
-        ${safrasOpts.map(s=>`<option value="${s}" ${plantSafra===s?'selected':''}>${s}</option>`).join('')}
-      </select>
-    </div>
-    ${lista.length===0?'<div class="tabela-vazia" style="padding:24px;text-align:center;background:var(--branco);border-radius:var(--radius)">Nenhum plantio cadastrado para esta safra</div>':
-    lista.map(p => {
+  // operador PRECISA escolher a safra (sem "todas") para não confundir
+  const cards = !plantSafra ? '' : plantios
+    .filter(p => p.safra === plantSafra)
+    .sort((a,b)=> String(a.data||'9999').localeCompare(String(b.data||'9999')) || (`${a.fazenda}${a.talhao}`).localeCompare(`${b.fazenda}${b.talhao}`))
+    .map(p => {
       const cults = cultivaresDoPlantio(p);
+      const espM = (parseFloat(p.espacamento)||0) / 100; // espaçamento em metros
       const sulco = Array.isArray(p.produtos_sulco) ? p.produtos_sulco : [];
+      // sem/m = pop/ha × espaçamento(m) ÷ 10.000
+      const semPorMetro = (pop) => (espM>0 && pop) ? (pop * espM / 10000) : 0;
       return `
       <div style="background:var(--branco);border-radius:var(--radius);padding:16px;box-shadow:var(--sombra);margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">${p.fazenda||'—'} · ${p.talhao||'—'}</div>
-          <div style="font-size:12px;color:var(--cinza)">${p.safra||''}</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:4px">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:17px">${p.fazenda||'—'} · ${p.talhao||'—'}</div>
+          <div style="font-size:13px;color:var(--verde);font-weight:600;font-family:'DM Mono',monospace">📅 ${fmtDataBR(p.data)}</div>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:8px">
-          ${cults.map(cv=>`<tr>
-            <td style="padding:3px 0"><b>${cv.cultivar||'—'}</b></td>
-            <td style="padding:3px 0;text-align:right;color:var(--verde);font-family:'DM Mono',monospace">${cv.populacao?Math.round(cv.populacao).toLocaleString('pt-BR')+' sem/ha':'—'}</td>
-          </tr>`).join('')}
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
+          ${cults.map(cv=>{
+            const spm = semPorMetro(cv.populacao);
+            return `<tr>
+              <td style="padding:4px 0"><b>${cv.cultivar||'—'}</b></td>
+              <td style="padding:4px 0;text-align:right;color:var(--verde);font-family:'DM Mono',monospace">${spm>0?fmt(spm)+' sem/m':(cv.populacao?'—':'—')}</td>
+            </tr>`;
+          }).join('')}
         </table>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--cinza);border-top:1px solid var(--creme-escuro);padding-top:8px">
-          ${p.espacamento?`<span>📏 Espaç.: <b>${fmt(p.espacamento)} cm</b></span>`:''}
-          ${p.vazao?`<span>💧 Vazão: <b>${p.vazao}</b></span>`:''}
-        </div>
+        ${(p.tratamento_tipo==='fazenda' && Array.isArray(p.tratamento_produtos) && p.tratamento_produtos.length>0)?`
+          <div style="margin-top:8px;border-top:1px solid var(--creme-escuro);padding-top:8px">
+            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">💊 Tratamento na fazenda</div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              ${p.tratamento_produtos.map(t=>`<tr><td style="padding:2px 0">${t.produto}</td><td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${t.dose?fmt(t.dose)+' '+(t.unidade||''):''}</td></tr>`).join('')}
+            </table>
+          </div>`:''}
         ${sulco.length>0?`
-          <div style="margin-top:10px">
-            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">🌱 Produtos no sulco</div>
+          <div style="margin-top:8px;border-top:1px solid var(--creme-escuro);padding-top:8px">
+            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">🌱 Sulco de plantio${p.vazao?` · 💧 ${p.vazao}`:''}</div>
             <table style="width:100%;border-collapse:collapse;font-size:13px">
               ${sulco.map(s=>`<tr><td style="padding:2px 0">${s.produto}</td><td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${s.dose?fmt(s.dose)+' '+(s.unidade||''):''}</td></tr>`).join('')}
             </table>
           </div>`:''}
-        ${(p.tratamento_tipo && Array.isArray(p.tratamento_produtos) && p.tratamento_produtos.length>0)?`
-          <div style="margin-top:10px">
-            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">💊 Tratamento de sementes — ${p.tratamento_tipo==='tsi'?'Industrial (TSI)':'Na fazenda'}</div>
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              ${p.tratamento_produtos.map(t=>`<tr><td style="padding:2px 0">${t.produto}</td>${p.tratamento_tipo==='fazenda'?`<td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${t.dose?fmt(t.dose)+' '+(t.unidade||''):''}</td>`:'<td></td>'}</tr>`).join('')}
-            </table>
-          </div>`:''}
       </div>`;
-    }).join('')}`;
+    }).join('');
+
+  el.innerHTML = `
+    <div class="form-group" style="max-width:320px">
+      <label>Safra *</label>
+      <select onchange="filtrarPlantSafra(this.value)">
+        <option value="">Selecione a safra</option>
+        ${safrasOpts.map(s=>`<option value="${s}" ${plantSafra===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>
+    ${!plantSafra
+      ? '<div class="tabela-vazia" style="padding:30px;text-align:center;background:var(--branco);border-radius:var(--radius)">Selecione uma safra para ver o planejamento dos talhões.</div>'
+      : (cards || '<div class="tabela-vazia" style="padding:24px;text-align:center;background:var(--branco);border-radius:var(--radius)">Nenhum plantio cadastrado para esta safra.</div>')}`;
 }
 
 window.filtrarPlantSafra = function(s) {
@@ -4478,11 +4484,14 @@ window.abrirModalPlantio = function(id) {
           <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaCultivar()">+ Adicionar cultivar</button>
         </div>
         <div class="form-group"><label>Espaçamento (cm)</label><input type="number" id="pl-espacamento" value="${p?.espacamento||''}" min="0" step="0.1" placeholder="Geral do plantio"></div>
-        <div class="form-group"><label>Vazão (L/ha)</label><input type="text" id="pl-vazao" value="${p?.vazao||''}" placeholder="Ex: 100 L/ha"></div>
         <div class="form-group">
           <label>Produtos no sulco de plantio <span style="font-weight:400;text-transform:none;color:var(--cinza)">(fertilizantes, inseticidas de sulco, etc.)</span></label>
           <div id="pl-sulco-lista"></div>
           <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaSulco()">+ Adicionar produto</button>
+          <div id="pl-vazao-area" style="margin-top:12px;display:none">
+            <label>Vazão do pulverizador de sulco (L/ha)</label>
+            <input type="text" id="pl-vazao" value="${p?.vazao||''}" placeholder="Ex: 100 L/ha">
+          </div>
         </div>
         <div class="form-group">
           <label>Tratamento de sementes</label>
@@ -4546,6 +4555,9 @@ window.atualizarLinhaTrat = function(i,campo,val) { if(window._plTrat[i]) window
 function renderLinhasSulco() {
   const div = document.getElementById('pl-sulco-lista');
   if (!div) return;
+  // vazão só aparece quando há pelo menos um produto no sulco
+  const vazaoArea = document.getElementById('pl-vazao-area');
+  if (vazaoArea) vazaoArea.style.display = window._plSulco.length > 0 ? 'block' : 'none';
   if (window._plSulco.length === 0) {
     div.innerHTML = '<div style="font-size:12px;color:var(--cinza)">Nenhum produto no sulco. Toque em "+ Adicionar produto" se usar.</div>';
     return;
