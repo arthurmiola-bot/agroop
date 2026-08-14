@@ -1119,6 +1119,13 @@ function renderPlantPlanejamento() {
               ${sulco.map(s=>`<tr><td style="padding:2px 0">${s.produto}</td><td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${s.dose?fmt(s.dose)+' '+(s.unidade||''):''}</td></tr>`).join('')}
             </table>
           </div>`:''}
+        ${(p.tratamento_tipo && Array.isArray(p.tratamento_produtos) && p.tratamento_produtos.length>0)?`
+          <div style="margin-top:10px">
+            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">💊 Tratamento de sementes — ${p.tratamento_tipo==='tsi'?'Industrial (TSI)':'Na fazenda'}</div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              ${p.tratamento_produtos.map(t=>`<tr><td style="padding:2px 0">${t.produto}</td>${p.tratamento_tipo==='fazenda'?`<td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${t.dose?fmt(t.dose)+' '+(t.unidade||''):''}</td>`:'<td></td>'}</tr>`).join('')}
+            </table>
+          </div>`:''}
       </div>`;
     }).join('')}`;
 }
@@ -4477,6 +4484,16 @@ window.abrirModalPlantio = function(id) {
           <div id="pl-sulco-lista"></div>
           <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="adicionarLinhaSulco()">+ Adicionar produto</button>
         </div>
+        <div class="form-group">
+          <label>Tratamento de sementes</label>
+          <select id="pl-trat-tipo" onchange="atualizarTratamentoSementes()">
+            <option value="">Sem tratamento</option>
+            <option value="tsi" ${p?.tratamento_tipo==='tsi'?'selected':''}>Industrial (TSI)</option>
+            <option value="fazenda" ${p?.tratamento_tipo==='fazenda'?'selected':''}>Tratamento na fazenda</option>
+          </select>
+          <div id="pl-trat-lista" style="margin-top:8px"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="pl-trat-btn" style="margin-top:8px;display:none" onclick="adicionarLinhaTrat()">+ Adicionar produto</button>
+        </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="fecharModal('modal-plantio')">Cancelar</button>
           <button class="btn btn-primary" onclick="salvarPlantio(${p?`'${id}'`:'null'})">Salvar</button>
@@ -4490,8 +4507,40 @@ window.abrirModalPlantio = function(id) {
   // Inicializa produtos no sulco
   window._plSulco = (p && Array.isArray(p.produtos_sulco) && p.produtos_sulco.length) ? p.produtos_sulco.slice() : [];
   renderLinhasSulco();
+  // Inicializa tratamento de sementes
+  window._plTrat = (p && Array.isArray(p.tratamento_produtos) && p.tratamento_produtos.length) ? p.tratamento_produtos.slice() : [];
+  atualizarTratamentoSementes();
   if (p?.fazenda) { atualizarTalhoesCampo('pl'); setTimeout(()=>{ const s=document.getElementById('pl-talhao'); if(s) s.value=p.talhao||''; },0); }
 };
+
+// Tratamento de sementes: TSI = só produtos; Fazenda = produtos + doses
+window.atualizarTratamentoSementes = function() {
+  const tipo = document.getElementById('pl-trat-tipo')?.value || '';
+  const btn = document.getElementById('pl-trat-btn');
+  if (btn) btn.style.display = tipo ? 'inline-flex' : 'none';
+  renderLinhasTrat();
+};
+function renderLinhasTrat() {
+  const div = document.getElementById('pl-trat-lista');
+  if (!div) return;
+  const tipo = document.getElementById('pl-trat-tipo')?.value || '';
+  if (!tipo) { div.innerHTML = ''; return; }
+  const comDose = tipo === 'fazenda';
+  if (window._plTrat.length === 0) {
+    div.innerHTML = `<div style="font-size:12px;color:var(--cinza)">${comDose?'Adicione os produtos e as doses do tratamento.':'Adicione os produtos do tratamento.'}</div>`;
+    return;
+  }
+  div.innerHTML = window._plTrat.map((t,i)=>`
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <input type="text" placeholder="Produto" value="${(t.produto||'').replace(/"/g,'&quot;')}" oninput="atualizarLinhaTrat(${i},'produto',this.value)" style="flex:2;min-width:0">
+      ${comDose?`<input type="number" placeholder="Dose" value="${t.dose||''}" step="0.01" min="0" oninput="atualizarLinhaTrat(${i},'dose',this.value)" style="flex:1;min-width:0">
+      <select onchange="atualizarLinhaTrat(${i},'unidade',this.value)" style="flex:1;min-width:0">${UNIDADES.map(u=>`<option ${u===(t.unidade||'mL')?'selected':''}>${u}</option>`).join('')}</select>`:''}
+      <button type="button" onclick="removerLinhaTrat(${i})" style="background:none;border:none;color:var(--vermelho);font-weight:700;cursor:pointer;font-size:16px">✕</button>
+    </div>`).join('');
+}
+window.adicionarLinhaTrat = function() { window._plTrat.push({produto:'',dose:'',unidade:'mL'}); renderLinhasTrat(); };
+window.removerLinhaTrat = function(i) { window._plTrat.splice(i,1); renderLinhasTrat(); };
+window.atualizarLinhaTrat = function(i,campo,val) { if(window._plTrat[i]) window._plTrat[i][campo] = (campo==='dose')?(parseFloat(val)||''):val; };
 
 // Linhas de produtos no sulco de plantio
 function renderLinhasSulco() {
@@ -4612,7 +4661,9 @@ window.salvarPlantio = async function(id) {
     obs: cultivares[0].obs,
     espacamento: parseFloat(document.getElementById('pl-espacamento').value)||0,
     vazao: (document.getElementById('pl-vazao')?.value||'').trim(),
-    produtos_sulco: (window._plSulco||[]).filter(s=>s.produto && s.produto.trim()).map(s=>({produto:s.produto.trim(), dose:parseFloat(s.dose)||0, unidade:s.unidade||'kg'}))
+    produtos_sulco: (window._plSulco||[]).filter(s=>s.produto && s.produto.trim()).map(s=>({produto:s.produto.trim(), dose:parseFloat(s.dose)||0, unidade:s.unidade||'kg'})),
+    tratamento_tipo: document.getElementById('pl-trat-tipo')?.value||'',
+    tratamento_produtos: (window._plTrat||[]).filter(t=>t.produto && t.produto.trim()).map(t=>({produto:t.produto.trim(), dose:parseFloat(t.dose)||0, unidade:t.unidade||''}))
   };
   try {
     if (id) {
