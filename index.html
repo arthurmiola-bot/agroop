@@ -1115,7 +1115,7 @@ function renderPlantPlanejamento() {
           </div>`:''}
         ${sulco.length>0?`
           <div style="margin-top:8px;border-top:1px solid var(--creme-escuro);padding-top:8px">
-            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">🌱 Sulco de plantio${p.vazao?` · 💧 ${p.vazao}`:''}</div>
+            <div style="font-size:12px;font-weight:700;color:var(--cinza);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">🌱 Sulco de plantio${p.vazao?` · Vazão: ${/[a-zA-Z]/.test(String(p.vazao))?p.vazao:p.vazao+' L/ha'}`:''}</div>
             <table style="width:100%;border-collapse:collapse;font-size:13px">
               ${sulco.map(s=>`<tr><td style="padding:2px 0">${s.produto}</td><td style="padding:2px 0;text-align:right;font-family:'DM Mono',monospace;color:var(--verde)">${s.dose?fmt(s.dose)+' '+(s.unidade||''):''}</td></tr>`).join('')}
             </table>
