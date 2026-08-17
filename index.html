@@ -5244,29 +5244,33 @@ function numeroCategoria(a) {
 }
 
 // Recalcula toda a cadeia DAA de um talhão. Cada pulverização "pulv_anterior" conta a partir da
-// pulverização imediatamente anterior NA SEQUÊNCIA (ordenada por: data conhecida → número da
-// categoria → ordem de criação). Isso funciona mesmo quando as datas ainda estão vazias.
+// pulverização imediatamente anterior NA SEQUÊNCIA. A sequência segue, nesta prioridade:
+//   1) número da categoria (Fungicida 1 < 2 < 3 < 4 < 5) — a numeração é a ordem "verdadeira"
+//   2) data conhecida (para itens sem número, ex: Dessecação, Pré-emergente)
+//   3) ordem de criação
+// Priorizar o número evita que uma data temporariamente errada embaralhe a ordem dos fungicidas.
 async function recalcularCadeiaDAA(fazenda, talhao) {
   for (let passada=0; passada<12; passada++) {
     let mudou = false;
-    // sequência ordenada de TODAS as pulverizações do talhão
     const seq = adubacoes
       .filter(a => tipoDaAdubacao(a)==='pulverizacao'
         && normalizar(a.fazenda||'')===normalizar(fazenda)
         && normalizar(a.talhao||'')===normalizar(talhao))
       .map((a, ordemCriacao) => ({ a, ordemCriacao }))
       .sort((x, y) => {
-        // 1º critério: quem já tem data vai pela data
+        const nx = numeroCategoria(x.a), ny = numeroCategoria(y.a);
+        // 1º critério: ambos numerados → ordena pelo número (Fung 3 sempre antes de Fung 4)
+        if (nx != null && ny != null) {
+          if (nx !== ny) return nx - ny;
+          return x.ordemCriacao - y.ordemCriacao;
+        }
+        // 2º critério: um tem número e outro não. Usa a data para posicionar o sem-número
+        // relativo ao com-número; se o sem-número não tem data, mantém a ordem de criação.
         const dx = x.a.data ? String(x.a.data).slice(0,10) : '';
         const dy = y.a.data ? String(y.a.data).slice(0,10) : '';
         if (dx && dy && dx !== dy) return dx.localeCompare(dy);
         if (dx && !dy) return -1;
         if (!dx && dy) return 1;
-        // 2º critério: número da categoria (Fungicida 1 < Fungicida 2 < ...)
-        const nx = numeroCategoria(x.a), ny = numeroCategoria(y.a);
-        if (nx != null && ny != null && nx !== ny) return nx - ny;
-        if (nx != null && ny == null) return -1;
-        if (nx == null && ny != null) return 1;
         // 3º critério: ordem de criação
         return x.ordemCriacao - y.ordemCriacao;
       })
@@ -5276,7 +5280,6 @@ async function recalcularCadeiaDAA(fazenda, talhao) {
     for (let i = 0; i < seq.length; i++) {
       const a = seq[i];
       if (a.modo_data !== 'pulv_anterior') continue;
-      // acha o anterior (i-1, i-2...) que tenha data
       let ref = '';
       for (let j = i-1; j >= 0; j--) {
         if (seq[j].data) { ref = String(seq[j].data).slice(0,10); break; }
