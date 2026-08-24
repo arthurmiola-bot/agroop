@@ -224,7 +224,7 @@ var INIT = {
 
 // ── CONSTANTES ──────────────────────────────────────────────────────────────
 var ADJ_PIN = "284284";
-var APP_VERSION = "4.2";
+var APP_VERSION = "4.3";
 
 // ── HELPERS DE FAZENDA ──────────────────────────────────────────────────────
 function getFarmRaw(data,id){
@@ -297,6 +297,18 @@ function computeAvgCost(data){
   });
   if(totalLiters<=0) return 0;
   return Math.round((totalValue/totalLiters)*10000)/10000;
+}
+// Custo do diesel de UM abastecimento (R$/L), congelado:
+// 1) se o registro ja tem custo gravado (costPerLiter), usa ele - nunca muda;
+// 2) senao (registros antigos), aplica a regra por data acertada com o usuario:
+//    ate 16/08/2026 => 6,20 ; de 17/08 a 23/08/2026 => 6,15 ;
+// 3) de 24/08/2026 em diante sem custo gravado, usa o custo ponderado atual (fallback).
+function fuelCostPerLiter(x, avg){
+  if(x&&x.costPerLiter!==undefined&&x.costPerLiter!==null&&Number(x.costPerLiter)>0) return Number(x.costPerLiter);
+  var d10=String((x&&x.date)||"").slice(0,10);
+  if(d10&&d10<="2026-08-16") return 6.20;
+  if(d10&&d10<="2026-08-23") return 6.15;
+  return Number(avg)||0;
 }
 function farmLow(farm){
   return farm && farm.tankStock<=(farm.lowStockThreshold||1000);
@@ -894,6 +906,7 @@ function Login(props){
 // ── ABASTECER ────────────────────────────────────────────────────────────────
 function Fuel(props){
   var data=props.data, saveConfig=props.saveConfig, updFarm=props.updFarm, addFuel=props.addFuel, role=props.role, online=props.online, toast=props.toast;
+  var avg=data.avgCostPerLiter||0;
   var activeFarms=(data.farms||[]).filter(function(fa){return fa.active!==false;});
   var _f=useState({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:"",prov:""}), f=_f[0], setF=_f[1];
   var _conf=useState(false), conf=_conf[0], setConf=_conf[1];
@@ -939,7 +952,7 @@ function Fuel(props){
     };
     // adiciona o abastecimento como documento individual (sem sobrescrever nada)
     // O estoque e recalculado automaticamente a partir dos registros - nao precisa mais atualizar manualmente
-    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:isProv?0:Number(f.meter),liters:litros,provider:isProv?f.prov.trim():"",date:tsNow(),registeredBy:role});
+    addFuel({id:Date.now(),farmId:farm.id,operatorId:Number(f.op),machineId:Number(f.mc),meter:isProv?0:Number(f.meter),liters:litros,provider:isProv?f.prov.trim():"",costPerLiter:avg>0?avg:null,date:tsNow(),registeredBy:role});
     setF({farm:activeFarms.length===1?String(activeFarms[0].id):"",op:"",mc:"",meter:"",lts:"",prov:""});
     setConf(false);
     setSuccess(det);
@@ -1603,8 +1616,9 @@ function Rep(props){
     var mf=rows.filter(function(x){return x.machineId===m.id;});
     if(mf.length<2) return null;
     var tot=mf.reduce(function(s,x){return s+x.liters;},0);
+    var custoTot=mf.reduce(function(s,x){return s+x.liters*fuelCostPerLiter(x,avg);},0);
     var sr=mf.slice().sort(function(a,b){return b.meter-a.meter;});
-    return Object.assign({},m,{tot:tot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,getMachineMt(m)),cnt:mf.length});
+    return Object.assign({},m,{tot:tot,custoTot:custoTot,eff:eCalc(tot,sr[0].meter-sr[sr.length-1].meter,getMachineMt(m)),cnt:mf.length});
   }).filter(function(x){return x!==null;});
 
   // Consumo por prestador de servico (agrupa os abastecimentos de maquinas tipo "provider"
@@ -1614,11 +1628,15 @@ function Rep(props){
     var m=null; for(var i=0;i<data.machines.length;i++){if(data.machines[i].id===x.machineId){m=data.machines[i];break;}}
     if(m&&isProvider(m)){
       var key=(x.provider&&String(x.provider).trim())?String(x.provider).trim():"(sem identificacao)";
-      if(!provAgg[key]) provAgg[key]={liters:0,cnt:0};
-      provAgg[key].liters+=x.liters; provAgg[key].cnt+=1;
+      if(!provAgg[key]) provAgg[key]={liters:0,cnt:0,cost:0};
+      provAgg[key].liters+=x.liters; provAgg[key].cnt+=1; provAgg[key].cost+=x.liters*fuelCostPerLiter(x,avg);
     }
   });
-  var provList=Object.keys(provAgg).map(function(k){return {name:k,tot:provAgg[k].liters,cnt:provAgg[k].cnt};}).sort(function(a,b){return b.tot-a.tot;});
+  var provList=Object.keys(provAgg).map(function(k){return {name:k,tot:provAgg[k].liters,cnt:provAgg[k].cnt,cost:provAgg[k].cost};}).sort(function(a,b){return b.tot-a.tot;});
+
+  // Totais de custo (usando o custo congelado de cada abastecimento)
+  var custoTotalRows=rows.reduce(function(s,x){return s+x.liters*fuelCostPerLiter(x,avg);},0);
+  var custoMedioRows=totL>0?custoTotalRows/totL:0;
 
   function exportExtrato(){
     var avg=data.avgCostPerLiter||0;
@@ -1672,7 +1690,7 @@ function Rep(props){
         unidade:mUnit(mc?getMachineMt(mc):"hourmeter"),
         litros:-Number(x.liters),
         preco:avg,
-        custo:-(Number(x.liters)*avg),
+        custo:-(Number(x.liters)*fuelCostPerLiter(x,avg)),
         registradoPor:x.registeredBy||""
       });
     });
@@ -1749,8 +1767,8 @@ function Rep(props){
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginTop:16}}>
           <div className="sbox"><div className="slbl">Registros</div><div className="sval">{rows.length}</div></div>
           <div className="sbox"><div className="slbl">Total Consumido</div><div className="sval">{fmtN(totL)}<span className="sunit"> L</span></div></div>
-          <div className="sbox"><div className="slbl">Custo Medio/L</div><div className="sval" style={{fontSize:18,color:AMB}}>{avg>0?fmtR(avg):"--"}</div></div>
-          <div className="sbox"><div className="slbl">Custo Total</div><div className="sval" style={{fontSize:18,color:AMB}}>{avg>0?fmtR(totL*avg):"--"}</div></div>
+          <div className="sbox"><div className="slbl">Custo Medio/L</div><div className="sval" style={{fontSize:18,color:AMB}}>{custoMedioRows>0?fmtR(custoMedioRows):"--"}</div></div>
+          <div className="sbox"><div className="slbl">Custo Total</div><div className="sval" style={{fontSize:18,color:AMB}}>{custoTotalRows>0?fmtR(custoTotalRows):"--"}</div></div>
         </div>
       </div>
       {mSt.length>0&&(
@@ -1768,7 +1786,7 @@ function Rep(props){
                   <div style={{fontFamily:"'Barlow Condensed'",fontSize:24,fontWeight:800}}>{m.eff||"--"}<span style={{fontSize:13,color:MUT,fontWeight:400}}> {eLbl(getMachineMt(m))}</span></div>
                   <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+BDR,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
                     <div><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Litros</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700}}>{fmtN(m.tot)} L</div></div>
-                    {avg>0&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Custo total</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:AMB}}>{fmtR(m.tot*avg)}</div></div>}
+                    {m.custoTot>0&&<div style={{textAlign:"right"}}><div style={{fontSize:10,color:MUT,textTransform:"uppercase"}}>Custo total</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,color:AMB}}>{fmtR(m.custoTot)}</div></div>}
                   </div>
                   <div style={{fontSize:11,color:DIM,marginTop:4}}>{m.cnt} abastecimentos</div>
                 </div>
@@ -1791,7 +1809,7 @@ function Rep(props){
                   </div>
                   <div style={{textAlign:"right",flexShrink:0}}>
                     <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:22,color:BLU}}>{fmtN(p.tot)} L</div>
-                    {avg>0&&<div style={{fontSize:12,color:AMB,fontWeight:600}}>{fmtR(p.tot*avg)}</div>}
+                    {p.cost>0&&<div style={{fontSize:12,color:AMB,fontWeight:600}}>{fmtR(p.cost)}</div>}
                   </div>
                 </div>
               );
@@ -1825,8 +1843,8 @@ function Rep(props){
                     <td>{op?op.name:"-"}</td>
                     <td>{mc&&isProvider(mc)?(x.provider||"-"):fmtN(x.meter)+" "+mUnit(mc?getMachineMt(mc):"hourmeter")}</td>
                     <td><strong style={{color:BLU}}>{x.liters} L</strong></td>
-                    <td style={{color:AMB,whiteSpace:"nowrap"}}>{avg>0?fmtR(avg):"--"}</td>
-                    <td style={{color:MUT,whiteSpace:"nowrap"}}>{avg>0?fmtR(x.liters*avg):"--"}</td>
+                    <td style={{color:AMB,whiteSpace:"nowrap"}}>{fmtR(fuelCostPerLiter(x,avg))}</td>
+                    <td style={{color:MUT,whiteSpace:"nowrap"}}>{fmtR(x.liters*fuelCostPerLiter(x,avg))}</td>
                     <td><span className={"bdg "+(x.registeredBy==="ADMINISTRADOR"?"by":x.registeredBy==="ESCRITORIO"?"bb":"bg")} style={{fontSize:11}}>{x.registeredBy}</span></td>
                   </tr>
                 );
