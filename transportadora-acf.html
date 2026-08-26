@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Transportadora — ACF</title>
+  <title>Diamantes LHM</title>
   <meta name="theme-color" content="#2a7a2a"/>
-  <meta name="apple-mobile-web-app-title" content="Transportadora"/>
+  <meta name="apple-mobile-web-app-title" content="Diamantes LHM"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232a7a2a'/%3E%3Cpath d='M50 20 L74 44 L50 84 L26 44 Z' fill='none' stroke='white' stroke-width='6' stroke-linejoin='round'/%3E%3Cpath d='M26 44 H74 M50 20 L38 44 L50 84 M50 20 L62 44 L50 84' stroke='white' stroke-width='4' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E"/>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -19,6 +20,34 @@
 </head>
 <body>
 <div id="root"></div>
+
+<!-- ===================== INSTALAÇÃO (PWA) ===================== -->
+<script>
+(function(){
+  var icon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232a7a2a'/%3E%3Cpath d='M50 20 L74 44 L50 84 L26 44 Z' fill='none' stroke='white' stroke-width='6' stroke-linejoin='round'/%3E%3Cpath d='M26 44 H74 M50 20 L38 44 L50 84 M50 20 L62 44 L50 84' stroke='white' stroke-width='4' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E";
+  try{
+    var base = location.href.substring(0, location.href.lastIndexOf('/')+1);
+    var m = {
+      name: "Diamantes LHM",
+      short_name: "Diamantes LHM",
+      display: "standalone",
+      background_color: "#f0f4f0",
+      theme_color: "#2a7a2a",
+      start_url: location.href.split('#')[0].split('?')[0],
+      scope: base,
+      icons: [
+        { src: icon, sizes: "192x192", type: "image/svg+xml", purpose: "any" },
+        { src: icon, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
+      ]
+    };
+    var blob = new Blob([JSON.stringify(m)], { type: "application/manifest+json" });
+    var link = document.createElement("link");
+    link.rel = "manifest";
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  }catch(e){ console.error("manifest:", e); }
+})();
+</script>
 
 <!-- ============================ CAMADA FIREBASE ============================ -->
 <script>
@@ -354,7 +383,7 @@ function App(){
       <div className="noprint" style={{background:"linear-gradient(180deg,"+GN2+","+GN+")",padding:"18px 14px 16px",color:"#fff",boxShadow:"0 2px 12px #0002"}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>TRANSPORTADORA · ACF</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>DIAMANTES LHM</div>
             <div style={{fontSize:12,opacity:.85,marginTop:2}}>Controle de resultados · Caminhão FH 540 (016)</div>
           </div>
           <div style={{background:"#ffffff22",borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
@@ -450,7 +479,7 @@ function Receitas(props){
   }
   function editar(r){ setForm(Object.assign({},r,{ precoTon:String(r.precoTon), ton:String(r.ton) })); }
 
-  // ---- Importar Excel/CSV ----
+  // ---- Importar Excel/CSV (tolerante a formatos) ----
   function importar(ev){
     var file = ev.target.files[0]; if(!file) return;
     var reader = new FileReader();
@@ -458,29 +487,62 @@ function Receitas(props){
       try {
         var wb = XLSX.read(e.target.result, {type:"array", cellDates:true});
         var ws = wb.Sheets[wb.SheetNames[0]];
-        var rows = XLSX.utils.sheet_to_json(ws, {defval:""});
-        var mapKey = function(obj,alts){ for(var k in obj){ if(alts.indexOf(norm(k))>=0) return obj[k]; } return ""; };
+        var aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:"", raw:false});
+        // acha a linha de cabeçalho (pode haver título/linhas acima)
+        var KW = ["tomador","cliente","empresa","contratante","data","valor","frete","receita","preco","preço","ton","tonelada","quantidade","peso","produto","origem","destino"];
+        var hRow = -1;
+        for(var i=0;i<Math.min(aoa.length,20);i++){
+          var hits=0;
+          for(var c=0;c<aoa[i].length;c++){ var cell=norm(aoa[i][c]); if(!cell) continue;
+            for(var k=0;k<KW.length;k++){ if(cell.indexOf(norm(KW[k]))>=0){ hits++; break; } } }
+          if(hits>=2){ hRow=i; break; }
+        }
+        if(hRow<0){ alert("Não encontrei uma linha de cabeçalho na planilha.\n\nDica: clique em \"Baixar modelo\", coloque seus fretes nele e importe — as colunas já ficam certas."); ev.target.value=""; return; }
+        var headers = aoa[hRow].map(function(x){ return String(x); }).filter(function(x){return x.trim();});
+        var rows = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false, range:hRow});
+
+        function get(row, aliases){
+          for(var key in row){ var nk=norm(key); for(var a=0;a<aliases.length;a++){ if(nk.indexOf(aliases[a])>=0) return row[key]; } }
+          return "";
+        }
+        function toNum(v){ if(typeof v==="number") return v; var s=String(v).replace(/[r$\s]/gi,""); if(!s) return 0;
+          if(s.indexOf(",")>=0){ s=s.replace(/\./g,"").replace(",","."); } var n=parseFloat(s); return isNaN(n)?0:n; }
+        function toISO(v){
+          if(v instanceof Date) return v.getFullYear()+"-"+pad(v.getMonth()+1)+"-"+pad(v.getDate());
+          var s=String(v).trim(); if(!s) return "";
+          if(s.indexOf("/")>0){ var p=s.split("/"); if(p.length>=3){ var y=p[2].slice(0,4); if(y.length===2) y="20"+y; return y+"-"+pad(Number(p[1]))+"-"+pad(Number(p[0])); } }
+          if(s.indexOf("-")>0 && s.length>=8) return s.slice(0,10);
+          return "";
+        }
+
         var n=0;
         rows.forEach(function(row){
-          var tom = mapKey(row,["tomador","tomador do servico","cliente"]);
-          if(!tom && !mapKey(row,["origem"])) return; // linha vazia
-          var dcell = mapKey(row,["data","date"]);
-          var dISO;
-          if(dcell instanceof Date){ dISO = dcell.getFullYear()+"-"+pad(dcell.getMonth()+1)+"-"+pad(dcell.getDate()); }
-          else { var ds=String(dcell); if(ds.indexOf("/")>0){ var p=ds.split("/"); dISO=p[2]+"-"+pad(Number(p[1]))+"-"+pad(Number(p[0])); } else { dISO=String(dcell).slice(0,10); } }
-          var preco=Number(String(mapKey(row,["r$/ton","preco","preco/ton","valor/ton","rs/ton"])).replace(",","."))||0;
-          var ton=Number(String(mapKey(row,["quantidade","quantidade (ton)","ton","toneladas"])).replace(",","."))||0;
+          var tom = String(get(row,["tomador","cliente","empresa","contratante","razao"])).trim();
+          var dISO = toISO(get(row,["data","date","dia","emissao"]));
+          var preco = toNum(get(row,["r$/ton","rs/ton","valor/ton","r$/t","preco/ton","preco","preço"]));
+          var ton = toNum(get(row,["quantidade","tonelada","ton","peso","carga","qtd"]));
+          // valor total do frete: coluna com "valor/frete/receita/total" que NÃO seja por tonelada
+          var totalRaw="";
+          for(var key in row){ var nk=norm(key);
+            if((nk.indexOf("valor")>=0||nk.indexOf("frete")>=0||nk.indexOf("receita")>=0||nk.indexOf("total")>=0) && nk.indexOf("ton")<0 && nk.indexOf("/t")<0){ totalRaw=row[key]; break; } }
+          var total = toNum(totalRaw);
+          var valor = total>0 ? total : preco*ton;
+          if(valor>0 && ton>0 && !(preco>0)) preco = valor/ton;   // deriva R$/ton se só veio o total
+          if(!tom && !valor && !ton && !dISO) return;             // pula linha realmente vazia
           var item = {
-            id: Date.now()+Math.floor(Math.random()*10000)+n,
-            date: dISO, tomador:String(tom).trim(),
-            produto:String(mapKey(row,["produto"])).trim(),
-            origem:String(mapKey(row,["origem"])).trim(),
-            destino:String(mapKey(row,["destino"])).trim(),
-            precoTon:preco, ton:ton, valor:preco*ton, createdAt:new Date().toISOString()
+            id: Date.now()+Math.floor(Math.random()*100000)+n,
+            date: dISO || todayISO(),
+            tomador: tom,
+            produto: String(get(row,["produto","material"])).trim(),
+            origem: String(get(row,["origem","saida"])).trim(),
+            destino: String(get(row,["destino","entrega"])).trim(),
+            precoTon: preco, ton: ton, valor: valor,
+            createdAt: new Date().toISOString()
           };
           window.TX.addReceita(item); n++;
         });
-        props.toast(n+" frete(s) importado(s)");
+        if(n===0){ alert("Li a planilha, mas não importei nenhum frete.\n\nColunas encontradas:\n• "+headers.join("\n• ")+"\n\nO app precisa de: Tomador (ou Cliente), Data e Valor (ou R$/ton + Quantidade).\nDica: use o botão \"Baixar modelo\"."); }
+        else props.toast(n+" frete(s) importado(s)");
       } catch(err){ console.error(err); props.toast("Erro ao ler a planilha",true); }
       ev.target.value="";
     };
@@ -504,10 +566,8 @@ function Receitas(props){
     <div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px"}}>
         <Btn onClick={nova}>+ Novo frete</Btn>
-        <label style={{display:"inline-block"}}>
-          <Btn color={INP} style={{pointerEvents:"none"}}>Importar Excel</Btn>
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
-        </label>
+        <Btn color={INP} onClick={function(){ var el=document.getElementById("fileFretes"); if(el) el.click(); }}>Importar Excel</Btn>
+        <input id="fileFretes" type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
         <Btn color={INP} onClick={baixarModelo}>Modelo</Btn>
         <Btn color={INP} onClick={exportar}>Exportar mês</Btn>
       </div>
@@ -786,7 +846,7 @@ function Acerto(props){
       {/* ÁREA DE IMPRESSÃO (PDF) */}
       <div id="printArea" style={{padding:"10px 4px",color:"#111",fontFamily:"'Barlow',sans-serif"}}>
         <div style={{borderBottom:"3px solid "+GN,paddingBottom:10,marginBottom:16}}>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>TRANSPORTADORA · ACF</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>DIAMANTES LHM</div>
           <div style={{fontSize:14,color:"#333"}}>Acerto de contas — {nomeFaz}</div>
           <div style={{fontSize:14,color:"#333"}}>Referência: <b>{mesLabel(props.mk)}</b> · Caminhão FH 540 (016)</div>
         </div>
