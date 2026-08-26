@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Transportadora — ACF</title>
+  <meta name="theme-color" content="#2a7a2a"/>
+  <meta name="apple-mobile-web-app-title" content="Transportadora"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ============================ CAMADA FIREBASE ============================ -->
+<script>
+(function(){
+  // MESMO PROJETO do Posto Diesel (agroop-d73d4) — e isso que permite LER os
+  // abastecimentos da FH 540 direto da base do Posto, sem redigitar nada.
+  var firebaseConfig = {
+    apiKey: "AIzaSyDtmcibrocmj0Gc8bpTtXFUc2JTuN5CRjY",
+    authDomain: "agroop-d73d4.firebaseapp.com",
+    projectId: "agroop-d73d4",
+    storageBucket: "agroop-d73d4.firebasestorage.app",
+    messagingSenderId: "591049190246",
+    appId: "1:591049190246:web:0a21a937f978ade855b6a7"
+  };
+
+  window.TX = { ready:false };
+
+  try {
+    var existing = firebase.apps.filter(function(a){return a.name==="transportadora";});
+    var fbApp = existing.length ? existing[0] : firebase.initializeApp(firebaseConfig, "transportadora");
+    var db = fbApp.firestore();
+
+    // ---- Dados DESTE app (transportadora) ----
+    var ROOT = db.collection("transportadora").doc("dados");
+    var REC  = ROOT.collection("receitas");   // 1 doc por frete
+    var DESP = ROOT.collection("despesas");    // 1 doc por lançamento/recorrência/parcelamento
+    var CONF = db.collection("transportadora").doc("config");
+
+    // ---- Dados do Posto Diesel (somente leitura) ----
+    var POSTO_CONFIG = db.collection("posto-diesel").doc("config");
+    var POSTO_FUEL   = db.collection("posto-diesel").doc("dados").collection("abastecimentos");
+
+    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[] };
+    var listeners = [];
+    function emit(){ for(var i=0;i<listeners.length;i++){ try{listeners[i](state);}catch(e){console.error(e);} } }
+
+    // Assinaturas em tempo real
+    REC.onSnapshot(function(qs){
+      state.rec = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
+      emit();
+    }, function(e){console.error("rec:",e);});
+
+    DESP.onSnapshot(function(qs){
+      state.desp = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
+      emit();
+    }, function(e){console.error("desp:",e);});
+
+    CONF.onSnapshot(function(snap){
+      if(snap.exists && snap.data() && snap.data().payload){
+        try{ state.conf = JSON.parse(snap.data().payload); }catch(e){ state.conf = {}; }
+      } else { state.conf = {}; }
+      emit();
+    }, function(e){console.error("conf:",e);});
+
+    POSTO_CONFIG.onSnapshot(function(snap){
+      var m = [];
+      if(snap.exists && snap.data() && snap.data().payload){
+        try{ var p = JSON.parse(snap.data().payload); m = p.machines || []; }catch(e){}
+      }
+      state.postoMachines = m;
+      emit();
+    }, function(e){console.error("postoConfig:",e);});
+
+    POSTO_FUEL.onSnapshot(function(qs){
+      state.fuel = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
+      emit();
+    }, function(e){console.error("postoFuel:",e);});
+
+    // ---- SEGUNDO PROJETO: Nossas Contas (nossas-contas-6c240) ----
+    // Lê SOMENTE as despesas marcadas como "Diamantes LHM" no app de gastos pessoais.
+    // Esse projeto exige login anônimo (regras: request.auth != null).
+    state.diamGastos = [];
+    try {
+      var ncConfig = {
+        apiKey: "AIzaSyC2dPU4lZUelyCMCY0hyLDCBTwHW7PDGuw",
+        authDomain: "nossas-contas-6c240.firebaseapp.com",
+        projectId: "nossas-contas-6c240",
+        storageBucket: "nossas-contas-6c240.firebasestorage.app",
+        messagingSenderId: "553757944177",
+        appId: "1:553757944177:web:016e77aaf412609a02eed0"
+      };
+      var ncEx = firebase.apps.filter(function(a){return a.name==="nossas-contas";});
+      var ncApp = ncEx.length ? ncEx[0] : firebase.initializeApp(ncConfig, "nossas-contas");
+      var ncDb = ncApp.firestore();
+      ncApp.auth().signInAnonymously().then(function(){
+        ncDb.collection("gastos_familia").doc("dados").collection("gastos")
+          .where("category","==","Diamantes LHM")
+          .onSnapshot(function(qs){
+            state.diamGastos = qs.docs.map(function(d){ var o=d.data()||{}; o.__id=d.id; return o; })
+              .filter(function(x){ return x && !x.deleted; });
+            emit();
+          }, function(e){ console.error("diamGastos:",e); });
+      }).catch(function(e){ console.error("Nossas Contas auth:",e); });
+    } catch(ncErr){ console.error("Falha init Nossas Contas:", ncErr); }
+
+    // API para o React
+    window.TX = {
+      ready: true,
+      onData: function(cb){ listeners.push(cb); cb(state); },
+      addReceita: function(item){ return REC.doc(String(item.id)).set(item); },
+      delReceita: function(id){ return REC.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
+      addDespesa: function(item){ return DESP.doc(String(item.id)).set(item); },
+      delDespesa: function(id){ return DESP.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
+      saveConfig: function(cfg){ return CONF.set({ payload: JSON.stringify(cfg) }); }
+    };
+  } catch(err){
+    console.error("Falha init Firebase:", err);
+    window.TX = { ready:false, error:String(err) };
+  }
+})();
+</script>
+
+<script>
+Babel.registerPreset("react-classic", { presets: [[Babel.availablePresets["react"], { runtime: "classic" }]] });
+</script>
+
+<!-- ============================ APLICATIVO REACT ============================ -->
+<script type="text/babel" data-presets="react-classic">
+var useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo;
+
+// ── PALETA (mesma identidade do Posto Diesel) ────────────────────────────────
+var GN="#2a7a2a", GN2="#1d561d", GN3="#d4f0a0";
+var BG="#f0f4f0", CARD="#ffffff", INP="#e8f0e8", BDR="#b8d4b8";
+var TXT="#1a2e1a", MUT="#4a6e4a", DIM="#7a9a7a";
+var RED="#dc2626", BLU="#0369a1", PUR="#7c3aed", AMB="#854d0e";
+
+var CSS = [
+  "@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap');",
+  "*{box-sizing:border-box;margin:0;padding:0}",
+  "body{background:"+BG+";color:"+TXT+";font-family:'Barlow',sans-serif;min-height:100vh}",
+  "::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:"+BDR+";border-radius:3px}",
+  "input,select,textarea{background:#fff;border:2px solid "+BDR+";color:"+TXT+";border-radius:8px;padding:10px 14px;font-family:'Barlow',sans-serif;font-size:15px;width:100%;outline:none;transition:border .2s}",
+  "input:focus,select:focus,textarea:focus{border-color:"+GN+";box-shadow:0 0 0 3px #2a7a2a22}",
+  "input::placeholder{color:"+DIM+"}",
+  "button{cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:700;border:none;border-radius:8px;transition:all .15s}",
+  ".bdg{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}",
+  ".bg{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0}",
+  ".br{background:#fee2e2;color:"+RED+";border:1px solid #fca5a5}",
+  ".by{background:#fef9c3;color:"+AMB+";border:1px solid #fde047}",
+  ".bb{background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd}",
+  ".bp{background:#f3e8ff;color:"+PUR+";border:1px solid #d8b4fe}",
+  "table{width:100%;border-collapse:collapse}",
+  "th{text-align:left;padding:9px 12px;font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:1px;color:"+MUT+";border-bottom:2px solid "+BDR+";text-transform:uppercase;background:#f7faf7}",
+  "td{padding:10px 12px;border-bottom:1px solid "+BDR+";font-size:14px;vertical-align:middle}",
+  "tr:hover td{background:#f0f7f0}",
+  ".sec{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:700;letter-spacing:1.5px;color:"+GN+";text-transform:uppercase;margin-bottom:14px}",
+  ".card{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:12px;padding:20px;box-shadow:0 2px 8px #0000000d}",
+  ".sbox{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:3px;box-shadow:0 2px 8px #0000000d}",
+  ".slbl{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:"+MUT+";font-family:'Barlow Condensed',sans-serif}",
+  ".sval{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:800;color:"+TXT+"}",
+  ".flbl{font-size:12px;color:"+MUT+";margin-bottom:5px;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;font-weight:600;letter-spacing:.5px}",
+  ".mtog{display:flex;border:2px solid "+BDR+";border-radius:8px;overflow:hidden;background:#fff}",
+  ".mtog button{flex:1;padding:9px 8px;background:none;color:"+MUT+";font-size:14px;border:none;border-radius:0;font-family:'Barlow',sans-serif}",
+  ".mtog button.on{background:"+GN+";color:#fff;font-weight:700}",
+  "@keyframes fi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}",
+  ".fi{animation:fi .3s ease forwards}",
+  "@media print{ body{background:#fff} .noprint{display:none !important} #root>div>*{display:none} #printArea{display:block !important} }",
+  "#printArea{display:none}"
+].join("\n");
+
+// ── UTILIDADES ───────────────────────────────────────────────────────────────
+function pad(n){ return (n<10?"0":"")+n; }
+function todayISO(){ var n=new Date(); return n.getFullYear()+"-"+pad(n.getMonth()+1)+"-"+pad(n.getDate()); }
+function thisMonth(){ var n=new Date(); return n.getFullYear()+"-"+pad(n.getMonth()+1); }
+function monthOf(d){ return String(d||"").slice(0,7); }
+function monthDiff(a,b){ // b - a em meses (a,b = "YYYY-MM")
+  var pa=a.split("-"), pb=b.split("-");
+  return (Number(pb[0])-Number(pa[0]))*12 + (Number(pb[1])-Number(pa[1]));
+}
+function brl(v){ v=Number(v)||0; return "R$ "+v.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function num(v){ v=Number(v)||0; return v.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function ddmmyyyy(d){ var p=String(d||"").slice(0,10).split("-"); return p.length===3 ? p[2]+"/"+p[1]+"/"+p[0] : d; }
+function mesLabel(mk){
+  var nomes=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+  var p=String(mk).split("-"); return nomes[Number(p[1])-1]+"/"+p[0];
+}
+function norm(s){ return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim(); }
+
+// Custo do diesel de UM abastecimento (R$/L), congelado — mesma regra do Posto:
+function fuelCostPerLiter(x, avg){
+  if(x && x.costPerLiter!==undefined && x.costPerLiter!==null && Number(x.costPerLiter)>0) return Number(x.costPerLiter);
+  var d10 = String((x&&x.date)||"").slice(0,10);
+  if(d10 && d10<="2026-08-16") return 6.20;
+  if(d10 && d10<="2026-08-23") return 6.15;
+  return Number(avg)||0;
+}
+
+// ── COMPONENTES BÁSICOS ──────────────────────────────────────────────────────
+function Fld(props){
+  return (
+    <div style={{display:"flex",flexDirection:"column"}}>
+      <label className="flbl">{props.label}</label>
+      {props.textarea
+        ? <textarea rows={props.rows||2} value={props.value} onChange={function(e){props.onChange(e.target.value);}} placeholder={props.placeholder||""}/>
+        : props.options
+          ? <select value={props.value} onChange={function(e){props.onChange(e.target.value);}}>
+              {props.options.map(function(o){return <option key={o.v} value={o.v}>{o.t}</option>;})}
+            </select>
+          : <input type={props.type||"text"} value={props.value} onChange={function(e){props.onChange(e.target.value);}} placeholder={props.placeholder||""} step={props.step} inputMode={props.inputMode}/>
+      }
+    </div>
+  );
+}
+function Btn(props){
+  var bg = props.color || GN;
+  var st = Object.assign({background:bg,color:props.color?TXT:"#fff",padding:"11px 18px",fontSize:15,letterSpacing:.5,opacity:props.disabled?0.5:1,width:props.full?"100%":"auto"}, props.style||{});
+  return <button style={st} onClick={props.onClick} disabled={props.disabled}>{props.children}</button>;
+}
+function Stat(props){
+  return (
+    <div className="sbox">
+      <span className="slbl">{props.label}</span>
+      <span className="sval" style={{color:props.color||TXT}}>{props.value}</span>
+      {props.sub?<span style={{fontSize:12,color:MUT}}>{props.sub}</span>:null}
+    </div>
+  );
+}
+function Modal(props){
+  return (
+    <div className="noprint" style={{position:"fixed",inset:0,background:"#0006",display:"flex",alignItems:"flex-start",justifyContent:"center",zIndex:50,padding:"40px 14px",overflowY:"auto"}} onClick={props.onClose}>
+      <div style={{background:CARD,borderRadius:14,padding:22,width:"100%",maxWidth:440,boxShadow:"0 10px 40px #0004"}} onClick={function(e){e.stopPropagation();}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <span className="sec" style={{margin:0}}>{props.title}</span>
+          <button onClick={props.onClose} style={{background:INP,width:32,height:32,borderRadius:8,color:MUT,fontSize:18}}>×</button>
+        </div>
+        {props.children}
+      </div>
+    </div>
+  );
+}
+function Toast(props){
+  if(!props.msg) return null;
+  return <div className="noprint" style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:props.err?RED:GN2,color:"#fff",padding:"12px 22px",borderRadius:10,fontSize:15,fontWeight:600,zIndex:99,boxShadow:"0 4px 20px #0003"}}>{props.msg}</div>;
+}
+
+// ── APP ──────────────────────────────────────────────────────────────────────
+function App(){
+  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[], diamGastos:[] }); var data=s0[0], setData=s0[1];
+  var t0 = useState("painel"); var tab=t0[0], setTab=t0[1];
+  var m0 = useState(thisMonth()); var mk=m0[0], setMk=m0[1];
+  var ts0 = useState(null); var toast=ts0[0], setToast=ts0[1];
+
+  useEffect(function(){
+    if(window.TX && window.TX.ready){ window.TX.onData(function(st){ setData(Object.assign({},st)); }); }
+  },[]);
+
+  function showToast(msg,err){ setToast({msg:msg,err:err}); setTimeout(function(){setToast(null);},2600); }
+
+  var conf = data.conf || {};
+  var fazendaKey = conf.fazendaKey || "ACF";
+  var custoFallback = Number(conf.custoFallback)||6.15;
+
+  // ---- localizar a FH 540 (código 016) no Posto ----
+  var fh540 = useMemo(function(){
+    var list = data.postoMachines || [];
+    var found = null;
+    for(var i=0;i<list.length;i++){ if(String(list[i].code||"").trim()==="016"){ found=list[i]; break; } }
+    if(!found){ for(var j=0;j<list.length;j++){ if(norm(list[j].desc)==="fh 540"||norm(list[j].desc)==="fh540"){ found=list[j]; break; } } }
+    return found;
+  },[data.postoMachines]);
+
+  // ---- diesel da FH 540 no mês selecionado ----
+  var diesel = useMemo(function(){
+    if(!fh540) return { litros:0, custo:0, itens:[] };
+    var itens = (data.fuel||[]).filter(function(x){
+      return Number(x.machineId)===Number(fh540.id) && monthOf(x.date)===mk;
+    }).sort(function(a,b){ return String(a.date)<String(b.date)?-1:1; });
+    // fallback de custo = último costPerLiter conhecido da FH540, senão config
+    var avg = custoFallback;
+    for(var i=itens.length-1;i>=0;i--){ if(Number(itens[i].costPerLiter)>0){ avg=Number(itens[i].costPerLiter); break; } }
+    var litros=0, custo=0;
+    var det = itens.map(function(x){
+      var l=Number(x.liters)||0; var cpl=fuelCostPerLiter(x,avg); var v=l*cpl;
+      litros+=l; custo+=v;
+      return { date:x.date, liters:l, cpl:cpl, valor:v };
+    });
+    return { litros:litros, custo:custo, itens:det };
+  },[data.fuel, fh540, mk, custoFallback]);
+
+  // ---- receitas do mês ----
+  var recMes = useMemo(function(){
+    return (data.rec||[]).filter(function(r){ return monthOf(r.date)===mk; })
+      .sort(function(a,b){ return String(a.date)<String(b.date)?-1:1; });
+  },[data.rec, mk]);
+  var recFazenda = recMes.filter(function(r){ return norm(r.tomador).indexOf(norm(fazendaKey))>=0; });
+  var totRec = recMes.reduce(function(a,r){ return a+(Number(r.valor)||0); },0);
+  var totRecFaz = recFazenda.reduce(function(a,r){ return a+(Number(r.valor)||0); },0);
+
+  // ---- despesas Diamantes vindas do Nossas Contas (cartão pessoal), SOMENTE LEITURA ----
+  var diamDesp = useMemo(function(){
+    return (data.diamGastos||[]).map(function(g){
+      return {
+        id: "nc_"+(g.__id||g.importKey||(String(g.date)+"_"+g.amount)),
+        tipo: "unica",
+        categoria: (String(g.subcat||"").trim()) || "Diamantes (sem subcategoria)",
+        descricao: (g.desc||"Sem descrição") + " · " + (g.person||""),
+        date: g.date,
+        valor: Number(g.amount)||0,
+        fonte: "nossas-contas",
+        createdAt: g.createdAt ? new Date(g.createdAt).toISOString() : ""
+      };
+    });
+  },[data.diamGastos]);
+  // lista combinada: despesas próprias da transportadora + Diamantes do Nossas Contas
+  var despAll = useMemo(function(){ return (data.desp||[]).concat(diamDesp); },[data.desp, diamDesp]);
+  var totDiamMes = useMemo(function(){
+    return diamDesp.filter(function(d){ return monthOf(d.date)===mk; }).reduce(function(a,d){ return a+(Number(d.valor)||0); },0);
+  },[diamDesp, mk]);
+
+  // ---- despesas que incidem no mês ----
+  function despValorNoMes(d, m){
+    if(d.tipo==="recorrente"){ if(m>=(d.inicio||"0000-00") && (!d.fim || m<=d.fim)) return Number(d.valor)||0; return 0; }
+    if(d.tipo==="parcelada"){ var n=monthDiff(d.parcInicio||m, m); if(n>=0 && n<(Number(d.parcN)||0)) return Number(d.valor)||0; return 0; }
+    return monthOf(d.date)===m ? (Number(d.valor)||0) : 0; // unica
+  }
+  var despMes = useMemo(function(){
+    return despAll.map(function(d){ return { d:d, v:despValorNoMes(d,mk) }; })
+      .filter(function(o){ return o.v!==0; })
+      .sort(function(a,b){ return b.v-a.v; });
+  },[despAll, mk]);
+  var totDesp = despMes.reduce(function(a,o){ return a+o.v; },0);
+
+  var resultado = totRec - totDesp - diesel.custo;   // resultado geral da transportadora
+  var acertoLiquido = totRecFaz - diesel.custo;      // acerto com a fazenda
+
+  var estilos = { maxWidth:960, margin:"0 auto", padding:"0 14px 90px" };
+
+  return (
+    <div style={{minHeight:"100vh"}}>
+      <style>{CSS}</style>
+
+      {/* CABEÇALHO */}
+      <div className="noprint" style={{background:"linear-gradient(180deg,"+GN2+","+GN+")",padding:"18px 14px 16px",color:"#fff",boxShadow:"0 2px 12px #0002"}}>
+        <div style={{maxWidth:960,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>TRANSPORTADORA · ACF</div>
+            <div style={{fontSize:12,opacity:.85,marginTop:2}}>Controle de resultados · Caminhão FH 540 (016)</div>
+          </div>
+          <div style={{background:"#ffffff22",borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.85}}>Mês</span>
+            <input type="month" value={mk} onChange={function(e){setMk(e.target.value);}} style={{width:150,padding:"6px 10px",border:"none",fontWeight:700,color:TXT}}/>
+          </div>
+        </div>
+      </div>
+
+      {/* AVISO se não achou a FH540 */}
+      {(!window.TX||!window.TX.ready) &&
+        <div style={estilos}><div className="card" style={{marginTop:16,borderColor:"#fca5a5",background:"#fef2f2",color:RED}}>Sem conexão com o banco de dados. Verifique a internet e recarregue.</div></div>}
+
+      {/* NAV */}
+      <div className="noprint" style={{background:CARD,borderBottom:"1.5px solid "+BDR}}>
+        <div style={{maxWidth:960,margin:"0 auto",display:"flex",gap:4,padding:"0 8px",overflowX:"auto"}}>
+          {[["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["acerto","Acerto Fazenda"],["config","Config"]].map(function(t){
+            var on = tab===t[0];
+            return <button key={t[0]} onClick={function(){setTab(t[0]);}} style={{background:"none",color:on?GN:MUT,borderBottom:on?"3px solid "+GN:"3px solid transparent",borderRadius:0,padding:"14px 14px",fontSize:15,whiteSpace:"nowrap"}}>{t[1]}</button>;
+          })}
+        </div>
+      </div>
+
+      <div style={estilos} className="fi">
+        {tab==="painel" && <Painel mk={mk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
+        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast}/>}
+        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} toast={showToast}/>}
+        {tab==="acerto" && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
+        {tab==="config" && <Config conf={conf} toast={showToast} fh540={fh540}/>}
+      </div>
+
+      <Toast msg={toast&&toast.msg} err={toast&&toast.err}/>
+    </div>
+  );
+}
+
+// ── PAINEL ───────────────────────────────────────────────────────────────────
+function Painel(props){
+  var d=props.diesel;
+  return (
+    <div>
+      <div className="sec" style={{marginTop:18}}>Resumo de {mesLabel(props.mk)}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+        <Stat label="Receitas (total)" value={brl(props.totRec)} sub={props.recCount+" frete(s)"} color={GN}/>
+        <Stat label="Despesas (total)" value={brl(props.totDesp)} sub={props.despCount+" lançamento(s)"} color={RED}/>
+        {props.totDiam!==0 && <Stat label="Diamantes no cartão" value={brl(props.totDiam)} sub="via Nossas Contas" color={PUR}/>}
+        <Stat label="Diesel FH 540" value={brl(d.custo)} sub={num(d.litros)+" L no posto"} color={AMB}/>
+        <Stat label="Resultado do mês" value={brl(props.resultado)} sub="receitas − despesas − diesel" color={props.resultado>=0?GN:RED}/>
+      </div>
+
+      <div className="card" style={{marginTop:16,background:"#f7faf7"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div>
+            <div className="slbl">Acerto com a Fazenda (prévia)</div>
+            <div style={{fontSize:13,color:MUT,marginTop:4}}>Fretes da fazenda {brl(props.totRecFaz)} − Diesel FH 540 {brl(d.custo)}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div className="sval" style={{color:props.acerto>=0?GN:RED,fontSize:28}}>{brl(props.acerto)}</div>
+            <div style={{fontSize:12,color:MUT}}>{props.acerto>=0?"a receber da fazenda":"a pagar à fazenda"}</div>
+          </div>
+        </div>
+      </div>
+
+      {!props.fh540 &&
+        <div className="card" style={{marginTop:16,borderColor:"#fde047",background:"#fefce8",color:AMB}}>
+          Não encontrei a máquina de código <b>016</b> no Posto Diesel. Confira se ela está cadastrada lá (código 016, nome FH 540). Sem isso, o diesel não é puxado.
+        </div>}
+    </div>
+  );
+}
+
+// ── RECEITAS ─────────────────────────────────────────────────────────────────
+function Receitas(props){
+  var f0=useState(null); var form=f0[0], setForm=f0[1];
+  function nova(){ setForm({ date:todayISO(), tomador:"", produto:"", origem:"", destino:"", precoTon:"", ton:"" }); }
+  function set(k,v){ setForm(function(p){ var o=Object.assign({},p); o[k]=v; return o; }); }
+
+  function salvar(){
+    var precoTon=Number(String(form.precoTon).replace(",","."))||0;
+    var ton=Number(String(form.ton).replace(",","."))||0;
+    var item = {
+      id: form.id || Date.now(),
+      date: form.date, tomador:(form.tomador||"").trim(), produto:(form.produto||"").trim(),
+      origem:(form.origem||"").trim(), destino:(form.destino||"").trim(),
+      precoTon:precoTon, ton:ton, valor:precoTon*ton, createdAt: form.createdAt||new Date().toISOString()
+    };
+    window.TX.addReceita(item).then(function(){ setForm(null); props.toast("Frete salvo"); })
+      .catch(function(){ props.toast("Erro ao salvar",true); });
+  }
+  function excluir(r){
+    if(!confirm("Excluir este frete?")) return;
+    window.TX.delReceita(r.id).then(function(){ props.toast("Frete excluído"); });
+  }
+  function editar(r){ setForm(Object.assign({},r,{ precoTon:String(r.precoTon), ton:String(r.ton) })); }
+
+  // ---- Importar Excel/CSV ----
+  function importar(ev){
+    var file = ev.target.files[0]; if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var wb = XLSX.read(e.target.result, {type:"array", cellDates:true});
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, {defval:""});
+        var mapKey = function(obj,alts){ for(var k in obj){ if(alts.indexOf(norm(k))>=0) return obj[k]; } return ""; };
+        var n=0;
+        rows.forEach(function(row){
+          var tom = mapKey(row,["tomador","tomador do servico","cliente"]);
+          if(!tom && !mapKey(row,["origem"])) return; // linha vazia
+          var dcell = mapKey(row,["data","date"]);
+          var dISO;
+          if(dcell instanceof Date){ dISO = dcell.getFullYear()+"-"+pad(dcell.getMonth()+1)+"-"+pad(dcell.getDate()); }
+          else { var ds=String(dcell); if(ds.indexOf("/")>0){ var p=ds.split("/"); dISO=p[2]+"-"+pad(Number(p[1]))+"-"+pad(Number(p[0])); } else { dISO=String(dcell).slice(0,10); } }
+          var preco=Number(String(mapKey(row,["r$/ton","preco","preco/ton","valor/ton","rs/ton"])).replace(",","."))||0;
+          var ton=Number(String(mapKey(row,["quantidade","quantidade (ton)","ton","toneladas"])).replace(",","."))||0;
+          var item = {
+            id: Date.now()+Math.floor(Math.random()*10000)+n,
+            date: dISO, tomador:String(tom).trim(),
+            produto:String(mapKey(row,["produto"])).trim(),
+            origem:String(mapKey(row,["origem"])).trim(),
+            destino:String(mapKey(row,["destino"])).trim(),
+            precoTon:preco, ton:ton, valor:preco*ton, createdAt:new Date().toISOString()
+          };
+          window.TX.addReceita(item); n++;
+        });
+        props.toast(n+" frete(s) importado(s)");
+      } catch(err){ console.error(err); props.toast("Erro ao ler a planilha",true); }
+      ev.target.value="";
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function baixarModelo(){
+    var ws = XLSX.utils.aoa_to_sheet([["Tomador","Data","Produto","Origem","Destino","R$/ton","Quantidade (ton)"],
+      ["Fazenda","01/09/2026","Soja","Fazenda Rodeio","Armazém Uberlândia","95","33.5"]]);
+    var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Receitas");
+    XLSX.writeFile(wb,"modelo-receitas.xlsx");
+  }
+  function exportar(){
+    var aoa=[["Data","Tomador","Produto","Origem","Destino","R$/ton","Ton","Valor"]];
+    props.recMes.forEach(function(r){ aoa.push([ddmmyyyy(r.date),r.tomador,r.produto,r.origem,r.destino,r.precoTon,r.ton,r.valor]); });
+    var ws=XLSX.utils.aoa_to_sheet(aoa); var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Receitas"); XLSX.writeFile(wb,"receitas-"+props.mk+".xlsx");
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px"}}>
+        <Btn onClick={nova}>+ Novo frete</Btn>
+        <label style={{display:"inline-block"}}>
+          <Btn color={INP} style={{pointerEvents:"none"}}>Importar Excel</Btn>
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
+        </label>
+        <Btn color={INP} onClick={baixarModelo}>Modelo</Btn>
+        <Btn color={INP} onClick={exportar}>Exportar mês</Btn>
+      </div>
+
+      <div className="sec">Fretes de {mesLabel(props.mk)} — total {brl(props.totRec)}</div>
+      <div className="card" style={{padding:0,overflowX:"auto"}}>
+        <table>
+          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th><th></th></tr></thead>
+          <tbody>
+            {props.recMes.length===0 && <tr><td colSpan={8} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum frete neste mês. Adicione ou importe uma planilha.</td></tr>}
+            {props.recMes.map(function(r){
+              return <tr key={r.id}>
+                <td>{ddmmyyyy(r.date)}</td>
+                <td>{r.tomador}</td>
+                <td>{r.produto}</td>
+                <td style={{fontSize:13,color:MUT}}>{r.origem}{r.destino?" → "+r.destino:""}</td>
+                <td>{num(r.ton)}</td>
+                <td>{brl(r.precoTon)}</td>
+                <td style={{fontWeight:700}}>{brl(r.valor)}</td>
+                <td style={{whiteSpace:"nowrap"}}>
+                  <button onClick={function(){editar(r);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
+                  <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {form &&
+        <Modal title={form.id?"Editar frete":"Novo frete"} onClose={function(){setForm(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Fld label="Data" type="date" value={form.date} onChange={function(v){set("date",v);}}/>
+              <Fld label="Tomador do serviço" value={form.tomador} onChange={function(v){set("tomador",v);}} placeholder="Ex: ACF (fazenda) ou outro cliente"/>
+            </div>
+            <Fld label="Produto" value={form.produto} onChange={function(v){set("produto",v);}} placeholder="Ex: Soja, Milho, Calcário"/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Fld label="Origem" value={form.origem} onChange={function(v){set("origem",v);}}/>
+              <Fld label="Destino" value={form.destino} onChange={function(v){set("destino",v);}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Fld label="R$/ton" type="text" inputMode="decimal" value={form.precoTon} onChange={function(v){set("precoTon",v);}} placeholder="0,00"/>
+              <Fld label="Quantidade (ton)" type="text" inputMode="decimal" value={form.ton} onChange={function(v){set("ton",v);}} placeholder="0,00"/>
+            </div>
+            <div style={{background:"#f7faf7",borderRadius:8,padding:"10px 14px",fontSize:15}}>
+              Valor do frete: <b style={{color:GN}}>{brl((Number(String(form.precoTon).replace(",","."))||0)*(Number(String(form.ton).replace(",","."))||0))}</b>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:4}}>
+              <Btn full color={INP} onClick={function(){setForm(null);}}>Cancelar</Btn>
+              <Btn full onClick={salvar} disabled={!form.date||!form.tomador}>Salvar</Btn>
+            </div>
+          </div>
+        </Modal>}
+    </div>
+  );
+}
+
+// ── DESPESAS ─────────────────────────────────────────────────────────────────
+function Despesas(props){
+  var f0=useState(null); var form=f0[0], setForm=f0[1];
+  var v0=useState("mes"); var view=v0[0], setView=v0[1]; // mes | todas
+  function nova(){ setForm({ tipo:"unica", date:todayISO(), categoria:"", descricao:"", valor:"", inicio:thisMonth(), fim:"", parcInicio:thisMonth(), parcN:"", parcTotal:"" }); }
+  function set(k,v){ setForm(function(p){ var o=Object.assign({},p); o[k]=v; return o; }); }
+
+  function salvar(){
+    var tipo=form.tipo;
+    var item = { id: form.id||Date.now(), tipo:tipo, categoria:(form.categoria||"").trim(), descricao:(form.descricao||"").trim(), createdAt: form.createdAt||new Date().toISOString() };
+    if(tipo==="unica"){
+      item.date=form.date; item.valor=Number(String(form.valor).replace(",","."))||0;
+    } else if(tipo==="recorrente"){
+      item.inicio=form.inicio; item.fim=form.fim||null; item.valor=Number(String(form.valor).replace(",","."))||0;
+    } else { // parcelada
+      var total=Number(String(form.parcTotal).replace(",","."))||0;
+      var n=Number(form.parcN)||1;
+      item.parcInicio=form.parcInicio; item.parcN=n; item.parcTotal=total; item.valor= n>0? total/n : total;
+    }
+    window.TX.addDespesa(item).then(function(){ setForm(null); props.toast("Despesa salva"); })
+      .catch(function(){ props.toast("Erro ao salvar",true); });
+  }
+  function excluir(d){
+    var msg = d.tipo==="unica" ? "Excluir esta despesa?" : "Excluir esta despesa recorrente/parcelada de TODOS os meses?";
+    if(!confirm(msg)) return;
+    window.TX.delDespesa(d.id).then(function(){ props.toast("Despesa excluída"); });
+  }
+  function editar(d){
+    setForm(Object.assign({tipo:d.tipo,date:d.date||todayISO(),inicio:d.inicio||thisMonth(),fim:d.fim||"",parcInicio:d.parcInicio||thisMonth(),parcN:d.parcN||"",parcTotal:d.parcTotal||"",valor:d.tipo==="parcelada"?d.parcTotal:d.valor},d,{valor:d.tipo==="parcelada"?String(d.parcTotal||""):String(d.valor||""),parcN:String(d.parcN||""),parcTotal:String(d.parcTotal||"")}));
+  }
+  function tipoBadge(t){
+    if(t==="recorrente") return <span className="bdg bb">recorrente</span>;
+    if(t==="parcelada") return <span className="bdg bp">parcelada</span>;
+    return <span className="bdg bg">única</span>;
+  }
+
+  var todas = (props.despAll||props.data.desp||[]).slice().sort(function(a,b){ return String(b.createdAt||"")<String(a.createdAt||"")?-1:1; });
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px",alignItems:"center"}}>
+        <Btn onClick={nova}>+ Nova despesa</Btn>
+        <div className="mtog" style={{width:230}}>
+          <button className={view==="mes"?"on":""} onClick={function(){setView("mes");}}>Deste mês</button>
+          <button className={view==="todas"?"on":""} onClick={function(){setView("todas");}}>Todas / recorrências</button>
+        </div>
+      </div>
+
+      {view==="mes" && <div>
+        <div className="sec">Despesas de {mesLabel(props.mk)} — total {brl(props.totDesp)}</div>
+        {props.totDiam!==0 && <div style={{fontSize:13,color:MUT,marginBottom:10}}>Inclui <b style={{color:PUR}}>{brl(props.totDiam)}</b> em despesas Diamantes lançadas no cartão pessoal (via Nossas Contas). São geridas lá — aqui aparecem só para leitura, já com a subcategoria.</div>}
+        <div className="card" style={{padding:0,overflowX:"auto"}}>
+          <table>
+            <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Valor no mês</th></tr></thead>
+            <tbody>
+              {props.despMes.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa incide neste mês.</td></tr>}
+              {props.despMes.map(function(o){
+                var d=o.d;
+                return <tr key={d.id}>
+                  <td style={{fontWeight:600}}>{d.categoria||"—"}</td>
+                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}{d.fonte==="nossas-contas"?<span className="bdg" style={{background:"#ede9fe",color:"#6d28d9",marginLeft:6}}>cartão pessoal</span>:null}</td>
+                  <td>{tipoBadge(d.tipo)}</td>
+                  <td style={{fontWeight:700,color:RED}}>{brl(o.v)}</td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>}
+
+      {view==="todas" && <div>
+        <div className="sec">Todos os lançamentos</div>
+        <div style={{fontSize:13,color:MUT,marginBottom:12}}>Recorrentes se repetem todo mês automaticamente; parceladas cobram só o valor da parcela nos meses do parcelamento. Adicione uma vez — não precisa repetir.</div>
+        <div className="card" style={{padding:0,overflowX:"auto"}}>
+          <table>
+            <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Período</th><th>Valor</th><th></th></tr></thead>
+            <tbody>
+              {todas.length===0 && <tr><td colSpan={6} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa cadastrada.</td></tr>}
+              {todas.map(function(d){
+                var periodo, valor;
+                if(d.tipo==="unica"){ periodo=ddmmyyyy(d.date); valor=brl(d.valor); }
+                else if(d.tipo==="recorrente"){ periodo="desde "+mesLabel(d.inicio)+(d.fim?" até "+mesLabel(d.fim):" (sem fim)"); valor=brl(d.valor)+"/mês"; }
+                else { periodo=d.parcN+"x desde "+mesLabel(d.parcInicio); valor=brl(d.valor)+" (total "+brl(d.parcTotal)+")"; }
+                return <tr key={d.id}>
+                  <td style={{fontWeight:600}}>{d.categoria||"—"}</td>
+                  <td style={{fontSize:13,color:MUT}}>{d.descricao}</td>
+                  <td>{tipoBadge(d.tipo)}</td>
+                  <td style={{fontSize:13}}>{periodo}</td>
+                  <td style={{fontWeight:700,color:RED}}>{valor}</td>
+                  <td style={{whiteSpace:"nowrap"}}>
+                    {d.fonte==="nossas-contas"
+                      ? <span className="bdg" style={{background:"#ede9fe",color:"#6d28d9"}}>Nossas Contas</span>
+                      : <React.Fragment>
+                          <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
+                          <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
+                        </React.Fragment>}
+                  </td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>}
+
+      {form &&
+        <Modal title={form.id?"Editar despesa":"Nova despesa"} onClose={function(){setForm(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div>
+              <label className="flbl">Tipo de despesa</label>
+              <div className="mtog">
+                <button className={form.tipo==="unica"?"on":""} onClick={function(){set("tipo","unica");}}>Única</button>
+                <button className={form.tipo==="recorrente"?"on":""} onClick={function(){set("tipo","recorrente");}}>Recorrente</button>
+                <button className={form.tipo==="parcelada"?"on":""} onClick={function(){set("tipo","parcelada");}}>Parcelada</button>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Fld label="Categoria" value={form.categoria} onChange={function(v){set("categoria",v);}} placeholder="Ex: Seguro, Pneu, Salário"/>
+              <Fld label="Descrição" value={form.descricao} onChange={function(v){set("descricao",v);}} placeholder="opcional"/>
+            </div>
+
+            {form.tipo==="unica" &&
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <Fld label="Data" type="date" value={form.date} onChange={function(v){set("date",v);}}/>
+                <Fld label="Valor (R$)" inputMode="decimal" value={form.valor} onChange={function(v){set("valor",v);}} placeholder="0,00"/>
+              </div>}
+
+            {form.tipo==="recorrente" &&
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <Fld label="Valor mensal (R$)" inputMode="decimal" value={form.valor} onChange={function(v){set("valor",v);}} placeholder="0,00"/>
+                  <Fld label="Início" type="month" value={form.inicio} onChange={function(v){set("inicio",v);}}/>
+                </div>
+                <div style={{marginTop:12}}>
+                  <Fld label="Fim (deixe vazio para sem fim)" type="month" value={form.fim} onChange={function(v){set("fim",v);}}/>
+                </div>
+                <div style={{fontSize:13,color:MUT,marginTop:8}}>Vai aparecer automaticamente em todo mês a partir do início.</div>
+              </div>}
+
+            {form.tipo==="parcelada" &&
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <Fld label="Valor total (R$)" inputMode="decimal" value={form.parcTotal} onChange={function(v){set("parcTotal",v);}} placeholder="0,00"/>
+                  <Fld label="Nº de parcelas" type="number" value={form.parcN} onChange={function(v){set("parcN",v);}} placeholder="Ex: 6"/>
+                </div>
+                <div style={{marginTop:12}}>
+                  <Fld label="Mês da 1ª parcela" type="month" value={form.parcInicio} onChange={function(v){set("parcInicio",v);}}/>
+                </div>
+                <div style={{background:"#f7faf7",borderRadius:8,padding:"10px 14px",fontSize:14,marginTop:10}}>
+                  Cada parcela: <b style={{color:RED}}>{brl((Number(String(form.parcTotal).replace(",","."))||0)/(Number(form.parcN)||1))}</b> — cobrada em {form.parcN||"?"} mês(es), só nos meses do parcelamento.
+                </div>
+              </div>}
+
+            <div style={{display:"flex",gap:10,marginTop:4}}>
+              <Btn full color={INP} onClick={function(){setForm(null);}}>Cancelar</Btn>
+              <Btn full onClick={salvar} disabled={!form.categoria}>Salvar</Btn>
+            </div>
+          </div>
+        </Modal>}
+    </div>
+  );
+}
+
+// ── ACERTO FAZENDA ───────────────────────────────────────────────────────────
+function Acerto(props){
+  var d=props.diesel;
+  function imprimir(){ window.print(); }
+  var nomeFaz = (props.conf && props.conf.fazendaNome) || "Agropecuária Córrego das Flores";
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"18px 0 14px"}}>
+        <div className="sec" style={{margin:0}}>Acerto com a Fazenda — {mesLabel(props.mk)}</div>
+        <Btn onClick={imprimir}>Gerar PDF</Btn>
+      </div>
+
+      <div className="card">
+        <div style={{fontWeight:700,marginBottom:10,color:GN}}>Fretes prestados à fazenda</div>
+        <div style={{overflowX:"auto"}}>
+          <table>
+            <thead><tr><th>Data</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th></tr></thead>
+            <tbody>
+              {props.recFazenda.length===0 && <tr><td colSpan={6} style={{color:MUT,textAlign:"center",padding:20}}>Nenhum frete da fazenda neste mês.</td></tr>}
+              {props.recFazenda.map(function(r){
+                return <tr key={r.id}><td>{ddmmyyyy(r.date)}</td><td>{r.produto}</td><td style={{fontSize:13,color:MUT}}>{r.origem}{r.destino?" → "+r.destino:""}</td><td>{num(r.ton)}</td><td>{brl(r.precoTon)}</td><td style={{fontWeight:700}}>{brl(r.valor)}</td></tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{textAlign:"right",marginTop:10,fontWeight:700}}>Subtotal fretes: <span style={{color:GN}}>{brl(props.totRecFaz)}</span></div>
+      </div>
+
+      <div className="card" style={{marginTop:14}}>
+        <div style={{fontWeight:700,marginBottom:10,color:AMB}}>Abastecimentos da FH 540 no posto da fazenda</div>
+        <div style={{overflowX:"auto"}}>
+          <table>
+            <thead><tr><th>Data</th><th>Litros</th><th>R$/L</th><th>Valor</th></tr></thead>
+            <tbody>
+              {d.itens.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:20}}>Nenhum abastecimento neste mês.</td></tr>}
+              {d.itens.map(function(x,i){
+                return <tr key={i}><td>{ddmmyyyy(x.date)}</td><td>{num(x.liters)} L</td><td>{brl(x.cpl)}</td><td style={{fontWeight:700}}>{brl(x.valor)}</td></tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{textAlign:"right",marginTop:10,fontWeight:700}}>Subtotal diesel: <span style={{color:AMB}}>{brl(d.custo)}</span> · {num(d.litros)} L</div>
+      </div>
+
+      <div className="card" style={{marginTop:14,background:"#f7faf7"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div className="slbl">{props.liquido>=0?"Valor a receber da fazenda":"Valor a pagar à fazenda"}</div>
+            <div style={{fontSize:13,color:MUT,marginTop:3}}>Fretes {brl(props.totRecFaz)} − Diesel {brl(d.custo)}</div>
+          </div>
+          <div className="sval" style={{fontSize:30,color:props.liquido>=0?GN:RED}}>{brl(props.liquido)}</div>
+        </div>
+      </div>
+
+      {/* ÁREA DE IMPRESSÃO (PDF) */}
+      <div id="printArea" style={{padding:"10px 4px",color:"#111",fontFamily:"'Barlow',sans-serif"}}>
+        <div style={{borderBottom:"3px solid "+GN,paddingBottom:10,marginBottom:16}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>TRANSPORTADORA · ACF</div>
+          <div style={{fontSize:14,color:"#333"}}>Acerto de contas — {nomeFaz}</div>
+          <div style={{fontSize:14,color:"#333"}}>Referência: <b>{mesLabel(props.mk)}</b> · Caminhão FH 540 (016)</div>
+        </div>
+
+        <div style={{fontWeight:700,fontSize:15,margin:"6px 0"}}>1. Fretes prestados</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:14}}>
+          <thead><tr>
+            <th style={{textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Data</th>
+            <th style={{textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Produto</th>
+            <th style={{textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Origem → Destino</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Ton</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>R$/ton</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Valor</th>
+          </tr></thead>
+          <tbody>
+            {props.recFazenda.map(function(r){
+              return <tr key={r.id}>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd"}}>{ddmmyyyy(r.date)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd"}}>{r.produto}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd"}}>{r.origem}{r.destino?" → "+r.destino:""}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{num(r.ton)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{brl(r.precoTon)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{brl(r.valor)}</td>
+              </tr>;
+            })}
+            <tr><td colSpan={5} style={{padding:"7px 8px",textAlign:"right",fontWeight:700}}>Subtotal fretes</td><td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:GN2}}>{brl(props.totRecFaz)}</td></tr>
+          </tbody>
+        </table>
+
+        <div style={{fontWeight:700,fontSize:15,margin:"6px 0"}}>2. Diesel abastecido na fazenda (FH 540)</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:14}}>
+          <thead><tr>
+            <th style={{textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Data</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Litros</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>R$/L</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Valor</th>
+          </tr></thead>
+          <tbody>
+            {d.itens.map(function(x,i){
+              return <tr key={i}>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd"}}>{ddmmyyyy(x.date)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{num(x.liters)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{brl(x.cpl)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{brl(x.valor)}</td>
+              </tr>;
+            })}
+            <tr><td colSpan={3} style={{padding:"7px 8px",textAlign:"right",fontWeight:700}}>Subtotal diesel</td><td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:AMB}}>{brl(d.custo)}</td></tr>
+          </tbody>
+        </table>
+
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:15,marginTop:6,borderTop:"2px solid "+GN}}>
+          <tbody>
+            <tr><td style={{padding:"8px",fontWeight:700}}>(+) Fretes prestados</td><td style={{padding:"8px",textAlign:"right"}}>{brl(props.totRecFaz)}</td></tr>
+            <tr><td style={{padding:"8px",fontWeight:700}}>(−) Diesel abastecido</td><td style={{padding:"8px",textAlign:"right"}}>{brl(d.custo)}</td></tr>
+            <tr style={{borderTop:"1.5px solid #999"}}><td style={{padding:"10px 8px",fontWeight:800,fontSize:17}}>{props.liquido>=0?"= A RECEBER DA FAZENDA":"= A PAGAR À FAZENDA"}</td><td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,fontSize:17,color:props.liquido>=0?GN2:RED}}>{brl(props.liquido)}</td></tr>
+          </tbody>
+        </table>
+
+        <div style={{marginTop:24,fontSize:12,color:"#666"}}>Emitido em {ddmmyyyy(todayISO())} · Agropecuária Córrego das Flores (ACF)</div>
+      </div>
+
+      <div style={{fontSize:13,color:MUT,marginTop:12}} className="noprint">No diálogo de impressão, escolha <b>“Salvar como PDF”</b> (ou compartilhar como PDF no celular) para gerar o arquivo do acerto.</div>
+    </div>
+  );
+}
+
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+function Config(props){
+  var c=props.conf||{};
+  var f0=useState({ fazendaKey:c.fazendaKey||"ACF", fazendaNome:c.fazendaNome||"Agropecuária Córrego das Flores", custoFallback:String(c.custoFallback||6.15) });
+  var form=f0[0], setForm=f0[1];
+  function set(k,v){ setForm(function(p){var o=Object.assign({},p);o[k]=v;return o;}); }
+  function salvar(){
+    window.TX.saveConfig({ fazendaKey:(form.fazendaKey||"ACF").trim(), fazendaNome:form.fazendaNome, custoFallback:Number(String(form.custoFallback).replace(",","."))||6.15 })
+      .then(function(){ props.toast("Configuração salva"); }).catch(function(){ props.toast("Erro ao salvar",true); });
+  }
+  return (
+    <div>
+      <div className="sec" style={{marginTop:18}}>Configuração</div>
+      <div className="card" style={{display:"flex",flexDirection:"column",gap:14,maxWidth:520}}>
+        <Fld label="Palavra que identifica a fazenda no campo Tomador" value={form.fazendaKey} onChange={function(v){set("fazendaKey",v);}} placeholder="ACF"/>
+        <div style={{fontSize:13,color:MUT,marginTop:-8}}>Todo frete cujo tomador contenha esta palavra entra no acerto. Está como <b>ACF</b> — então lance esses fretes com o tomador “ACF”.</div>
+        <Fld label="Nome da fazenda no relatório PDF" value={form.fazendaNome} onChange={function(v){set("fazendaNome",v);}}/>
+        <Fld label="Custo do diesel de reserva (R$/L)" inputMode="decimal" value={form.custoFallback} onChange={function(v){set("custoFallback",v);}} placeholder="6,15"/>
+        <div style={{fontSize:13,color:MUT,marginTop:-8}}>Usado só se algum abastecimento antigo não tiver o custo gravado. Os novos já vêm com o custo congelado do Posto Diesel.</div>
+        <Btn onClick={salvar}>Salvar configuração</Btn>
+      </div>
+
+      <div className="card" style={{marginTop:16,maxWidth:520}}>
+        <div className="slbl">Integração com o Posto Diesel</div>
+        {props.fh540
+          ? <div style={{marginTop:6,color:GN}}>✓ Conectado à máquina <b>016 — {props.fh540.desc}</b>. Os abastecimentos são puxados automaticamente.</div>
+          : <div style={{marginTop:6,color:AMB}}>Máquina 016 não encontrada no Posto Diesel. Confira o cadastro lá.</div>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
