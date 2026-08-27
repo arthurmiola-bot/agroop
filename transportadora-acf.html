@@ -74,13 +74,14 @@
     var ROOT = db.collection("transportadora").doc("dados");
     var REC  = ROOT.collection("receitas");   // 1 doc por frete
     var DESP = ROOT.collection("despesas");    // 1 doc por lançamento/recorrência/parcelamento
+    var ODO  = ROOT.collection("odometro");    // abastecimentos externos + leitura de odômetro (consumo)
     var CONF = db.collection("transportadora").doc("config");
 
     // ---- Dados do Posto Diesel (somente leitura) ----
     var POSTO_CONFIG = db.collection("posto-diesel").doc("config");
     var POSTO_FUEL   = db.collection("posto-diesel").doc("dados").collection("abastecimentos");
 
-    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[] };
+    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[], odo:[] };
     var listeners = [];
     function emit(){ for(var i=0;i<listeners.length;i++){ try{listeners[i](state);}catch(e){console.error(e);} } }
 
@@ -94,6 +95,11 @@
       state.desp = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
       emit();
     }, function(e){console.error("desp:",e);});
+
+    ODO.onSnapshot(function(qs){
+      state.odo = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
+      emit();
+    }, function(e){console.error("odo:",e);});
 
     CONF.onSnapshot(function(snap){
       if(snap.exists && snap.data() && snap.data().payload){
@@ -151,6 +157,8 @@
       delReceita: function(id){ return REC.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
       addDespesa: function(item){ return DESP.doc(String(item.id)).set(item); },
       delDespesa: function(id){ return DESP.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
+      addOdometro: function(item){ return ODO.doc(String(item.id)).set(item); },
+      delOdometro: function(id){ return ODO.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
       saveConfig: function(cfg){ return CONF.set({ payload: JSON.stringify(cfg) }); }
     };
   } catch(err){
@@ -285,10 +293,15 @@ function Toast(props){
 
 // ── APP ──────────────────────────────────────────────────────────────────────
 function App(){
-  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[], diamGastos:[] }); var data=s0[0], setData=s0[1];
+  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[], diamGastos:[], odo:[] }); var data=s0[0], setData=s0[1];
   var t0 = useState("painel"); var tab=t0[0], setTab=t0[1];
   var m0 = useState(thisMonth()); var mk=m0[0], setMk=m0[1];
   var ts0 = useState(null); var toast=ts0[0], setToast=ts0[1];
+  var rl0 = useState((function(){ try{return localStorage.getItem("tx_role")||"";}catch(e){return "";} })()); var role=rl0[0], setRole=rl0[1];
+  var driver = role==="motorista";
+  var OWNER_PIN = "284284";   // PIN do dono (troque pedindo pra mim)
+  function pickRole(r){ try{localStorage.setItem("tx_role",r);}catch(e){} setRole(r); setTab(r==="motorista"?"receitas":"painel"); }
+  function trocarPerfil(){ try{localStorage.removeItem("tx_role");}catch(e){} setRole(""); }
 
   useEffect(function(){
     if(window.TX && window.TX.ready){ window.TX.onData(function(st){ setData(Object.assign({},st)); }); }
@@ -351,8 +364,16 @@ function App(){
       };
     });
   },[data.diamGastos]);
-  // lista combinada: despesas próprias da transportadora + Diamantes do Nossas Contas
-  var despAll = useMemo(function(){ return (data.desp||[]).concat(diamDesp); },[data.desp, diamDesp]);
+  // ARLA lançado na aba Abastecimento entra como despesa (categoria ARLA), só leitura aqui
+  var arlaDesp = useMemo(function(){
+    return (data.odo||[]).filter(function(x){ return x.tipo==="arla"; }).map(function(a){
+      return { id:"arla_"+a.id, tipo:"unica", categoria:"ARLA",
+        descricao:((a.local||"ARLA")+(a.motorista?" · "+a.motorista:"")), date:a.date,
+        valor:Number(a.valor)||0, fonte:"abastec", createdAt:a.createdAt||"" };
+    });
+  },[data.odo]);
+  // lista combinada: despesas próprias + Diamantes (Nossas Contas) + ARLA (abastecimento)
+  var despAll = useMemo(function(){ return (data.desp||[]).concat(diamDesp).concat(arlaDesp); },[data.desp, diamDesp, arlaDesp]);
   var totDiamMes = useMemo(function(){
     return diamDesp.filter(function(d){ return monthOf(d.date)===mk; }).reduce(function(a,d){ return a+(Number(d.valor)||0); },0);
   },[diamDesp, mk]);
@@ -373,6 +394,14 @@ function App(){
   var resultado = totRec - totDesp - diesel.custo;   // resultado geral da transportadora
   var acertoLiquido = totRecFaz - diesel.custo;      // acerto com a fazenda
 
+  var fuelFH = useMemo(function(){
+    if(!fh540) return [];
+    return (data.fuel||[]).filter(function(x){ return Number(x.machineId)===Number(fh540.id); });
+  },[data.fuel, fh540]);
+  useEffect(function(){ if(driver && (tab==="painel"||tab==="acerto"||tab==="config")) setTab("receitas"); },[driver,tab]);
+
+  if(!role){ return <RolePicker onPick={pickRole} ownerPin={OWNER_PIN}/>; }
+
   var estilos = { maxWidth:960, margin:"0 auto", padding:"0 14px 90px" };
 
   return (
@@ -385,6 +414,10 @@ function App(){
           <div>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>DIAMANTES LHM</div>
             <div style={{fontSize:12,opacity:.85,marginTop:2}}>Controle de resultados · Caminhão FH 540 (016)</div>
+            <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
+              <span style={{background:"#ffffff22",borderRadius:20,padding:"2px 11px",fontSize:12,fontWeight:700}}>{driver?"Motorista":"Dono"}</span>
+              <button onClick={trocarPerfil} style={{background:"none",color:"#fff",textDecoration:"underline",fontSize:12,padding:0,fontWeight:600}}>trocar perfil</button>
+            </div>
           </div>
           <div style={{background:"#ffffff22",borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.85}}>Mês</span>
@@ -400,7 +433,10 @@ function App(){
       {/* NAV */}
       <div className="noprint" style={{background:CARD,borderBottom:"1.5px solid "+BDR}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",gap:4,padding:"0 8px",overflowX:"auto"}}>
-          {[["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["acerto","Acerto Fazenda"],["config","Config"]].map(function(t){
+          {(driver
+            ? [["receitas","Frete"],["despesas","Despesa"],["abastec","Abastecimento"]]
+            : [["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["acerto","Acerto Fazenda"],["abastec","Abastecimento"],["config","Config"]]
+          ).map(function(t){
             var on = tab===t[0];
             return <button key={t[0]} onClick={function(){setTab(t[0]);}} style={{background:"none",color:on?GN:MUT,borderBottom:on?"3px solid "+GN:"3px solid transparent",borderRadius:0,padding:"14px 14px",fontSize:15,whiteSpace:"nowrap"}}>{t[1]}</button>;
           })}
@@ -408,11 +444,12 @@ function App(){
       </div>
 
       <div style={estilos} className="fi">
-        {tab==="painel" && <Painel mk={mk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
-        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast}/>}
-        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} toast={showToast}/>}
-        {tab==="acerto" && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
-        {tab==="config" && <Config conf={conf} toast={showToast} fh540={fh540}/>}
+        {tab==="painel" && !driver && <Painel mk={mk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
+        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} driver={driver} toast={showToast}/>}
+        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} driver={driver} toast={showToast}/>}
+        {tab==="abastec" && <Abastecimento data={data} mk={mk} fuelFH={fuelFH} driver={driver} toast={showToast}/>}
+        {tab==="acerto" && !driver && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
+        {tab==="config" && !driver && <Config conf={conf} toast={showToast} fh540={fh540}/>}
       </div>
 
       <Toast msg={toast&&toast.msg} err={toast&&toast.err}/>
@@ -572,7 +609,7 @@ function Receitas(props){
         <Btn color={INP} onClick={exportar}>Exportar mês</Btn>
       </div>
 
-      <div className="sec">Fretes de {mesLabel(props.mk)} — total {brl(props.totRec)}</div>
+      <div className="sec">Fretes de {mesLabel(props.mk)}{!props.driver?" — total "+brl(props.totRec):""}</div>
       <div className="card" style={{padding:0,overflowX:"auto"}}>
         <table>
           <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th><th></th></tr></thead>
@@ -675,8 +712,8 @@ function Despesas(props){
       </div>
 
       {view==="mes" && <div>
-        <div className="sec">Despesas de {mesLabel(props.mk)} — total {brl(props.totDesp)}</div>
-        {props.totDiam!==0 && <div style={{fontSize:13,color:MUT,marginBottom:10}}>Inclui <b style={{color:PUR}}>{brl(props.totDiam)}</b> em despesas Diamantes lançadas no cartão pessoal (via Nossas Contas). São geridas lá — aqui aparecem só para leitura, já com a subcategoria.</div>}
+        <div className="sec">Despesas de {mesLabel(props.mk)}{!props.driver?" — total "+brl(props.totDesp):""}</div>
+        {!props.driver && props.totDiam!==0 && <div style={{fontSize:13,color:MUT,marginBottom:10}}>Inclui <b style={{color:PUR}}>{brl(props.totDiam)}</b> em despesas Diamantes lançadas no cartão pessoal (via Nossas Contas). São geridas lá — aqui aparecem só para leitura, já com a subcategoria.</div>}
         <div className="card" style={{padding:0,overflowX:"auto"}}>
           <table>
             <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Valor no mês</th></tr></thead>
@@ -686,7 +723,7 @@ function Despesas(props){
                 var d=o.d;
                 return <tr key={d.id}>
                   <td style={{fontWeight:600}}>{d.categoria||"—"}</td>
-                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}{d.fonte==="nossas-contas"?<span className="bdg" style={{background:"#ede9fe",color:"#6d28d9",marginLeft:6}}>cartão pessoal</span>:null}</td>
+                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}{d.fonte==="nossas-contas"?<span className="bdg" style={{background:"#ede9fe",color:"#6d28d9",marginLeft:6}}>cartão pessoal</span>:(d.fonte==="abastec"?<span className="bdg bb" style={{marginLeft:6}}>abastecimento</span>:null)}</td>
                   <td>{tipoBadge(d.tipo)}</td>
                   <td style={{fontWeight:700,color:RED}}>{brl(o.v)}</td>
                 </tr>;
@@ -718,10 +755,12 @@ function Despesas(props){
                   <td style={{whiteSpace:"nowrap"}}>
                     {d.fonte==="nossas-contas"
                       ? <span className="bdg" style={{background:"#ede9fe",color:"#6d28d9"}}>Nossas Contas</span>
-                      : <React.Fragment>
-                          <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
-                          <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
-                        </React.Fragment>}
+                      : d.fonte==="abastec"
+                        ? <span className="bdg bb">Abastecimento</span>
+                        : <React.Fragment>
+                            <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
+                            <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
+                          </React.Fragment>}
                   </td>
                 </tr>;
               })}
@@ -941,6 +980,133 @@ function Config(props){
           ? <div style={{marginTop:6,color:GN}}>✓ Conectado à máquina <b>016 — {props.fh540.desc}</b>. Os abastecimentos são puxados automaticamente.</div>
           : <div style={{marginTop:6,color:AMB}}>Máquina 016 não encontrada no Posto Diesel. Confira o cadastro lá.</div>}
       </div>
+    </div>
+  );
+}
+
+// ── SELETOR DE PERFIL (dono x motorista) ─────────────────────────────────────
+function RolePicker(props){
+  var p0=useState(""); var pin=p0[0], setPin=p0[1];
+  var a0=useState(false); var asking=a0[0], setAsking=a0[1];
+  function entrarDono(){ if(pin===props.ownerPin){ props.onPick("dono"); } else { alert("PIN incorreto."); setPin(""); } }
+  return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(180deg,"+GN2+","+GN+")",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <style>{CSS}</style>
+      <div className="card" style={{maxWidth:380,width:"100%",textAlign:"center"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:28,color:GN,letterSpacing:1}}>DIAMANTES LHM</div>
+        <div style={{fontSize:13,color:MUT,margin:"6px 0 22px"}}>Quem está usando o app?</div>
+        {!asking
+          ? <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <Btn full onClick={function(){setAsking(true);}}>Sou o dono</Btn>
+              <Btn full color={INP} onClick={function(){props.onPick("motorista");}}>Sou o motorista</Btn>
+            </div>
+          : <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{fontSize:13,color:MUT}}>Digite o PIN do dono</div>
+              <input type="password" inputMode="numeric" value={pin} onChange={function(e){setPin(e.target.value);}} placeholder="••••••" style={{textAlign:"center",fontSize:20,letterSpacing:4}} onKeyDown={function(e){if(e.key==="Enter")entrarDono();}}/>
+              <Btn full onClick={entrarDono}>Entrar</Btn>
+              <button onClick={function(){setAsking(false);setPin("");}} style={{background:"none",color:MUT,fontSize:13}}>voltar</button>
+            </div>}
+        <div style={{fontSize:12,color:DIM,marginTop:20,lineHeight:1.5}}>O motorista lança fretes, despesas e abastecimentos, mas <b>não vê</b> o resultado financeiro.</div>
+      </div>
+    </div>
+  );
+}
+
+// ── ABASTECIMENTO EXTERNO + ODÔMETRO (consumo médio) ─────────────────────────
+function Abastecimento(props){
+  var f0 = useState({tipo:"diesel", date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""}); var form=f0[0], setForm=f0[1];
+  function set(k,v){ setForm(function(p){var o=Object.assign({},p);o[k]=v;return o;}); }
+  function num2(v){ return Number(String(v).replace(",","."))||0; }
+  var isArla = form.tipo==="arla";
+  function salvar(){
+    var lit=num2(form.litros), val=num2(form.valor);
+    if(isArla){
+      if(!form.date || val<=0){ props.toast("Preencha data e valor do ARLA",true); return; }
+      window.TX.addOdometro({
+        id: Date.now()+Math.floor(Math.random()*100000),
+        tipo:"arla", date: form.date, odometro:0, litros:lit, valor:val,
+        local:(form.local||"").trim(), motorista:(form.motorista||"").trim(),
+        fonte:"externo", createdAt:new Date().toISOString()
+      });
+      props.toast("ARLA registrado ✓ (entra nas despesas)");
+    } else {
+      var odo=num2(form.odometro);
+      if(!form.date || odo<=0 || lit<=0){ props.toast("Preencha data, odômetro e litros",true); return; }
+      window.TX.addOdometro({
+        id: Date.now()+Math.floor(Math.random()*100000),
+        tipo:"diesel", date: form.date, odometro: odo, litros: lit, valor: val,
+        local:(form.local||"").trim(), motorista:(form.motorista||"").trim(),
+        fonte:"externo", createdAt:new Date().toISOString()
+      });
+      props.toast("Abastecimento registrado ✓");
+    }
+    setForm({tipo:form.tipo, date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""});
+  }
+  var dieselEntries = (props.data.odo||[]).slice().filter(function(x){return x.tipo!=="arla" && Number(x.odometro)>0;});
+  var porOdo = dieselEntries.slice().sort(function(a,b){ return Number(a.odometro)-Number(b.odometro); });
+  var consumo=null;
+  if(porOdo.length>=2){
+    var first=porOdo[0], last=porOdo[porOdo.length-1];
+    var km=Number(last.odometro)-Number(first.odometro);
+    var litros=0;
+    for(var i=1;i<porOdo.length;i++){ litros += Number(porOdo[i].litros)||0; }
+    (props.fuelFH||[]).forEach(function(fl){ if(String(fl.date)>String(first.date) && String(fl.date)<=String(last.date)) litros += Number(fl.liters)||0; });
+    consumo = { km:km, litros:litros, kmL: litros>0? km/litros : 0 };
+  }
+  var lista = (props.data.odo||[]).slice().sort(function(a,b){ return String(b.date)<String(a.date)?-1:(String(b.date)>String(a.date)?1:(Number(b.odometro)-Number(a.odometro))); });
+  function excluir(r){ if(confirm("Excluir este registro?")) window.TX.delOdometro(r.id); }
+
+  return (
+    <div>
+      <div className="sec" style={{marginTop:18}}>Consumo do caminhão</div>
+      {consumo
+        ? <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+            <Stat label="Consumo médio" value={num(consumo.kmL)+" km/L"} sub="posto + externo" color={GN}/>
+            <Stat label="Km rodados" value={num(consumo.km)+" km"} sub="entre leituras" color={BLU}/>
+            <Stat label="Litros no período" value={num(consumo.litros)+" L"} sub="abastecidos" color={AMB}/>
+          </div>
+        : <div className="card" style={{marginBottom:16,color:MUT,fontSize:14}}>Registre pelo menos <b>2 abastecimentos com odômetro</b> para o app calcular o consumo médio.</div>}
+
+      <div className="card" style={{marginBottom:18}}>
+        <div style={{fontWeight:700,marginBottom:12,color:GN2}}>Registrar abastecimento</div>
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          <button onClick={function(){set("tipo","diesel");}} style={{flex:1,padding:"10px",background:!isArla?GN:INP,color:!isArla?"#fff":MUT}}>Diesel</button>
+          <button onClick={function(){set("tipo","arla");}} style={{flex:1,padding:"10px",background:isArla?BLU:INP,color:isArla?"#fff":MUT}}>ARLA</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+          <Fld label="Data" type="date" value={form.date} onChange={function(v){set("date",v);}}/>
+          {!isArla && <Fld label="Odômetro (km)" type="text" inputMode="numeric" value={form.odometro} onChange={function(v){set("odometro",v);}} placeholder="Ex: 245680"/>}
+          <Fld label={isArla?"Litros — opcional":"Litros"} type="text" inputMode="decimal" value={form.litros} onChange={function(v){set("litros",v);}} placeholder="Ex: 180"/>
+          <Fld label={isArla?"Valor (R$)":"Valor (R$) — opcional"} type="text" inputMode="decimal" value={form.valor} onChange={function(v){set("valor",v);}} placeholder="0,00"/>
+          <Fld label="Local/Posto — opcional" value={form.local} onChange={function(v){set("local",v);}} placeholder="Ex: Posto Trevo, BR-050"/>
+          <Fld label="Motorista — opcional" value={form.motorista} onChange={function(v){set("motorista",v);}} placeholder="Nome"/>
+        </div>
+        {isArla && <div style={{fontSize:13,color:MUT,marginTop:10}}>O ARLA não pede odômetro e não entra no consumo de diesel — ele entra automaticamente nas <b>Despesas</b> (categoria ARLA).</div>}
+        <div style={{marginTop:14}}><Btn full onClick={salvar}>{isArla?"Salvar ARLA":"Salvar abastecimento"}</Btn></div>
+      </div>
+
+      <div className="sec">Abastecimentos registrados</div>
+      <div className="card" style={{padding:0,overflow:"hidden"}}>
+        <table><thead><tr>
+          <th>Data</th><th>Tipo</th><th>Odômetro</th><th>Litros</th><th>Local</th>
+          {!props.driver && <th>Valor</th>}{!props.driver && <th></th>}
+        </tr></thead><tbody>
+          {lista.length===0 && <tr><td colSpan={props.driver?5:7} style={{color:MUT,textAlign:"center",padding:22}}>Nenhum abastecimento registrado ainda.</td></tr>}
+          {lista.map(function(r){
+            var arla = r.tipo==="arla";
+            return <tr key={r.id}>
+              <td>{ddmmyyyy(r.date)}</td>
+              <td><span className={"bdg "+(arla?"bb":"bg")}>{arla?"ARLA":"Diesel"}</span></td>
+              <td style={{fontWeight:700}}>{arla?"—":num(r.odometro)+" km"}</td>
+              <td>{r.litros>0?num(r.litros)+" L":"—"}</td>
+              <td style={{fontSize:13,color:MUT}}>{r.local||"—"}{r.motorista?" · "+r.motorista:""}</td>
+              {!props.driver && <td>{r.valor>0?brl(r.valor):"—"}</td>}
+              {!props.driver && <td><button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button></td>}
+            </tr>;
+          })}
+        </tbody></table>
+      </div>
+      <div style={{fontSize:13,color:MUT,marginTop:12,lineHeight:1.5}}>O consumo médio junta os litros do <b>posto da fazenda</b> (automático) com os abastecimentos <b>externos</b> registrados aqui, dividindo os km rodados pelo total de litros entre a primeira e a última leitura de odômetro.</div>
     </div>
   );
 }
