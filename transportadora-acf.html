@@ -415,7 +415,7 @@ function App(){
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>DIAMANTES LHM</div>
             <div style={{fontSize:12,opacity:.85,marginTop:2}}>Controle de resultados · Caminhão FH 540 (016)</div>
             <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
-              <span style={{background:"#ffffff22",borderRadius:20,padding:"2px 11px",fontSize:12,fontWeight:700}}>{driver?"Motorista":"Dono"}</span>
+              <span style={{background:"#ffffff22",borderRadius:20,padding:"2px 11px",fontSize:12,fontWeight:700}}>{driver?"Elinton":"Luana"}</span>
               <button onClick={trocarPerfil} style={{background:"none",color:"#fff",textDecoration:"underline",fontSize:12,padding:0,fontWeight:600}}>trocar perfil</button>
             </div>
           </div>
@@ -542,6 +542,25 @@ function Receitas(props){
           for(var key in row){ var nk=norm(key); for(var a=0;a<aliases.length;a++){ if(nk.indexOf(aliases[a])>=0) return row[key]; } }
           return "";
         }
+        // PREÇO por tonelada (colunas do tipo R$/ton, Valor/ton, Preço/ton...)
+        function getPreco(row){
+          for(var key in row){ var nk=norm(key);
+            if(nk.indexOf("/ton")>=0||nk.indexOf("/t")>=0||nk.indexOf("por tonelada")>=0||nk.indexOf("r$/")>=0||nk.indexOf("rs/")>=0||nk==="preco"||nk==="preço"||nk==="preco/valor") return row[key]; }
+          return "";
+        }
+        // VOLUME/quantidade em toneladas — ignora colunas de preço (com "/" ou "r$")
+        function getTon(row){
+          for(var key in row){ var nk=norm(key);
+            if(nk.indexOf("/")>=0 || nk.indexOf("r$")>=0) continue;   // pula R$/ton, Valor/ton
+            if(nk.indexOf("quantidade")>=0||nk.indexOf("tonelada")>=0||nk.indexOf("peso")>=0||nk.indexOf("carga")>=0||nk.indexOf("volume")>=0||nk.indexOf("(ton")>=0||nk.indexOf(" ton")>=0||nk==="ton"||nk==="tons"||nk==="qtd"||nk.indexOf("quant")>=0) return row[key]; }
+          return "";
+        }
+        // VALOR total do frete — colunas valor/frete/receita/total que NÃO sejam por tonelada
+        function getTotal(row){
+          for(var key in row){ var nk=norm(key);
+            if((nk.indexOf("valor")>=0||nk.indexOf("frete")>=0||nk.indexOf("receita")>=0||nk==="total"||nk.indexOf("valor total")>=0) && nk.indexOf("/t")<0 && nk.indexOf("ton")<0 && nk.indexOf("r$/")<0) return row[key]; }
+          return "";
+        }
         function toNum(v){ if(typeof v==="number") return v; var s=String(v).replace(/[r$\s]/gi,""); if(!s) return 0;
           if(s.indexOf(",")>=0){ s=s.replace(/\./g,"").replace(",","."); } var n=parseFloat(s); return isNaN(n)?0:n; }
         function toISO(v){
@@ -552,22 +571,18 @@ function Receitas(props){
           return "";
         }
 
-        var n=0;
+        var n=0, meses={};
         rows.forEach(function(row){
           var tom = String(get(row,["tomador","cliente","empresa","contratante","razao"])).trim();
           var dISO = toISO(get(row,["data","date","dia","emissao"]));
-          var preco = toNum(get(row,["r$/ton","rs/ton","valor/ton","r$/t","preco/ton","preco","preço"]));
-          var ton = toNum(get(row,["quantidade","tonelada","ton","peso","carga","qtd"]));
-          // valor total do frete: coluna com "valor/frete/receita/total" que NÃO seja por tonelada
-          var totalRaw="";
-          for(var key in row){ var nk=norm(key);
-            if((nk.indexOf("valor")>=0||nk.indexOf("frete")>=0||nk.indexOf("receita")>=0||nk.indexOf("total")>=0) && nk.indexOf("ton")<0 && nk.indexOf("/t")<0){ totalRaw=row[key]; break; } }
-          var total = toNum(totalRaw);
+          var preco = toNum(getPreco(row));
+          var ton = toNum(getTon(row));
+          var total = toNum(getTotal(row));
           var valor = total>0 ? total : preco*ton;
           if(valor>0 && ton>0 && !(preco>0)) preco = valor/ton;   // deriva R$/ton se só veio o total
           if(!tom && !valor && !ton && !dISO) return;             // pula linha realmente vazia
           var item = {
-            id: Date.now()+Math.floor(Math.random()*100000)+n,
+            id: "rec_"+Date.now()+"_"+n+"_"+Math.floor(Math.random()*1000000),
             date: dISO || todayISO(),
             tomador: tom,
             produto: String(get(row,["produto","material"])).trim(),
@@ -577,9 +592,13 @@ function Receitas(props){
             createdAt: new Date().toISOString()
           };
           window.TX.addReceita(item); n++;
+          if(dISO) meses[dISO.slice(0,7)] = true;
         });
         if(n===0){ alert("Li a planilha, mas não importei nenhum frete.\n\nColunas encontradas:\n• "+headers.join("\n• ")+"\n\nO app precisa de: Tomador (ou Cliente), Data e Valor (ou R$/ton + Quantidade).\nDica: use o botão \"Baixar modelo\"."); }
-        else props.toast(n+" frete(s) importado(s)");
+        else {
+          var listaMeses = Object.keys(meses);
+          props.toast(n+" frete(s) importado(s)"+(listaMeses.length>1?" em "+listaMeses.length+" meses — use o seletor de mês":""));
+        }
       } catch(err){ console.error(err); props.toast("Erro ao ler a planilha",true); }
       ev.target.value="";
     };
@@ -612,9 +631,9 @@ function Receitas(props){
       <div className="sec">Fretes de {mesLabel(props.mk)}{!props.driver?" — total "+brl(props.totRec):""}</div>
       <div className="card" style={{padding:0,overflowX:"auto"}}>
         <table>
-          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th><th></th></tr></thead>
+          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th>{!props.driver && <th></th>}</tr></thead>
           <tbody>
-            {props.recMes.length===0 && <tr><td colSpan={8} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum frete neste mês. Adicione ou importe uma planilha.</td></tr>}
+            {props.recMes.length===0 && <tr><td colSpan={props.driver?7:8} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum frete neste mês. Adicione ou importe uma planilha.</td></tr>}
             {props.recMes.map(function(r){
               return <tr key={r.id}>
                 <td>{ddmmyyyy(r.date)}</td>
@@ -624,10 +643,10 @@ function Receitas(props){
                 <td>{num(r.ton)}</td>
                 <td>{brl(r.precoTon)}</td>
                 <td style={{fontWeight:700}}>{brl(r.valor)}</td>
-                <td style={{whiteSpace:"nowrap"}}>
+                {!props.driver && <td style={{whiteSpace:"nowrap"}}>
                   <button onClick={function(){editar(r);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
                   <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
-                </td>
+                </td>}
               </tr>;
             })}
           </tbody>
@@ -738,9 +757,9 @@ function Despesas(props){
         <div style={{fontSize:13,color:MUT,marginBottom:12}}>Recorrentes se repetem todo mês automaticamente; parceladas cobram só o valor da parcela nos meses do parcelamento. Adicione uma vez — não precisa repetir.</div>
         <div className="card" style={{padding:0,overflowX:"auto"}}>
           <table>
-            <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Período</th><th>Valor</th><th></th></tr></thead>
+            <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Período</th><th>Valor</th>{!props.driver && <th></th>}</tr></thead>
             <tbody>
-              {todas.length===0 && <tr><td colSpan={6} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa cadastrada.</td></tr>}
+              {todas.length===0 && <tr><td colSpan={props.driver?5:6} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa cadastrada.</td></tr>}
               {todas.map(function(d){
                 var periodo, valor;
                 if(d.tipo==="unica"){ periodo=ddmmyyyy(d.date); valor=brl(d.valor); }
@@ -752,7 +771,7 @@ function Despesas(props){
                   <td>{tipoBadge(d.tipo)}</td>
                   <td style={{fontSize:13}}>{periodo}</td>
                   <td style={{fontWeight:700,color:RED}}>{valor}</td>
-                  <td style={{whiteSpace:"nowrap"}}>
+                  {!props.driver && <td style={{whiteSpace:"nowrap"}}>
                     {d.fonte==="nossas-contas"
                       ? <span className="bdg" style={{background:"#ede9fe",color:"#6d28d9"}}>Nossas Contas</span>
                       : d.fonte==="abastec"
@@ -761,7 +780,7 @@ function Despesas(props){
                             <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
                             <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
                           </React.Fragment>}
-                  </td>
+                  </td>}
                 </tr>;
               })}
             </tbody>
@@ -997,16 +1016,16 @@ function RolePicker(props){
         <div style={{fontSize:13,color:MUT,margin:"6px 0 22px"}}>Quem está usando o app?</div>
         {!asking
           ? <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <Btn full onClick={function(){setAsking(true);}}>Sou o dono</Btn>
-              <Btn full color={INP} onClick={function(){props.onPick("motorista");}}>Sou o motorista</Btn>
+              <Btn full onClick={function(){setAsking(true);}}>Luana</Btn>
+              <Btn full color={INP} onClick={function(){props.onPick("motorista");}}>Elinton</Btn>
             </div>
           : <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <div style={{fontSize:13,color:MUT}}>Digite o PIN do dono</div>
+              <div style={{fontSize:13,color:MUT}}>Luana, digite o PIN</div>
               <input type="password" inputMode="numeric" value={pin} onChange={function(e){setPin(e.target.value);}} placeholder="••••••" style={{textAlign:"center",fontSize:20,letterSpacing:4}} onKeyDown={function(e){if(e.key==="Enter")entrarDono();}}/>
               <Btn full onClick={entrarDono}>Entrar</Btn>
               <button onClick={function(){setAsking(false);setPin("");}} style={{background:"none",color:MUT,fontSize:13}}>voltar</button>
             </div>}
-        <div style={{fontSize:12,color:DIM,marginTop:20,lineHeight:1.5}}>O motorista lança fretes, despesas e abastecimentos, mas <b>não vê</b> o resultado financeiro.</div>
+        <div style={{fontSize:12,color:DIM,marginTop:20,lineHeight:1.5}}>O Elinton lança fretes, despesas e abastecimentos, mas <b>não vê</b> o resultado financeiro.</div>
       </div>
     </div>
   );
@@ -1040,7 +1059,7 @@ function Abastecimento(props){
       });
       props.toast("Abastecimento registrado ✓");
     }
-    setForm({tipo:form.tipo, date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""});
+    setForm({tipo:"diesel", date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""});
   }
   var dieselEntries = (props.data.odo||[]).slice().filter(function(x){return x.tipo!=="arla" && Number(x.odometro)>0;});
   var porOdo = dieselEntries.slice().sort(function(a,b){ return Number(a.odometro)-Number(b.odometro); });
