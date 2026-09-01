@@ -1072,7 +1072,15 @@ function Abastecimento(props){
     (props.fuelFH||[]).forEach(function(fl){ if(String(fl.date)>String(first.date) && String(fl.date)<=String(last.date)) litros += Number(fl.liters)||0; });
     consumo = { km:km, litros:litros, kmL: litros>0? km/litros : 0 };
   }
-  var lista = (props.data.odo||[]).slice().sort(function(a,b){ return String(b.date)<String(a.date)?-1:(String(b.date)>String(a.date)?1:(Number(b.odometro)-Number(a.odometro))); });
+  // combina externos (odo) + posto da fazenda (fuelFH), ordenados por data desc
+  var postoItems = (props.fuelFH||[]).map(function(fl){
+    return { id:"posto_"+(fl.id||fl.date), tipo:"diesel", date:fl.date,
+      odometro:0, litros:Number(fl.liters)||0,
+      valor:0,   // custo calculado pelo acerto, sem valor fixo aqui
+      local:"Posto da Fazenda", motorista:"", fonte:"posto" };
+  });
+  var lista = (props.data.odo||[]).concat(postoItems)
+    .sort(function(a,b){ return String(b.date)<String(a.date)?-1:(String(b.date)>String(a.date)?1:(Number(b.odometro)-Number(a.odometro))); });
   function excluir(r){ if(confirm("Excluir este registro?")) window.TX.delOdometro(r.id); }
 
   return (
@@ -1113,14 +1121,23 @@ function Abastecimento(props){
           {lista.length===0 && <tr><td colSpan={props.driver?5:7} style={{color:MUT,textAlign:"center",padding:22}}>Nenhum abastecimento registrado ainda.</td></tr>}
           {lista.map(function(r){
             var arla = r.tipo==="arla";
+            var doPosto = r.fonte==="posto";
             return <tr key={r.id}>
               <td>{ddmmyyyy(r.date)}</td>
-              <td><span className={"bdg "+(arla?"bb":"bg")}>{arla?"ARLA":"Diesel"}</span></td>
-              <td style={{fontWeight:700}}>{arla?"—":num(r.odometro)+" km"}</td>
+              <td>
+                {doPosto
+                  ? <span className="bdg bg" style={{background:"#d1fae5",color:"#065f46"}}>Posto Fazenda</span>
+                  : <span className={"bdg "+(arla?"bb":"bg")}>{arla?"ARLA":"Diesel Ext."}</span>}
+              </td>
+              <td style={{fontWeight:700}}>{(arla||(!r.odometro||r.odometro===0))?"—":num(r.odometro)+" km"}</td>
               <td>{r.litros>0?num(r.litros)+" L":"—"}</td>
               <td style={{fontSize:13,color:MUT}}>{r.local||"—"}{r.motorista?" · "+r.motorista:""}</td>
               {!props.driver && <td>{r.valor>0?brl(r.valor):"—"}</td>}
-              {!props.driver && <td><button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button></td>}
+              {!props.driver && <td>
+                {doPosto
+                  ? <span className="bdg" style={{fontSize:11,background:"#f0fdf4",color:"#15803d"}}>app posto</span>
+                  : <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>}
+              </td>}
             </tr>;
           })}
         </tbody></table>
