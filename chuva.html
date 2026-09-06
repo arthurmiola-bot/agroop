@@ -535,7 +535,6 @@ tr:hover td{background:#f5f9ff;}
         <div class="cal-grid" id="cal-grid"></div>
       </div>
 
-      <button class="btn-filtrar" onclick="aplicarFiltro()">Aplicar filtro</button>
       <button class="btn-limpar" onclick="limparFiltro()">Limpar seleção</button>
     </div>
 
@@ -997,20 +996,27 @@ function selecionarDia(str){
 
   if(calModo==='dia'){
     calIni = str; calFim = str;
+    atualizarPeriodoLabel();
+    renderCalendario();
+    aplicarFiltro(); // aplica na hora
   } else {
     // período: 1ª clique = início, 2ª clique = fim
     if(!calEsperando || !calIni){
       calIni = str; calFim = null;
       calEsperando = true;
+      atualizarPeriodoLabel();
+      renderCalendario();
+      // não aplica ainda — espera a 2ª data
     } else {
       calFim = str;
       calEsperando = false;
       // garante ordem
       if(calFim < calIni){ [calIni,calFim]=[calFim,calIni]; }
+      atualizarPeriodoLabel();
+      renderCalendario();
+      aplicarFiltro(); // aplica ao completar o período
     }
   }
-  atualizarPeriodoLabel();
-  renderCalendario();
 }
 
 function atualizarPeriodoLabel(){
