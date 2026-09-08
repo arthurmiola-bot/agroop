@@ -244,6 +244,19 @@ function fuelCostPerLiter(x, avg){
 }
 
 // ── COMPONENTES BÁSICOS ──────────────────────────────────────────────────────
+function MkSelector(props){
+  function prev(){ var p=props.mk.split("-"); var y=+p[0],m=+p[1]-1; if(m<1){m=12;y--;} props.setMk(y+"-"+pad(m)); }
+  function next(){ var p=props.mk.split("-"); var y=+p[0],m=+p[1]+1; if(m>12){m=1;y++;} props.setMk(y+"-"+pad(m)); }
+  var meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  var p=props.mk.split("-"); var label=meses[+p[1]-1]+" "+p[0];
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:8,background:CARD,border:"1.5px solid "+BDR,borderRadius:10,padding:"4px 6px",margin:"14px 0"}}>
+      <button onClick={prev} style={{background:"none",color:MUT,fontSize:20,padding:"4px 10px",lineHeight:1}}>‹</button>
+      <span style={{flex:1,textAlign:"center",fontWeight:700,fontSize:15}}>{label}</span>
+      <button onClick={next} style={{background:"none",color:MUT,fontSize:20,padding:"4px 10px",lineHeight:1}}>›</button>
+    </div>
+  );
+}
 function Fld(props){
   return (
     <div style={{display:"flex",flexDirection:"column"}}>
@@ -444,11 +457,11 @@ function App(){
       </div>
 
       <div style={estilos} className="fi">
-        {tab==="painel" && !driver && <Painel mk={mk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
-        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} driver={driver} toast={showToast}/>}
-        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} driver={driver} toast={showToast}/>}
+        {tab==="painel" && !driver && <Painel mk={mk} setMk={setMk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
+        {tab==="receitas" && <Receitas data={data} mk={mk} setMk={setMk} recMes={recMes} totRec={totRec} driver={driver} toast={showToast}/>}
+        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} setMk={setMk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} driver={driver} toast={showToast}/>}
         {tab==="abastec" && <Abastecimento data={data} mk={mk} fuelFH={fuelFH} driver={driver} toast={showToast}/>}
-        {tab==="acerto" && !driver && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
+        {tab==="acerto" && !driver && <Acerto mk={mk} setMk={setMk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
         {tab==="config" && !driver && <Config conf={conf} toast={showToast} fh540={fh540}/>}
       </div>
 
@@ -462,7 +475,8 @@ function Painel(props){
   var d=props.diesel;
   return (
     <div>
-      <div className="sec" style={{marginTop:18}}>Resumo de {mesLabel(props.mk)}</div>
+      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
+      <div className="sec" style={{marginTop:4}}>Resumo de {mesLabel(props.mk)}</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
         <Stat label="Receitas (total)" value={brl(props.totRec)} sub={props.recCount+" frete(s)"} color={GN}/>
         <Stat label="Despesas (total)" value={brl(props.totDesp)} sub={props.despCount+" lançamento(s)"} color={RED}/>
@@ -620,7 +634,8 @@ function Receitas(props){
 
   return (
     <div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px"}}>
+      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"4px 0 14px"}}>
         <Btn onClick={nova}>+ Novo frete</Btn>
         <Btn color={INP} onClick={function(){ var el=document.getElementById("fileFretes"); if(el) el.click(); }}>Importar Excel</Btn>
         <input id="fileFretes" type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
@@ -722,7 +737,8 @@ function Despesas(props){
 
   return (
     <div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px",alignItems:"center"}}>
+      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"4px 0 14px",alignItems:"center"}}>
         <Btn onClick={nova}>+ Nova despesa</Btn>
         <div className="mtog" style={{width:230}}>
           <button className={view==="mes"?"on":""} onClick={function(){setView("mes");}}>Deste mês</button>
@@ -854,7 +870,8 @@ function Acerto(props){
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"18px 0 14px"}}>
+      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"4px 0 14px"}}>
         <div className="sec" style={{margin:0}}>Acerto com a Fazenda — {mesLabel(props.mk)}</div>
         <Btn onClick={imprimir}>Gerar PDF</Btn>
       </div>
