@@ -459,7 +459,7 @@ function App(){
       <div style={estilos} className="fi">
         {tab==="painel" && !driver && <Painel mk={mk} setMk={setMk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
         {tab==="receitas" && <Receitas data={data} mk={mk} setMk={setMk} recMes={recMes} totRec={totRec} driver={driver} toast={showToast}/>}
-        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} setMk={setMk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} driver={driver} toast={showToast}/>}
+        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} setMk={setMk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} diamTotal={diamDesp.length} driver={driver} toast={showToast}/>}
         {tab==="abastec" && <Abastecimento data={data} mk={mk} fuelFH={fuelFH} driver={driver} toast={showToast}/>}
         {tab==="acerto" && !driver && <Acerto mk={mk} setMk={setMk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
         {tab==="config" && !driver && <Config conf={conf} toast={showToast} fh540={fh540}/>}
@@ -753,7 +753,14 @@ function Despesas(props){
           <table>
             <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Valor no mês</th></tr></thead>
             <tbody>
-              {props.despMes.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa incide neste mês.</td></tr>}
+              {props.despMes.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:20}}>
+                <div>Nenhuma despesa neste mês.</div>
+                {!props.driver && <div style={{marginTop:8,fontSize:13,lineHeight:1.6}}>
+                  {props.diamTotal>0
+                    ? <span>✅ <b>{props.diamTotal}</b> despesa(s) Diamantes carregada(s) do Nossas Contas, mas nenhuma com data em <b>{mesLabel(props.mk)}</b>. Importe a fatura deste mês no Nossas Contas para que elas apareçam aqui.</span>
+                    : <span>⏳ Carregando despesas Diamantes do Nossas Contas… Se demorar, verifique a conexão com o app.</span>}
+                </div>}
+              </td></tr>}
               {props.despMes.map(function(o){
                 var d=o.d;
                 return <tr key={d.id}>
@@ -1078,24 +1085,31 @@ function Abastecimento(props){
     }
     setForm({tipo:"diesel", date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""});
   }
-  var dieselEntries = (props.data.odo||[]).slice().filter(function(x){return x.tipo!=="arla" && Number(x.odometro)>0;});
+  // combina externos (odo) + posto da fazenda (fuelFH), ordenados por data desc
+  var postoItems = (props.fuelFH||[]).map(function(fl){
+    // o posto grava o odômetro no campo currentReading (km para caminhão)
+    var odo = Number(fl.currentReading)||Number(fl.odometer)||Number(fl.km)||0;
+    return { id:"posto_"+(fl.id||fl.date), tipo:"diesel", date:fl.date,
+      odometro: odo, litros:Number(fl.liters)||0,
+      valor:0, local:"Posto da Fazenda",
+      motorista: String(fl.operatorName||fl.operator||fl.motorista||"").trim(),
+      fonte:"posto" };
+  });
+  // para consumo: todos os diesel com odômetro conhecido (externos + posto se tiver currentReading)
+  var dieselEntries = (props.data.odo||[]).filter(function(x){return x.tipo!=="arla" && Number(x.odometro)>0;})
+    .concat(postoItems.filter(function(x){ return Number(x.odometro)>0; }));
   var porOdo = dieselEntries.slice().sort(function(a,b){ return Number(a.odometro)-Number(b.odometro); });
   var consumo=null;
   if(porOdo.length>=2){
     var first=porOdo[0], last=porOdo[porOdo.length-1];
     var km=Number(last.odometro)-Number(first.odometro);
+    // litros = todos os abastecimentos entre a primeira e a última leitura de odômetro
     var litros=0;
-    for(var i=1;i<porOdo.length;i++){ litros += Number(porOdo[i].litros)||0; }
-    (props.fuelFH||[]).forEach(function(fl){ if(String(fl.date)>String(first.date) && String(fl.date)<=String(last.date)) litros += Number(fl.liters)||0; });
+    dieselEntries.forEach(function(e){ if(String(e.date)>String(first.date) && String(e.date)<=String(last.date)) litros += Number(e.litros)||0; });
+    // adiciona os itens do posto que não têm odômetro (só litros), no mesmo período
+    postoItems.filter(function(x){ return !(Number(x.odometro)>0); }).forEach(function(fl){ if(String(fl.date)>String(first.date) && String(fl.date)<=String(last.date)) litros += Number(fl.litros)||0; });
     consumo = { km:km, litros:litros, kmL: litros>0? km/litros : 0 };
   }
-  // combina externos (odo) + posto da fazenda (fuelFH), ordenados por data desc
-  var postoItems = (props.fuelFH||[]).map(function(fl){
-    return { id:"posto_"+(fl.id||fl.date), tipo:"diesel", date:fl.date,
-      odometro:0, litros:Number(fl.liters)||0,
-      valor:0,   // custo calculado pelo acerto, sem valor fixo aqui
-      local:"Posto da Fazenda", motorista:"", fonte:"posto" };
-  });
   var lista = (props.data.odo||[]).concat(postoItems)
     .sort(function(a,b){ return String(b.date)<String(a.date)?-1:(String(b.date)>String(a.date)?1:(Number(b.odometro)-Number(a.odometro))); });
   function excluir(r){ if(confirm("Excluir este registro?")) window.TX.delOdometro(r.id); }
