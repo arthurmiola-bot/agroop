@@ -550,26 +550,28 @@ function Receitas(props){
         }
         if(hRow<0){ alert("Não encontrei uma linha de cabeçalho na planilha.\n\nDica: clique em \"Baixar modelo\", coloque seus fretes nele e importe — as colunas já ficam certas."); ev.target.value=""; return; }
         var headers = aoa[hRow].map(function(x){ return String(x); }).filter(function(x){return x.trim();});
-        var rows = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false, range:hRow});
+        var rows = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false, range:hRow, dateNF:'dd/mm/yy'});
+        // lê como texto puro — evita que o XLSX converta datas no padrão americano (MM/DD)
+        var rows = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false, range:hRow, dateNF:'dd/mm/yy'});
 
         function get(row, aliases){
           for(var key in row){ var nk=norm(key); for(var a=0;a<aliases.length;a++){ if(nk.indexOf(aliases[a])>=0) return row[key]; } }
           return "";
         }
-        // PREÇO por tonelada (colunas do tipo R$/ton, Valor/ton, Preço/ton...)
+        // PREÇO por tonelada
         function getPreco(row){
           for(var key in row){ var nk=norm(key);
             if(nk.indexOf("/ton")>=0||nk.indexOf("/t")>=0||nk.indexOf("por tonelada")>=0||nk.indexOf("r$/")>=0||nk.indexOf("rs/")>=0||nk==="preco"||nk==="preço"||nk==="preco/valor") return row[key]; }
           return "";
         }
-        // VOLUME/quantidade em toneladas — ignora colunas de preço (com "/" ou "r$")
+        // VOLUME — ignora colunas de preço
         function getTon(row){
           for(var key in row){ var nk=norm(key);
-            if(nk.indexOf("/")>=0 || nk.indexOf("r$")>=0) continue;   // pula R$/ton, Valor/ton
+            if(nk.indexOf("/")>=0 || nk.indexOf("r$")>=0) continue;
             if(nk.indexOf("quantidade")>=0||nk.indexOf("tonelada")>=0||nk.indexOf("peso")>=0||nk.indexOf("carga")>=0||nk.indexOf("volume")>=0||nk.indexOf("(ton")>=0||nk.indexOf(" ton")>=0||nk==="ton"||nk==="tons"||nk==="qtd"||nk.indexOf("quant")>=0) return row[key]; }
           return "";
         }
-        // VALOR total do frete — colunas valor/frete/receita/total que NÃO sejam por tonelada
+        // VALOR total do frete
         function getTotal(row){
           for(var key in row){ var nk=norm(key);
             if((nk.indexOf("valor")>=0||nk.indexOf("frete")>=0||nk.indexOf("receita")>=0||nk==="total"||nk.indexOf("valor total")>=0) && nk.indexOf("/t")<0 && nk.indexOf("ton")<0 && nk.indexOf("r$/")<0) return row[key]; }
@@ -577,11 +579,21 @@ function Receitas(props){
         }
         function toNum(v){ if(typeof v==="number") return v; var s=String(v).replace(/[r$\s]/gi,""); if(!s) return 0;
           if(s.indexOf(",")>=0){ s=s.replace(/\./g,"").replace(",","."); } var n=parseFloat(s); return isNaN(n)?0:n; }
+        // converte dd/mm/aa, dd/mm/aaaa e aaaa-mm-dd para ISO
         function toISO(v){
-          if(v instanceof Date) return v.getFullYear()+"-"+pad(v.getMonth()+1)+"-"+pad(v.getDate());
-          var s=String(v).trim(); if(!s) return "";
-          if(s.indexOf("/")>0){ var p=s.split("/"); if(p.length>=3){ var y=p[2].slice(0,4); if(y.length===2) y="20"+y; return y+"-"+pad(Number(p[1]))+"-"+pad(Number(p[0])); } }
-          if(s.indexOf("-")>0 && s.length>=8) return s.slice(0,10);
+          var s=String(v||"").trim(); if(!s) return "";
+          // dd/mm/aa ou dd/mm/aaaa — formato brasileiro
+          if(s.indexOf("/")>=0){
+            var p=s.split("/");
+            if(p.length>=2){
+              var d=p[0], mo=p[1], y=p[2]||"";
+              if(!y){ y=String(new Date().getFullYear()); }
+              else if(y.length===2){ y="20"+y; }
+              if(y.length===4) return y+"-"+pad(Number(mo))+"-"+pad(Number(d));
+            }
+          }
+          // aaaa-mm-dd
+          if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
           return "";
         }
 
@@ -620,8 +632,8 @@ function Receitas(props){
   }
 
   function baixarModelo(){
-    var ws = XLSX.utils.aoa_to_sheet([["Tomador","Data","Produto","Origem","Destino","R$/ton","Quantidade (ton)"],
-      ["Fazenda","01/09/2026","Soja","Fazenda Rodeio","Armazém Uberlândia","95","33.5"]]);
+    var ws = XLSX.utils.aoa_to_sheet([[" Tomador","Data (dd/mm/aa)","Produto","Origem","Destino","R$/ton","Quantidade (ton)"],
+      ["Fazenda","01/09/26","Soja","Fazenda Rodeio","Armazém Uberlândia","95","33.5"]]);
     var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Receitas");
     XLSX.writeFile(wb,"modelo-receitas.xlsx");
   }
