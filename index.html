@@ -428,6 +428,17 @@
   .prod-dose-mini tr:hover td { background: transparent !important; }
   th.th-ord:hover { background: rgba(255,255,255,0.08); }
   .th-seta { font-size: 10px; opacity: .9; }
+  /* Linha de filtros abaixo do cabeçalho */
+  .tr-filtros th { background: var(--creme-escuro); padding: 4px 6px; }
+  .tr-filtros select, .tr-filtros input[type=text] {
+    width: 100%; font-size: 11px; padding: 3px 5px;
+    border: 1.5px solid #ccc; border-radius: 5px;
+    background: #fff; color: #333; outline: none;
+  }
+  .tr-filtros select:focus, .tr-filtros input[type=text]:focus { border-color: var(--verde); }
+  .tr-filtros select.filtro-ativo, .tr-filtros input.filtro-ativo {
+    border-color: var(--verde); background: #eef7f2;
+  }
 
   /* Indicador de status offline/sincronização (modo Aplicações) */
   .offline-ind { align-items:center; gap:8px; padding:10px 14px; border-radius:10px; font-size:13px; font-weight:600; margin-bottom:14px; }
@@ -765,6 +776,63 @@ window.ordenarCaderno = function(tabela, campo) {
   if (o.campo === campo) o.dir *= -1; else { o.campo = campo; o.dir = 1; }
   renderSubabaCaderno();
 };
+
+// ── FILTROS DO CADERNO ──
+// Estado: { plantio: {fazenda:'', talhao:'', ...}, pulverizacao: {}, ... }
+const cadernoFiltros = { plantio: {}, pulverizacao: {}, solido: {}, colheita: {} };
+
+window.filtrarCaderno = function(tabela, campo, valor) {
+  if (!valor) delete cadernoFiltros[tabela][campo];
+  else cadernoFiltros[tabela][campo] = valor;
+  // ao mudar fazenda, zera o talhão (dependente)
+  if (campo === 'fazenda') delete cadernoFiltros[tabela]['talhao'];
+  renderSubabaCaderno();
+};
+
+window.limparFiltrosCaderno = function(tabela) {
+  cadernoFiltros[tabela] = {};
+  renderSubabaCaderno();
+};
+
+function temFiltrosAtivos(tabela) {
+  return Object.keys(cadernoFiltros[tabela] || {}).length > 0;
+}
+
+// Aplica os filtros ativos numa lista; _produto busca nos nomes dos produtos.
+function aplicarFiltrosCaderno(lista, tabela) {
+  const f = cadernoFiltros[tabela] || {};
+  if (!Object.keys(f).length) return lista;
+  return lista.filter(r => Object.entries(f).every(([campo, valor]) => {
+    if (!valor) return true;
+    if (campo === '_produto') {
+      const txt = valor.toLowerCase();
+      return produtosDaAplicacao(r).some(p => (p.produto||'').toLowerCase().includes(txt));
+    }
+    return String(r[campo]||'').toLowerCase() === String(valor).toLowerCase();
+  }));
+}
+
+// Monta <th> com <select> para filtro de coluna categórica
+function thFiltroSelect(tabela, campo, opcoes) {
+  const atual = (cadernoFiltros[tabela]||{})[campo] || '';
+  const cls = atual ? ' filtro-ativo' : '';
+  const opts = `<option value="">Todos</option>` +
+    opcoes.map(v => `<option value="${v}" ${v===atual?'selected':''}>${v}</option>`).join('');
+  return `<th><select class="${cls}" onchange="filtrarCaderno('${tabela}','${campo}',this.value)">${opts}</select></th>`;
+}
+
+// Monta <th> com <input text> para filtro de texto livre
+function thFiltroText(tabela, campo, placeholder) {
+  const atual = (cadernoFiltros[tabela]||{})[campo] || '';
+  const cls = atual ? ' filtro-ativo' : '';
+  return `<th><input type="text" class="${cls}" value="${atual.replace(/"/g,'&quot;')}" placeholder="${placeholder||'Filtrar...'}"
+    oninput="filtrarCaderno('${tabela}','${campo}',this.value)"></th>`;
+}
+
+// <th> vazio (colunas sem filtro — mantém alinhamento)
+function thFiltroVazio(n) {
+  return `<th${n>1?` colspan="${n}"`:''} style="background:var(--creme-escuro)"></th>`;
+}
 
 // Monta um <th> clicável com seta indicando a ordenação atual
 function thOrd(tabela, campo, rotulo, extraClass) {
@@ -4389,9 +4457,22 @@ window.excluirSelecionadosCaderno = async function(tipo, colecao) {
 
 function renderPlantio() {
   const el = document.getElementById('caderno-conteudo');
-  const lista = plantios.filter(filtroCadernoSafra);
+  const listaBase = plantios.filter(filtroCadernoSafra);
+  const lista = aplicarFiltrosCaderno(listaBase, 'plantio');
+  // Opções únicas para os selects de filtro de plantio
+  const fazendaFiltroP = (cadernoFiltros['plantio']||{}).fazenda || '';
+  const fazendaOptsP   = [...new Set(listaBase.map(p=>p.fazenda).filter(Boolean))].sort();
+  const talhaoOptsP    = [...new Set(listaBase.filter(p=>!fazendaFiltroP||p.fazenda===fazendaFiltroP).map(p=>p.talhao).filter(Boolean))].sort();
+  const culturaOptsP   = [...new Set(listaBase.map(p=>p.cultura).filter(Boolean))].sort();
+  const safraOptsP     = [...new Set(listaBase.map(p=>p.safra).filter(Boolean))].sort();
+  const statusOptsP    = ['planejado','enviado_operador','execucao','concluido'];
+  const filtroAtivoP   = temFiltrosAtivos('plantio');
   el.innerHTML = `
-    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s)${cadernoSafra?` — ${cadernoSafra}`:''}</div>
+    <div class="sec-header">
+      <div style="font-size:14px;color:var(--cinza);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>${lista.length}${filtroAtivoP&&lista.length!==listaBase.length?` de ${listaBase.length}`:''} registro(s)${cadernoSafra?` — ${cadernoSafra}`:''}</span>
+        ${filtroAtivoP?`<button class="btn btn-sm btn-secondary" onclick="limparFiltrosCaderno('plantio')" style="padding:4px 10px;font-size:12px">✕ Limpar filtros</button>`:''}
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="baixarModelo('plantio')">📋 Baixar Modelo</button>
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-plantio').click()">📤 Importar Excel</button>
@@ -4400,7 +4481,8 @@ function renderPlantio() {
         <button class="btn btn-primary" onclick="abrirModalPlantio()">+ Novo Plantio</button>
       </div></div>
     <div class="tabela-wrap">${barraSelCaderno('plantio','insumos_campo_plantio')}<table>
-      <thead><tr>
+      <thead>
+      <tr>
         ${thSelCaderno('plantio')}
         ${thOrd('plantio','data','Data Planejada')}
         ${thOrd('plantio','data_conclusao','Data Execução')}
@@ -4413,7 +4495,18 @@ function renderPlantio() {
         ${thOrd('plantio','data_prevista_colheita','Previsão Colheita')}
         ${thOrd('plantio','status','Status')}
         <th class="col-acoes">Ações</th>
-      </tr></thead>
+      </tr>
+      <tr class="tr-filtros">
+        ${thFiltroVazio(3)}
+        ${thFiltroSelect('plantio','fazenda',fazendaOptsP)}
+        ${thFiltroSelect('plantio','talhao',talhaoOptsP)}
+        ${thFiltroSelect('plantio','cultura',culturaOptsP)}
+        ${thFiltroSelect('plantio','safra',safraOptsP)}
+        ${thFiltroVazio(3)}
+        ${thFiltroSelect('plantio','status',statusOptsP)}
+        ${thFiltroVazio()}
+      </tr>
+      </thead>
       <tbody>
         ${lista.length===0?'<tr><td colspan="12" class="tabela-vazia">Nenhum plantio registrado</td></tr>':
         ordenarLista(lista,'plantio',(p,c)=>{
@@ -4844,11 +4937,23 @@ function resumoProdutos(a) {
 function renderAdubacao(tipo) {
   tipo = tipo || 'solido';
   const el = document.getElementById('caderno-conteudo');
-  const lista = adubacoes.filter(a => tipoDaAdubacao(a) === tipo && filtroCadernoSafra(a));
+  const listaBase = adubacoes.filter(a => tipoDaAdubacao(a) === tipo && filtroCadernoSafra(a));
+  const lista = aplicarFiltrosCaderno(listaBase, tipo);
   const ehPulv = tipo === 'pulverizacao';
   const rotulo = ehPulv ? 'Pulverização' : 'Sólidos';
+  // Opções únicas para os selects de filtro
+  const fazendaFiltro = (cadernoFiltros[tipo]||{}).fazenda || '';
+  const fazendaOpts = [...new Set(listaBase.map(a=>a.fazenda).filter(Boolean))].sort();
+  const talhaoOpts  = [...new Set(listaBase.filter(a=>!fazendaFiltro||a.fazenda===fazendaFiltro).map(a=>a.talhao).filter(Boolean))].sort();
+  const catOpts     = [...new Set(listaBase.map(a=>a.categoria).filter(Boolean))].sort();
+  const statusOpts  = ['planejado','enviado_operador','execucao','concluido'];
+  const filtroAtivo = temFiltrosAtivos(tipo);
   el.innerHTML = `
-    <div class="sec-header"><div style="font-size:14px;color:var(--cinza)">${lista.length} registro(s) — ${rotulo}</div>
+    <div class="sec-header">
+      <div style="font-size:14px;color:var(--cinza);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>${lista.length}${filtroAtivo&&lista.length!==listaBase.length?` de ${listaBase.length}`:''} registro(s) — ${rotulo}</span>
+        ${filtroAtivo?`<button class="btn btn-sm btn-secondary" onclick="limparFiltrosCaderno('${tipo}')" style="padding:4px 10px;font-size:12px">✕ Limpar filtros</button>`:''}
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="baixarModelo('${tipo}')">📋 Baixar Modelo</button>
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-adubacao').click()">📤 Importar Excel</button>
@@ -4858,7 +4963,8 @@ function renderAdubacao(tipo) {
       </div></div>
     <p style="font-size:12px;color:var(--cinza);margin-bottom:14px">💡 Ao clicar em <strong>"Liberar p/ Campo"</strong>, a aplicação passa a aparecer no <strong>modo Aplicações</strong> para o operador executar. Quando ele concluir, o status aqui vira <strong>Concluído</strong> automaticamente. Datas calculadas (X dias após...) têm um botão 🔄 pra recalcular.</p>
     <div class="tabela-wrap">${barraSelCaderno(tipo,'insumos_campo_adubacao')}<table>
-      <thead><tr>
+      <thead>
+      <tr>
         ${thSelCaderno(tipo)}
         ${thOrd(tipo,'data','Data Planejada')}
         ${thOrd(tipo,'data_conclusao','Data Execução')}
@@ -4869,7 +4975,19 @@ function renderAdubacao(tipo) {
         ${ehPulv?`<th>Descrição</th>`:''}
         ${thOrd(tipo,'status','Status')}
         <th class="col-acoes">Ações</th>
-      </tr></thead>
+      </tr>
+      <tr class="tr-filtros">
+        ${thFiltroVazio()}
+        ${thFiltroVazio(2)}
+        ${thFiltroSelect(tipo,'fazenda',fazendaOpts)}
+        ${thFiltroSelect(tipo,'talhao',talhaoOpts)}
+        ${thFiltroText(tipo,'_produto','Buscar produto')}
+        ${ehPulv?thFiltroVazio():''}
+        ${ehPulv?thFiltroSelect(tipo,'categoria',catOpts):''}
+        ${thFiltroSelect(tipo,'status',statusOpts)}
+        ${thFiltroVazio()}
+      </tr>
+      </thead>
       <tbody>
         ${lista.length===0?`<tr><td colspan="${ehPulv?10:8}" class="tabela-vazia">Nenhum registro</td></tr>`:
         ordenarLista(lista,tipo,(a,c)=>{
@@ -5244,33 +5362,29 @@ function numeroCategoria(a) {
 }
 
 // Recalcula toda a cadeia DAA de um talhão. Cada pulverização "pulv_anterior" conta a partir da
-// pulverização imediatamente anterior NA SEQUÊNCIA. A sequência segue, nesta prioridade:
-//   1) número da categoria (Fungicida 1 < 2 < 3 < 4 < 5) — a numeração é a ordem "verdadeira"
-//   2) data conhecida (para itens sem número, ex: Dessecação, Pré-emergente)
-//   3) ordem de criação
-// Priorizar o número evita que uma data temporariamente errada embaralhe a ordem dos fungicidas.
+// pulverização imediatamente anterior NA SEQUÊNCIA (ordenada por: data conhecida → número da
+// categoria → ordem de criação). Isso funciona mesmo quando as datas ainda estão vazias.
 async function recalcularCadeiaDAA(fazenda, talhao) {
   for (let passada=0; passada<12; passada++) {
     let mudou = false;
+    // sequência ordenada de TODAS as pulverizações do talhão
     const seq = adubacoes
       .filter(a => tipoDaAdubacao(a)==='pulverizacao'
         && normalizar(a.fazenda||'')===normalizar(fazenda)
         && normalizar(a.talhao||'')===normalizar(talhao))
       .map((a, ordemCriacao) => ({ a, ordemCriacao }))
       .sort((x, y) => {
-        const nx = numeroCategoria(x.a), ny = numeroCategoria(y.a);
-        // 1º critério: ambos numerados → ordena pelo número (Fung 3 sempre antes de Fung 4)
-        if (nx != null && ny != null) {
-          if (nx !== ny) return nx - ny;
-          return x.ordemCriacao - y.ordemCriacao;
-        }
-        // 2º critério: um tem número e outro não. Usa a data para posicionar o sem-número
-        // relativo ao com-número; se o sem-número não tem data, mantém a ordem de criação.
+        // 1º critério: quem já tem data vai pela data
         const dx = x.a.data ? String(x.a.data).slice(0,10) : '';
         const dy = y.a.data ? String(y.a.data).slice(0,10) : '';
         if (dx && dy && dx !== dy) return dx.localeCompare(dy);
         if (dx && !dy) return -1;
         if (!dx && dy) return 1;
+        // 2º critério: número da categoria (Fungicida 1 < Fungicida 2 < ...)
+        const nx = numeroCategoria(x.a), ny = numeroCategoria(y.a);
+        if (nx != null && ny != null && nx !== ny) return nx - ny;
+        if (nx != null && ny == null) return -1;
+        if (nx == null && ny != null) return 1;
         // 3º critério: ordem de criação
         return x.ordemCriacao - y.ordemCriacao;
       })
@@ -5280,6 +5394,7 @@ async function recalcularCadeiaDAA(fazenda, talhao) {
     for (let i = 0; i < seq.length; i++) {
       const a = seq[i];
       if (a.modo_data !== 'pulv_anterior') continue;
+      // acha o anterior (i-1, i-2...) que tenha data
       let ref = '';
       for (let j = i-1; j >= 0; j--) {
         if (seq[j].data) { ref = String(seq[j].data).slice(0,10); break; }
