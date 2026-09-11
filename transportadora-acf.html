@@ -385,8 +385,21 @@ function App(){
         valor:Number(a.valor)||0, fonte:"abastec", createdAt:a.createdAt||"" };
     });
   },[data.odo]);
-  // lista combinada: despesas próprias + Diamantes (Nossas Contas) + ARLA (abastecimento)
-  var despAll = useMemo(function(){ return (data.desp||[]).concat(diamDesp).concat(arlaDesp); },[data.desp, diamDesp, arlaDesp]);
+  // diesel da fazenda (fuelFH) como despesas — somente leitura, custo calculado igual ao Acerto
+  var dieselFazDesp = useMemo(function(){
+    if(!fuelFH || !fuelFH.length) return [];
+    return fuelFH.map(function(x){
+      var l=Number(x.liters)||0;
+      var cpl=fuelCostPerLiter(x, custoFallback);
+      var valor=l*cpl;
+      return { id:"diesel_"+( x.id||x.date+"_"+l ), tipo:"unica",
+        categoria:"Combustível (posto fazenda)",
+        descricao: (num(l)+" L · custo R$"+cpl.toFixed(2).replace(".",",")+"/L"),
+        date: x.date, valor: valor, fonte:"posto", createdAt: x.date||"" };
+    });
+  },[fuelFH, custoFallback]);
+  // lista combinada: próprias + Diamantes + ARLA + diesel fazenda
+  var despAll = useMemo(function(){ return (data.desp||[]).concat(diamDesp).concat(arlaDesp).concat(dieselFazDesp); },[data.desp, diamDesp, arlaDesp, dieselFazDesp]);
   var totDiamMes = useMemo(function(){
     return diamDesp.filter(function(d){ return monthOf(d.date)===mk; }).reduce(function(a,d){ return a+(Number(d.valor)||0); },0);
   },[diamDesp, mk]);
@@ -777,7 +790,7 @@ function Despesas(props){
                 var d=o.d;
                 return <tr key={d.id}>
                   <td style={{fontWeight:600}}>{d.categoria||"—"}</td>
-                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}{d.fonte==="nossas-contas"?<span className="bdg" style={{background:"#ede9fe",color:"#6d28d9",marginLeft:6}}>cartão pessoal</span>:(d.fonte==="abastec"?<span className="bdg bb" style={{marginLeft:6}}>abastecimento</span>:null)}</td>
+                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}{d.fonte==="nossas-contas"?<span className="bdg" style={{background:"#ede9fe",color:"#6d28d9",marginLeft:6}}>cartão pessoal</span>:(d.fonte==="abastec"?<span className="bdg bb" style={{marginLeft:6}}>abastecimento</span>:(d.fonte==="posto"?<span className="bdg bg" style={{marginLeft:6}}>posto fazenda</span>:null))}</td>
                   <td>{tipoBadge(d.tipo)}</td>
                   <td style={{fontWeight:700,color:RED}}>{brl(o.v)}</td>
                 </tr>;
@@ -809,8 +822,8 @@ function Despesas(props){
                   {!props.driver && <td style={{whiteSpace:"nowrap"}}>
                     {d.fonte==="nossas-contas"
                       ? <span className="bdg" style={{background:"#ede9fe",color:"#6d28d9"}}>Nossas Contas</span>
-                      : d.fonte==="abastec"
-                        ? <span className="bdg bb">Abastecimento</span>
+                      : (d.fonte==="abastec" || d.fonte==="posto")
+                        ? <span className="bdg bb">{d.fonte==="posto"?"Posto Fazenda":"Abastecimento"}</span>
                         : <React.Fragment>
                             <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
                             <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
@@ -1100,7 +1113,7 @@ function Abastecimento(props){
   // combina externos (odo) + posto da fazenda (fuelFH), ordenados por data desc
   var postoItems = (props.fuelFH||[]).map(function(fl){
     // o posto grava o odômetro no campo currentReading (km para caminhão)
-    var odo = Number(fl.currentReading)||Number(fl.odometer)||Number(fl.km)||0;
+    var odo = Number(fl.reading)||Number(fl.currentReading)||Number(fl.odometer)||Number(fl.km)||Number(fl.currentKm)||0;
     return { id:"posto_"+(fl.id||fl.date), tipo:"diesel", date:fl.date,
       odometro: odo, litros:Number(fl.liters)||0,
       valor:0, local:"Posto da Fazenda",
