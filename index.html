@@ -1063,7 +1063,7 @@ window.renderModoAplicacoes = function() {
     return;
   }
   const cont = {
-    pendentes: adubacoes.filter(a => a.status==='planejado' || a.status==='enviado_operador').length,
+    pendentes: adubacoes.filter(a => a.status==='enviado_operador').length,
     execucao: adubacoes.filter(a => a.status==='execucao').length,
     concluidas: adubacoes.filter(a => a.status==='concluido').length
   };
@@ -1437,7 +1437,7 @@ function renderSubabaAplic() {
   const el = document.getElementById('aplic-conteudo');
   let lista, vazio;
   if (aplicSubaba === 'pendentes') {
-    lista = adubacoes.filter(a => a.status==='planejado' || a.status==='enviado_operador');
+    lista = adubacoes.filter(a => a.status==='enviado_operador');
     vazio = 'Nenhuma aplicação pendente';
   } else if (aplicSubaba === 'execucao') {
     lista = adubacoes.filter(a => a.status==='execucao');
@@ -1510,7 +1510,7 @@ function cardAplicacao(g, idx) {
 
   // Botão de ação da operação inteira (todos os produtos do card mudam juntos)
   let botaoOperacao = '';
-  const temPendente = g.itens.some(it => it.status === 'planejado' || it.status === 'enviado_operador');
+  const temPendente = g.itens.some(it => it.status === 'enviado_operador');
   const temExecucao = g.itens.some(it => it.status === 'execucao');
   if (temPendente) {
     botaoOperacao = `<button class="aplic-btn aplic-btn-iniciar" onclick="event.stopPropagation();aplicIniciarGrupo('${cardId}')">▶ Iniciar aplicação</button>`;
@@ -1677,7 +1677,7 @@ window.aplicIniciarGrupo = async function(cardId) {
   const ids = (card.dataset.ids||'').split(',').filter(Boolean);
   for (const id of ids) {
     const a = adubacoes.find(x=>x.id===id);
-    if (a && (a.status==='planejado' || a.status==='enviado_operador')) {
+    if (a && a.status==='enviado_operador') {
       await aplicIniciar(id, true);
     }
   }
