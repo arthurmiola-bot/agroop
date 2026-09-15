@@ -3,51 +3,21 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Diamantes LHM</title>
+  <title>Transportadora — ACF</title>
   <meta name="theme-color" content="#2a7a2a"/>
-  <meta name="apple-mobile-web-app-title" content="Diamantes LHM"/>
+  <meta name="apple-mobile-web-app-title" content="Transportadora"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="mobile-web-app-capable" content="yes"/>
-  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232a7a2a'/%3E%3Cpath d='M50 20 L74 44 L50 84 L26 44 Z' fill='none' stroke='white' stroke-width='6' stroke-linejoin='round'/%3E%3Cpath d='M26 44 H74 M50 20 L38 44 L50 84 M50 20 L62 44 L50 84' stroke='white' stroke-width='4' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E"/>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
-
-<!-- ===================== INSTALAÇÃO (PWA) ===================== -->
-<script>
-(function(){
-  var icon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232a7a2a'/%3E%3Cpath d='M50 20 L74 44 L50 84 L26 44 Z' fill='none' stroke='white' stroke-width='6' stroke-linejoin='round'/%3E%3Cpath d='M26 44 H74 M50 20 L38 44 L50 84 M50 20 L62 44 L50 84' stroke='white' stroke-width='4' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E";
-  try{
-    var base = location.href.substring(0, location.href.lastIndexOf('/')+1);
-    var m = {
-      name: "Diamantes LHM",
-      short_name: "Diamantes LHM",
-      display: "standalone",
-      background_color: "#f0f4f0",
-      theme_color: "#2a7a2a",
-      start_url: location.href.split('#')[0].split('?')[0],
-      scope: base,
-      icons: [
-        { src: icon, sizes: "192x192", type: "image/svg+xml", purpose: "any" },
-        { src: icon, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
-      ]
-    };
-    var blob = new Blob([JSON.stringify(m)], { type: "application/manifest+json" });
-    var link = document.createElement("link");
-    link.rel = "manifest";
-    link.href = URL.createObjectURL(blob);
-    document.head.appendChild(link);
-  }catch(e){ console.error("manifest:", e); }
-})();
-</script>
 
 <!-- ============================ CAMADA FIREBASE ============================ -->
 <script>
@@ -74,14 +44,13 @@
     var ROOT = db.collection("transportadora").doc("dados");
     var REC  = ROOT.collection("receitas");   // 1 doc por frete
     var DESP = ROOT.collection("despesas");    // 1 doc por lançamento/recorrência/parcelamento
-    var ODO  = ROOT.collection("odometro");    // abastecimentos externos + leitura de odômetro (consumo)
     var CONF = db.collection("transportadora").doc("config");
 
     // ---- Dados do Posto Diesel (somente leitura) ----
     var POSTO_CONFIG = db.collection("posto-diesel").doc("config");
     var POSTO_FUEL   = db.collection("posto-diesel").doc("dados").collection("abastecimentos");
 
-    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[], odo:[] };
+    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[] };
     var listeners = [];
     function emit(){ for(var i=0;i<listeners.length;i++){ try{listeners[i](state);}catch(e){console.error(e);} } }
 
@@ -95,11 +64,6 @@
       state.desp = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
       emit();
     }, function(e){console.error("desp:",e);});
-
-    ODO.onSnapshot(function(qs){
-      state.odo = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
-      emit();
-    }, function(e){console.error("odo:",e);});
 
     CONF.onSnapshot(function(snap){
       if(snap.exists && snap.data() && snap.data().payload){
@@ -122,33 +86,6 @@
       emit();
     }, function(e){console.error("postoFuel:",e);});
 
-    // ---- SEGUNDO PROJETO: Nossas Contas (nossas-contas-6c240) ----
-    // Lê SOMENTE as despesas marcadas como "Diamantes LHM" no app de gastos pessoais.
-    // Esse projeto exige login anônimo (regras: request.auth != null).
-    state.diamGastos = [];
-    try {
-      var ncConfig = {
-        apiKey: "AIzaSyC2dPU4lZUelyCMCY0hyLDCBTwHW7PDGuw",
-        authDomain: "nossas-contas-6c240.firebaseapp.com",
-        projectId: "nossas-contas-6c240",
-        storageBucket: "nossas-contas-6c240.firebasestorage.app",
-        messagingSenderId: "553757944177",
-        appId: "1:553757944177:web:016e77aaf412609a02eed0"
-      };
-      var ncEx = firebase.apps.filter(function(a){return a.name==="nossas-contas";});
-      var ncApp = ncEx.length ? ncEx[0] : firebase.initializeApp(ncConfig, "nossas-contas");
-      var ncDb = ncApp.firestore();
-      ncApp.auth().signInAnonymously().then(function(){
-        ncDb.collection("gastos_familia").doc("dados").collection("gastos")
-          .where("category","==","Diamantes LHM")
-          .onSnapshot(function(qs){
-            state.diamGastos = qs.docs.map(function(d){ var o=d.data()||{}; o.__id=d.id; return o; })
-              .filter(function(x){ return x && !x.deleted; });
-            emit();
-          }, function(e){ console.error("diamGastos:",e); });
-      }).catch(function(e){ console.error("Nossas Contas auth:",e); });
-    } catch(ncErr){ console.error("Falha init Nossas Contas:", ncErr); }
-
     // API para o React
     window.TX = {
       ready: true,
@@ -157,8 +94,6 @@
       delReceita: function(id){ return REC.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
       addDespesa: function(item){ return DESP.doc(String(item.id)).set(item); },
       delDespesa: function(id){ return DESP.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
-      addOdometro: function(item){ return ODO.doc(String(item.id)).set(item); },
-      delOdometro: function(id){ return ODO.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
       saveConfig: function(cfg){ return CONF.set({ payload: JSON.stringify(cfg) }); }
     };
   } catch(err){
@@ -244,19 +179,6 @@ function fuelCostPerLiter(x, avg){
 }
 
 // ── COMPONENTES BÁSICOS ──────────────────────────────────────────────────────
-function MkSelector(props){
-  function prev(){ var p=props.mk.split("-"); var y=+p[0],m=+p[1]-1; if(m<1){m=12;y--;} props.setMk(y+"-"+pad(m)); }
-  function next(){ var p=props.mk.split("-"); var y=+p[0],m=+p[1]+1; if(m>12){m=1;y++;} props.setMk(y+"-"+pad(m)); }
-  var meses=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-  var p=props.mk.split("-"); var label=meses[+p[1]-1]+" "+p[0];
-  return (
-    <div style={{display:"flex",alignItems:"center",gap:8,background:CARD,border:"1.5px solid "+BDR,borderRadius:10,padding:"4px 6px",margin:"14px 0"}}>
-      <button onClick={prev} style={{background:"none",color:MUT,fontSize:20,padding:"4px 10px",lineHeight:1}}>‹</button>
-      <span style={{flex:1,textAlign:"center",fontWeight:700,fontSize:15}}>{label}</span>
-      <button onClick={next} style={{background:"none",color:MUT,fontSize:20,padding:"4px 10px",lineHeight:1}}>›</button>
-    </div>
-  );
-}
 function Fld(props){
   return (
     <div style={{display:"flex",flexDirection:"column"}}>
@@ -306,15 +228,10 @@ function Toast(props){
 
 // ── APP ──────────────────────────────────────────────────────────────────────
 function App(){
-  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[], diamGastos:[], odo:[] }); var data=s0[0], setData=s0[1];
+  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[] }); var data=s0[0], setData=s0[1];
   var t0 = useState("painel"); var tab=t0[0], setTab=t0[1];
   var m0 = useState(thisMonth()); var mk=m0[0], setMk=m0[1];
   var ts0 = useState(null); var toast=ts0[0], setToast=ts0[1];
-  var rl0 = useState((function(){ try{return localStorage.getItem("tx_role")||"";}catch(e){return "";} })()); var role=rl0[0], setRole=rl0[1];
-  var driver = role==="motorista";
-  var OWNER_PIN = "284284";   // PIN do dono (troque pedindo pra mim)
-  function pickRole(r){ try{localStorage.setItem("tx_role",r);}catch(e){} setRole(r); setTab(r==="motorista"?"receitas":"painel"); }
-  function trocarPerfil(){ try{localStorage.removeItem("tx_role");}catch(e){} setRole(""); }
 
   useEffect(function(){
     if(window.TX && window.TX.ready){ window.TX.onData(function(st){ setData(Object.assign({},st)); }); }
@@ -336,8 +253,10 @@ function App(){
   },[data.postoMachines]);
 
   // ---- diesel da FH 540 no mês selecionado ----
+  var ano = mk.slice(0,4);
+
   var diesel = useMemo(function(){
-    if(!fh540) return { litros:0, custo:0, itens:[] };
+    if(!fh540) return { litros:0, custo:0, itens:[], km:0, kml:0, custokm:0 };
     var itens = (data.fuel||[]).filter(function(x){
       return Number(x.machineId)===Number(fh540.id) && monthOf(x.date)===mk;
     }).sort(function(a,b){ return String(a.date)<String(b.date)?-1:1; });
@@ -348,10 +267,35 @@ function App(){
     var det = itens.map(function(x){
       var l=Number(x.liters)||0; var cpl=fuelCostPerLiter(x,avg); var v=l*cpl;
       litros+=l; custo+=v;
-      return { date:x.date, liters:l, cpl:cpl, valor:v };
+      return { date:x.date, liters:l, cpl:cpl, valor:v, meter:Number(x.meter)||0 };
     });
-    return { litros:litros, custo:custo, itens:det };
+    // km rodado no mês = maior hodômetro − menor hodômetro dos registros do mês
+    var meters = det.map(function(d){return d.meter;}).filter(function(m){return m>0;});
+    var km = meters.length>=2 ? Math.max.apply(null,meters)-Math.min.apply(null,meters) : 0;
+    var kml = (km>0 && litros>0) ? km/litros : 0;
+    var custokm = (km>0 && custo>0) ? custo/km : 0;
+    return { litros:litros, custo:custo, itens:det, km:km, kml:kml, custokm:custokm };
   },[data.fuel, fh540, mk, custoFallback]);
+
+  // ---- diesel FH 540 acumulado no ano ----
+  var dieselAno = useMemo(function(){
+    if(!fh540) return { litros:0, custo:0, km:0, kml:0, custokm:0 };
+    var itens = (data.fuel||[]).filter(function(x){
+      return Number(x.machineId)===Number(fh540.id) && String(x.date||"").slice(0,4)===ano;
+    });
+    var avg = custoFallback;
+    for(var i=itens.length-1;i>=0;i--){ if(Number(itens[i].costPerLiter)>0){ avg=Number(itens[i].costPerLiter); break; } }
+    var litros=0, custo=0, meters=[];
+    itens.forEach(function(x){
+      var l=Number(x.liters)||0; var cpl=fuelCostPerLiter(x,avg); var v=l*cpl;
+      litros+=l; custo+=v;
+      if(Number(x.meter)>0) meters.push(Number(x.meter));
+    });
+    var km = meters.length>=2 ? Math.max.apply(null,meters)-Math.min.apply(null,meters) : 0;
+    var kml = (km>0 && litros>0) ? km/litros : 0;
+    var custokm = (km>0 && custo>0) ? custo/km : 0;
+    return { litros:litros, custo:custo, km:km, kml:kml, custokm:custokm };
+  },[data.fuel, fh540, ano, custoFallback]);
 
   // ---- receitas do mês ----
   var recMes = useMemo(function(){
@@ -362,48 +306,6 @@ function App(){
   var totRec = recMes.reduce(function(a,r){ return a+(Number(r.valor)||0); },0);
   var totRecFaz = recFazenda.reduce(function(a,r){ return a+(Number(r.valor)||0); },0);
 
-  // ---- despesas Diamantes vindas do Nossas Contas (cartão pessoal), SOMENTE LEITURA ----
-  var diamDesp = useMemo(function(){
-    return (data.diamGastos||[]).map(function(g){
-      return {
-        id: "nc_"+(g.__id||g.importKey||(String(g.date)+"_"+g.amount)),
-        tipo: "unica",
-        categoria: (String(g.subcat||"").trim()) || "Diamantes (sem subcategoria)",
-        descricao: (g.desc||"Sem descrição") + " · " + (g.person||""),
-        date: g.date,
-        valor: Number(g.amount)||0,
-        fonte: "nossas-contas",
-        createdAt: g.createdAt ? new Date(g.createdAt).toISOString() : ""
-      };
-    });
-  },[data.diamGastos]);
-  // ARLA lançado na aba Abastecimento entra como despesa (categoria ARLA), só leitura aqui
-  var arlaDesp = useMemo(function(){
-    return (data.odo||[]).filter(function(x){ return x.tipo==="arla"; }).map(function(a){
-      return { id:"arla_"+a.id, tipo:"unica", categoria:"ARLA",
-        descricao:((a.local||"ARLA")+(a.motorista?" · "+a.motorista:"")), date:a.date,
-        valor:Number(a.valor)||0, fonte:"abastec", createdAt:a.createdAt||"" };
-    });
-  },[data.odo]);
-  // diesel da fazenda (fuelFH) como despesas — somente leitura, custo calculado igual ao Acerto
-  var dieselFazDesp = useMemo(function(){
-    if(!fuelFH || !fuelFH.length) return [];
-    return fuelFH.map(function(x){
-      var l=Number(x.liters)||0;
-      var cpl=fuelCostPerLiter(x, custoFallback);
-      var valor=l*cpl;
-      return { id:"diesel_"+( x.id||x.date+"_"+l ), tipo:"unica",
-        categoria:"Combustível (posto fazenda)",
-        descricao: (num(l)+" L · custo R$"+cpl.toFixed(2).replace(".",",")+"/L"),
-        date: x.date, valor: valor, fonte:"posto", createdAt: x.date||"" };
-    });
-  },[fuelFH, custoFallback]);
-  // lista combinada: próprias + Diamantes + ARLA + diesel fazenda
-  var despAll = useMemo(function(){ return (data.desp||[]).concat(diamDesp).concat(arlaDesp).concat(dieselFazDesp); },[data.desp, diamDesp, arlaDesp, dieselFazDesp]);
-  var totDiamMes = useMemo(function(){
-    return diamDesp.filter(function(d){ return monthOf(d.date)===mk; }).reduce(function(a,d){ return a+(Number(d.valor)||0); },0);
-  },[diamDesp, mk]);
-
   // ---- despesas que incidem no mês ----
   function despValorNoMes(d, m){
     if(d.tipo==="recorrente"){ if(m>=(d.inicio||"0000-00") && (!d.fim || m<=d.fim)) return Number(d.valor)||0; return 0; }
@@ -411,22 +313,14 @@ function App(){
     return monthOf(d.date)===m ? (Number(d.valor)||0) : 0; // unica
   }
   var despMes = useMemo(function(){
-    return despAll.map(function(d){ return { d:d, v:despValorNoMes(d,mk) }; })
-      .filter(function(o){ return o.v!==0; })
+    return (data.desp||[]).map(function(d){ return { d:d, v:despValorNoMes(d,mk) }; })
+      .filter(function(o){ return o.v>0; })
       .sort(function(a,b){ return b.v-a.v; });
-  },[despAll, mk]);
+  },[data.desp, mk]);
   var totDesp = despMes.reduce(function(a,o){ return a+o.v; },0);
 
   var resultado = totRec - totDesp - diesel.custo;   // resultado geral da transportadora
   var acertoLiquido = totRecFaz - diesel.custo;      // acerto com a fazenda
-
-  var fuelFH = useMemo(function(){
-    if(!fh540) return [];
-    return (data.fuel||[]).filter(function(x){ return Number(x.machineId)===Number(fh540.id); });
-  },[data.fuel, fh540]);
-  useEffect(function(){ if(driver && (tab==="painel"||tab==="acerto"||tab==="config")) setTab("receitas"); },[driver,tab]);
-
-  if(!role){ return <RolePicker onPick={pickRole} ownerPin={OWNER_PIN}/>; }
 
   var estilos = { maxWidth:960, margin:"0 auto", padding:"0 14px 90px" };
 
@@ -438,12 +332,8 @@ function App(){
       <div className="noprint" style={{background:"linear-gradient(180deg,"+GN2+","+GN+")",padding:"18px 14px 16px",color:"#fff",boxShadow:"0 2px 12px #0002"}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>DIAMANTES LHM</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>TRANSPORTADORA · ACF</div>
             <div style={{fontSize:12,opacity:.85,marginTop:2}}>Controle de resultados · Caminhão FH 540 (016)</div>
-            <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
-              <span style={{background:"#ffffff22",borderRadius:20,padding:"2px 11px",fontSize:12,fontWeight:700}}>{driver?"Elinton":"Luana"}</span>
-              <button onClick={trocarPerfil} style={{background:"none",color:"#fff",textDecoration:"underline",fontSize:12,padding:0,fontWeight:600}}>trocar perfil</button>
-            </div>
           </div>
           <div style={{background:"#ffffff22",borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.85}}>Mês</span>
@@ -459,10 +349,7 @@ function App(){
       {/* NAV */}
       <div className="noprint" style={{background:CARD,borderBottom:"1.5px solid "+BDR}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",gap:4,padding:"0 8px",overflowX:"auto"}}>
-          {(driver
-            ? [["receitas","Frete"],["despesas","Despesa"],["abastec","Abastecimento"]]
-            : [["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["acerto","Acerto Fazenda"],["abastec","Abastecimento"],["config","Config"]]
-          ).map(function(t){
+          {[["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["acerto","Acerto Fazenda"],["config","Config"]].map(function(t){
             var on = tab===t[0];
             return <button key={t[0]} onClick={function(){setTab(t[0]);}} style={{background:"none",color:on?GN:MUT,borderBottom:on?"3px solid "+GN:"3px solid transparent",borderRadius:0,padding:"14px 14px",fontSize:15,whiteSpace:"nowrap"}}>{t[1]}</button>;
           })}
@@ -470,12 +357,11 @@ function App(){
       </div>
 
       <div style={estilos} className="fi">
-        {tab==="painel" && !driver && <Painel mk={mk} setMk={setMk} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} totDiam={totDiamMes} diesel={diesel} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
-        {tab==="receitas" && <Receitas data={data} mk={mk} setMk={setMk} recMes={recMes} totRec={totRec} driver={driver} toast={showToast}/>}
-        {tab==="despesas" && <Despesas data={data} despAll={despAll} mk={mk} setMk={setMk} despMes={despMes} totDesp={totDesp} totDiam={totDiamMes} diamTotal={diamDesp.length} driver={driver} toast={showToast}/>}
-        {tab==="abastec" && <Abastecimento data={data} mk={mk} fuelFH={fuelFH} driver={driver} toast={showToast}/>}
-        {tab==="acerto" && !driver && <Acerto mk={mk} setMk={setMk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
-        {tab==="config" && !driver && <Config conf={conf} toast={showToast} fh540={fh540}/>}
+        {tab==="painel" && <Painel mk={mk} ano={ano} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} diesel={diesel} dieselAno={dieselAno} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
+        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast}/>}
+        {tab==="despesas" && <Despesas data={data} mk={mk} despMes={despMes} totDesp={totDesp} toast={showToast}/>}
+        {tab==="acerto" && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
+        {tab==="config" && <Config conf={conf} toast={showToast} fh540={fh540}/>}
       </div>
 
       <Toast msg={toast&&toast.msg} err={toast&&toast.err}/>
@@ -485,20 +371,36 @@ function App(){
 
 // ── PAINEL ───────────────────────────────────────────────────────────────────
 function Painel(props){
-  var d=props.diesel;
+  var d=props.diesel, da=props.dieselAno||{};
+  function fmtKml(v){ return v>0 ? v.toFixed(2)+" km/L" : "—"; }
+  function fmtCkm(v){ return v>0 ? brl(v)+"/km" : "—"; }
+  function fmtKm(v){ return v>0 ? v.toLocaleString("pt-BR",{maximumFractionDigits:0})+" km" : "—"; }
   return (
     <div>
-      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
-      <div className="sec" style={{marginTop:4}}>Resumo de {mesLabel(props.mk)}</div>
+      <div className="sec" style={{marginTop:18}}>Resumo de {mesLabel(props.mk)}</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
         <Stat label="Receitas (total)" value={brl(props.totRec)} sub={props.recCount+" frete(s)"} color={GN}/>
         <Stat label="Despesas (total)" value={brl(props.totDesp)} sub={props.despCount+" lançamento(s)"} color={RED}/>
-        {props.totDiam!==0 && <Stat label="Diamantes no cartão" value={brl(props.totDiam)} sub="via Nossas Contas" color={PUR}/>}
-        <Stat label="Diesel FH 540" value={brl(d.custo)} sub={num(d.litros)+" L no posto"} color={AMB}/>
+        <Stat label="Diesel FH 540" value={brl(d.custo)} sub={num(d.litros)+" L · "+fmtKm(d.km)} color={AMB}/>
         <Stat label="Resultado do mês" value={brl(props.resultado)} sub="receitas − despesas − diesel" color={props.resultado>=0?GN:RED}/>
       </div>
 
-      <div className="card" style={{marginTop:16,background:"#f7faf7"}}>
+      {/* Eficiência de combustível — mês e ano lado a lado */}
+      <div className="sec" style={{marginTop:20}}>Eficiência — FH 540</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Stat label={"Consumo médio — "+mesLabel(props.mk)} value={fmtKml(d.kml)} sub={fmtKm(d.km)+" rodados"} color={BLU}/>
+          <Stat label={"Custo/km — "+mesLabel(props.mk)} value={fmtCkm(d.custokm)} sub={brl(d.custo)+" diesel"} color={PUR}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Stat label={"Consumo médio — "+props.ano} value={fmtKml(da.kml)} sub={fmtKm(da.km)+" rodados"} color={BLU}/>
+          <Stat label={"Custo/km — "+props.ano} value={fmtCkm(da.custokm)} sub={brl(da.custo||0)+" diesel"} color={PUR}/>
+        </div>
+      </div>
+      {(!d.km || d.km===0) && d.litros>0 &&
+        <div style={{fontSize:12,color:MUT,marginBottom:10}}>* O hodômetro não está sendo registrado em alguns abastecimentos no Posto Diesel — confira o campo "Odômetro (Km)" ao abastecer a 016.</div>}
+
+      <div className="card" style={{marginTop:6,background:"#f7faf7"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
           <div>
             <div className="slbl">Acerto com a Fazenda (prévia)</div>
@@ -543,7 +445,7 @@ function Receitas(props){
   }
   function editar(r){ setForm(Object.assign({},r,{ precoTon:String(r.precoTon), ton:String(r.ton) })); }
 
-  // ---- Importar Excel/CSV (tolerante a formatos) ----
+  // ---- Importar Excel/CSV ----
   function importar(ev){
     var file = ev.target.files[0]; if(!file) return;
     var reader = new FileReader();
@@ -551,93 +453,29 @@ function Receitas(props){
       try {
         var wb = XLSX.read(e.target.result, {type:"array", cellDates:true});
         var ws = wb.Sheets[wb.SheetNames[0]];
-        var aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:"", raw:false});
-        // acha a linha de cabeçalho (pode haver título/linhas acima)
-        var KW = ["tomador","cliente","empresa","contratante","data","valor","frete","receita","preco","preço","ton","tonelada","quantidade","peso","produto","origem","destino"];
-        var hRow = -1;
-        for(var i=0;i<Math.min(aoa.length,20);i++){
-          var hits=0;
-          for(var c=0;c<aoa[i].length;c++){ var cell=norm(aoa[i][c]); if(!cell) continue;
-            for(var k=0;k<KW.length;k++){ if(cell.indexOf(norm(KW[k]))>=0){ hits++; break; } } }
-          if(hits>=2){ hRow=i; break; }
-        }
-        if(hRow<0){ alert("Não encontrei uma linha de cabeçalho na planilha.\n\nDica: clique em \"Baixar modelo\", coloque seus fretes nele e importe — as colunas já ficam certas."); ev.target.value=""; return; }
-        var headers = aoa[hRow].map(function(x){ return String(x); }).filter(function(x){return x.trim();});
-        var rows = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false, range:hRow, dateNF:'dd/mm/yy'});
-        // lê como texto puro — evita que o XLSX converta datas no padrão americano (MM/DD)
-        var rows = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false, range:hRow, dateNF:'dd/mm/yy'});
-
-        function get(row, aliases){
-          for(var key in row){ var nk=norm(key); for(var a=0;a<aliases.length;a++){ if(nk.indexOf(aliases[a])>=0) return row[key]; } }
-          return "";
-        }
-        // PREÇO por tonelada
-        function getPreco(row){
-          for(var key in row){ var nk=norm(key);
-            if(nk.indexOf("/ton")>=0||nk.indexOf("/t")>=0||nk.indexOf("por tonelada")>=0||nk.indexOf("r$/")>=0||nk.indexOf("rs/")>=0||nk==="preco"||nk==="preço"||nk==="preco/valor") return row[key]; }
-          return "";
-        }
-        // VOLUME — ignora colunas de preço
-        function getTon(row){
-          for(var key in row){ var nk=norm(key);
-            if(nk.indexOf("/")>=0 || nk.indexOf("r$")>=0) continue;
-            if(nk.indexOf("quantidade")>=0||nk.indexOf("tonelada")>=0||nk.indexOf("peso")>=0||nk.indexOf("carga")>=0||nk.indexOf("volume")>=0||nk.indexOf("(ton")>=0||nk.indexOf(" ton")>=0||nk==="ton"||nk==="tons"||nk==="qtd"||nk.indexOf("quant")>=0) return row[key]; }
-          return "";
-        }
-        // VALOR total do frete
-        function getTotal(row){
-          for(var key in row){ var nk=norm(key);
-            if((nk.indexOf("valor")>=0||nk.indexOf("frete")>=0||nk.indexOf("receita")>=0||nk==="total"||nk.indexOf("valor total")>=0) && nk.indexOf("/t")<0 && nk.indexOf("ton")<0 && nk.indexOf("r$/")<0) return row[key]; }
-          return "";
-        }
-        function toNum(v){ if(typeof v==="number") return v; var s=String(v).replace(/[r$\s]/gi,""); if(!s) return 0;
-          if(s.indexOf(",")>=0){ s=s.replace(/\./g,"").replace(",","."); } var n=parseFloat(s); return isNaN(n)?0:n; }
-        // converte dd/mm/aa, dd/mm/aaaa e aaaa-mm-dd para ISO
-        function toISO(v){
-          var s=String(v||"").trim(); if(!s) return "";
-          // dd/mm/aa ou dd/mm/aaaa — formato brasileiro
-          if(s.indexOf("/")>=0){
-            var p=s.split("/");
-            if(p.length>=2){
-              var d=p[0], mo=p[1], y=p[2]||"";
-              if(!y){ y=String(new Date().getFullYear()); }
-              else if(y.length===2){ y="20"+y; }
-              if(y.length===4) return y+"-"+pad(Number(mo))+"-"+pad(Number(d));
-            }
-          }
-          // aaaa-mm-dd
-          if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
-          return "";
-        }
-
-        var n=0, meses={};
+        var rows = XLSX.utils.sheet_to_json(ws, {defval:""});
+        var mapKey = function(obj,alts){ for(var k in obj){ if(alts.indexOf(norm(k))>=0) return obj[k]; } return ""; };
+        var n=0;
         rows.forEach(function(row){
-          var tom = String(get(row,["tomador","cliente","empresa","contratante","razao"])).trim();
-          var dISO = toISO(get(row,["data","date","dia","emissao"]));
-          var preco = toNum(getPreco(row));
-          var ton = toNum(getTon(row));
-          var total = toNum(getTotal(row));
-          var valor = total>0 ? total : preco*ton;
-          if(valor>0 && ton>0 && !(preco>0)) preco = valor/ton;   // deriva R$/ton se só veio o total
-          if(!tom && !valor && !ton && !dISO) return;             // pula linha realmente vazia
+          var tom = mapKey(row,["tomador","tomador do servico","cliente"]);
+          if(!tom && !mapKey(row,["origem"])) return; // linha vazia
+          var dcell = mapKey(row,["data","date"]);
+          var dISO;
+          if(dcell instanceof Date){ dISO = dcell.getFullYear()+"-"+pad(dcell.getMonth()+1)+"-"+pad(dcell.getDate()); }
+          else { var ds=String(dcell); if(ds.indexOf("/")>0){ var p=ds.split("/"); dISO=p[2]+"-"+pad(Number(p[1]))+"-"+pad(Number(p[0])); } else { dISO=String(dcell).slice(0,10); } }
+          var preco=Number(String(mapKey(row,["r$/ton","preco","preco/ton","valor/ton","rs/ton"])).replace(",","."))||0;
+          var ton=Number(String(mapKey(row,["quantidade","quantidade (ton)","ton","toneladas"])).replace(",","."))||0;
           var item = {
-            id: "rec_"+Date.now()+"_"+n+"_"+Math.floor(Math.random()*1000000),
-            date: dISO || todayISO(),
-            tomador: tom,
-            produto: String(get(row,["produto","material"])).trim(),
-            origem: String(get(row,["origem","saida"])).trim(),
-            destino: String(get(row,["destino","entrega"])).trim(),
-            precoTon: preco, ton: ton, valor: valor,
-            createdAt: new Date().toISOString()
+            id: Date.now()+Math.floor(Math.random()*10000)+n,
+            date: dISO, tomador:String(tom).trim(),
+            produto:String(mapKey(row,["produto"])).trim(),
+            origem:String(mapKey(row,["origem"])).trim(),
+            destino:String(mapKey(row,["destino"])).trim(),
+            precoTon:preco, ton:ton, valor:preco*ton, createdAt:new Date().toISOString()
           };
           window.TX.addReceita(item); n++;
-          if(dISO) meses[dISO.slice(0,7)] = true;
         });
-        if(n===0){ alert("Li a planilha, mas não importei nenhum frete.\n\nColunas encontradas:\n• "+headers.join("\n• ")+"\n\nO app precisa de: Tomador (ou Cliente), Data e Valor (ou R$/ton + Quantidade).\nDica: use o botão \"Baixar modelo\"."); }
-        else {
-          var listaMeses = Object.keys(meses);
-          props.toast(n+" frete(s) importado(s)"+(listaMeses.length>1?" em "+listaMeses.length+" meses — use o seletor de mês":""));
-        }
+        props.toast(n+" frete(s) importado(s)");
       } catch(err){ console.error(err); props.toast("Erro ao ler a planilha",true); }
       ev.target.value="";
     };
@@ -645,8 +483,8 @@ function Receitas(props){
   }
 
   function baixarModelo(){
-    var ws = XLSX.utils.aoa_to_sheet([[" Tomador","Data (dd/mm/aa)","Produto","Origem","Destino","R$/ton","Quantidade (ton)"],
-      ["Fazenda","01/09/26","Soja","Fazenda Rodeio","Armazém Uberlândia","95","33.5"]]);
+    var ws = XLSX.utils.aoa_to_sheet([["Tomador","Data","Produto","Origem","Destino","R$/ton","Quantidade (ton)"],
+      ["Fazenda","01/09/2026","Soja","Fazenda Rodeio","Armazém Uberlândia","95","33.5"]]);
     var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Receitas");
     XLSX.writeFile(wb,"modelo-receitas.xlsx");
   }
@@ -659,21 +497,22 @@ function Receitas(props){
 
   return (
     <div>
-      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"4px 0 14px"}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px"}}>
         <Btn onClick={nova}>+ Novo frete</Btn>
-        <Btn color={INP} onClick={function(){ var el=document.getElementById("fileFretes"); if(el) el.click(); }}>Importar Excel</Btn>
-        <input id="fileFretes" type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
+        <label style={{display:"inline-block"}}>
+          <Btn color={INP} style={{pointerEvents:"none"}}>Importar Excel</Btn>
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
+        </label>
         <Btn color={INP} onClick={baixarModelo}>Modelo</Btn>
         <Btn color={INP} onClick={exportar}>Exportar mês</Btn>
       </div>
 
-      <div className="sec">Fretes de {mesLabel(props.mk)}{!props.driver?" — total "+brl(props.totRec):""}</div>
+      <div className="sec">Fretes de {mesLabel(props.mk)} — total {brl(props.totRec)}</div>
       <div className="card" style={{padding:0,overflowX:"auto"}}>
         <table>
-          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th>{!props.driver && <th></th>}</tr></thead>
+          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th><th></th></tr></thead>
           <tbody>
-            {props.recMes.length===0 && <tr><td colSpan={props.driver?7:8} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum frete neste mês. Adicione ou importe uma planilha.</td></tr>}
+            {props.recMes.length===0 && <tr><td colSpan={8} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum frete neste mês. Adicione ou importe uma planilha.</td></tr>}
             {props.recMes.map(function(r){
               return <tr key={r.id}>
                 <td>{ddmmyyyy(r.date)}</td>
@@ -683,10 +522,10 @@ function Receitas(props){
                 <td>{num(r.ton)}</td>
                 <td>{brl(r.precoTon)}</td>
                 <td style={{fontWeight:700}}>{brl(r.valor)}</td>
-                {!props.driver && <td style={{whiteSpace:"nowrap"}}>
+                <td style={{whiteSpace:"nowrap"}}>
                   <button onClick={function(){editar(r);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
                   <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
-                </td>}
+                </td>
               </tr>;
             })}
           </tbody>
@@ -758,12 +597,11 @@ function Despesas(props){
     return <span className="bdg bg">única</span>;
   }
 
-  var todas = (props.despAll||props.data.desp||[]).slice().sort(function(a,b){ return String(b.createdAt||"")<String(a.createdAt||"")?-1:1; });
+  var todas = (props.data.desp||[]).slice().sort(function(a,b){ return String(b.createdAt||"")<String(a.createdAt||"")?-1:1; });
 
   return (
     <div>
-      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"4px 0 14px",alignItems:"center"}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px",alignItems:"center"}}>
         <Btn onClick={nova}>+ Nova despesa</Btn>
         <div className="mtog" style={{width:230}}>
           <button className={view==="mes"?"on":""} onClick={function(){setView("mes");}}>Deste mês</button>
@@ -772,25 +610,17 @@ function Despesas(props){
       </div>
 
       {view==="mes" && <div>
-        <div className="sec">Despesas de {mesLabel(props.mk)}{!props.driver?" — total "+brl(props.totDesp):""}</div>
-        {!props.driver && props.totDiam!==0 && <div style={{fontSize:13,color:MUT,marginBottom:10}}>Inclui <b style={{color:PUR}}>{brl(props.totDiam)}</b> em despesas Diamantes lançadas no cartão pessoal (via Nossas Contas). São geridas lá — aqui aparecem só para leitura, já com a subcategoria.</div>}
+        <div className="sec">Despesas de {mesLabel(props.mk)} — total {brl(props.totDesp)}</div>
         <div className="card" style={{padding:0,overflowX:"auto"}}>
           <table>
             <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Valor no mês</th></tr></thead>
             <tbody>
-              {props.despMes.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:20}}>
-                <div>Nenhuma despesa neste mês.</div>
-                {!props.driver && <div style={{marginTop:8,fontSize:13,lineHeight:1.6}}>
-                  {props.diamTotal>0
-                    ? <span>✅ <b>{props.diamTotal}</b> despesa(s) Diamantes carregada(s) do Nossas Contas, mas nenhuma com data em <b>{mesLabel(props.mk)}</b>. Importe a fatura deste mês no Nossas Contas para que elas apareçam aqui.</span>
-                    : <span>⏳ Carregando despesas Diamantes do Nossas Contas… Se demorar, verifique a conexão com o app.</span>}
-                </div>}
-              </td></tr>}
+              {props.despMes.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa incide neste mês.</td></tr>}
               {props.despMes.map(function(o){
                 var d=o.d;
                 return <tr key={d.id}>
                   <td style={{fontWeight:600}}>{d.categoria||"—"}</td>
-                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}{d.fonte==="nossas-contas"?<span className="bdg" style={{background:"#ede9fe",color:"#6d28d9",marginLeft:6}}>cartão pessoal</span>:(d.fonte==="abastec"?<span className="bdg bb" style={{marginLeft:6}}>abastecimento</span>:(d.fonte==="posto"?<span className="bdg bg" style={{marginLeft:6}}>posto fazenda</span>:null))}</td>
+                  <td style={{fontSize:13,color:MUT}}>{d.descricao}{d.tipo==="parcelada"?" (parcela "+(monthDiff(d.parcInicio,props.mk)+1)+"/"+d.parcN+")":""}</td>
                   <td>{tipoBadge(d.tipo)}</td>
                   <td style={{fontWeight:700,color:RED}}>{brl(o.v)}</td>
                 </tr>;
@@ -805,9 +635,9 @@ function Despesas(props){
         <div style={{fontSize:13,color:MUT,marginBottom:12}}>Recorrentes se repetem todo mês automaticamente; parceladas cobram só o valor da parcela nos meses do parcelamento. Adicione uma vez — não precisa repetir.</div>
         <div className="card" style={{padding:0,overflowX:"auto"}}>
           <table>
-            <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Período</th><th>Valor</th>{!props.driver && <th></th>}</tr></thead>
+            <thead><tr><th>Categoria</th><th>Descrição</th><th>Tipo</th><th>Período</th><th>Valor</th><th></th></tr></thead>
             <tbody>
-              {todas.length===0 && <tr><td colSpan={props.driver?5:6} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa cadastrada.</td></tr>}
+              {todas.length===0 && <tr><td colSpan={6} style={{color:MUT,textAlign:"center",padding:24}}>Nenhuma despesa cadastrada.</td></tr>}
               {todas.map(function(d){
                 var periodo, valor;
                 if(d.tipo==="unica"){ periodo=ddmmyyyy(d.date); valor=brl(d.valor); }
@@ -819,16 +649,10 @@ function Despesas(props){
                   <td>{tipoBadge(d.tipo)}</td>
                   <td style={{fontSize:13}}>{periodo}</td>
                   <td style={{fontWeight:700,color:RED}}>{valor}</td>
-                  {!props.driver && <td style={{whiteSpace:"nowrap"}}>
-                    {d.fonte==="nossas-contas"
-                      ? <span className="bdg" style={{background:"#ede9fe",color:"#6d28d9"}}>Nossas Contas</span>
-                      : (d.fonte==="abastec" || d.fonte==="posto")
-                        ? <span className="bdg bb">{d.fonte==="posto"?"Posto Fazenda":"Abastecimento"}</span>
-                        : <React.Fragment>
-                            <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
-                            <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
-                          </React.Fragment>}
-                  </td>}
+                  <td style={{whiteSpace:"nowrap"}}>
+                    <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
+                    <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
+                  </td>
                 </tr>;
               })}
             </tbody>
@@ -902,8 +726,7 @@ function Acerto(props){
 
   return (
     <div>
-      {props.setMk && <MkSelector mk={props.mk} setMk={props.setMk}/>}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"4px 0 14px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"18px 0 14px"}}>
         <div className="sec" style={{margin:0}}>Acerto com a Fazenda — {mesLabel(props.mk)}</div>
         <Btn onClick={imprimir}>Gerar PDF</Btn>
       </div>
@@ -928,11 +751,11 @@ function Acerto(props){
         <div style={{fontWeight:700,marginBottom:10,color:AMB}}>Abastecimentos da FH 540 no posto da fazenda</div>
         <div style={{overflowX:"auto"}}>
           <table>
-            <thead><tr><th>Data</th><th>Litros</th><th>R$/L</th><th>Valor</th></tr></thead>
+            <thead><tr><th>Data</th><th>Hodômetro</th><th>Litros</th><th>R$/L</th><th>Valor</th></tr></thead>
             <tbody>
-              {d.itens.length===0 && <tr><td colSpan={4} style={{color:MUT,textAlign:"center",padding:20}}>Nenhum abastecimento neste mês.</td></tr>}
+              {d.itens.length===0 && <tr><td colSpan={5} style={{color:MUT,textAlign:"center",padding:20}}>Nenhum abastecimento neste mês.</td></tr>}
               {d.itens.map(function(x,i){
-                return <tr key={i}><td>{ddmmyyyy(x.date)}</td><td>{num(x.liters)} L</td><td>{brl(x.cpl)}</td><td style={{fontWeight:700}}>{brl(x.valor)}</td></tr>;
+                return <tr key={i}><td>{ddmmyyyy(x.date)}</td><td style={{color:MUT,fontSize:13}}>{x.meter>0?x.meter.toLocaleString("pt-BR",{maximumFractionDigits:1})+" km":"—"}</td><td>{num(x.liters)} L</td><td>{brl(x.cpl)}</td><td style={{fontWeight:700}}>{brl(x.valor)}</td></tr>;
               })}
             </tbody>
           </table>
@@ -953,7 +776,7 @@ function Acerto(props){
       {/* ÁREA DE IMPRESSÃO (PDF) */}
       <div id="printArea" style={{padding:"10px 4px",color:"#111",fontFamily:"'Barlow',sans-serif"}}>
         <div style={{borderBottom:"3px solid "+GN,paddingBottom:10,marginBottom:16}}>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>DIAMANTES LHM</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>TRANSPORTADORA · ACF</div>
           <div style={{fontSize:14,color:"#333"}}>Acerto de contas — {nomeFaz}</div>
           <div style={{fontSize:14,color:"#333"}}>Referência: <b>{mesLabel(props.mk)}</b> · Caminhão FH 540 (016)</div>
         </div>
@@ -987,6 +810,7 @@ function Acerto(props){
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:14}}>
           <thead><tr>
             <th style={{textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Data</th>
+            <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Hodômetro</th>
             <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Litros</th>
             <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>R$/L</th>
             <th style={{textAlign:"right",borderBottom:"1.5px solid #999",padding:"6px 8px"}}>Valor</th>
@@ -995,12 +819,13 @@ function Acerto(props){
             {d.itens.map(function(x,i){
               return <tr key={i}>
                 <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd"}}>{ddmmyyyy(x.date)}</td>
+                <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right",color:"#555"}}>{x.meter>0?x.meter.toLocaleString("pt-BR",{maximumFractionDigits:1})+" km":"—"}</td>
                 <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{num(x.liters)}</td>
                 <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{brl(x.cpl)}</td>
                 <td style={{padding:"5px 8px",borderBottom:"1px solid #ddd",textAlign:"right"}}>{brl(x.valor)}</td>
               </tr>;
             })}
-            <tr><td colSpan={3} style={{padding:"7px 8px",textAlign:"right",fontWeight:700}}>Subtotal diesel</td><td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:AMB}}>{brl(d.custo)}</td></tr>
+            <tr><td colSpan={4} style={{padding:"7px 8px",textAlign:"right",fontWeight:700}}>Subtotal diesel</td><td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:AMB}}>{brl(d.custo)}</td></tr>
           </tbody>
         </table>
 
@@ -1048,157 +873,6 @@ function Config(props){
           ? <div style={{marginTop:6,color:GN}}>✓ Conectado à máquina <b>016 — {props.fh540.desc}</b>. Os abastecimentos são puxados automaticamente.</div>
           : <div style={{marginTop:6,color:AMB}}>Máquina 016 não encontrada no Posto Diesel. Confira o cadastro lá.</div>}
       </div>
-    </div>
-  );
-}
-
-// ── SELETOR DE PERFIL (dono x motorista) ─────────────────────────────────────
-function RolePicker(props){
-  var p0=useState(""); var pin=p0[0], setPin=p0[1];
-  var a0=useState(false); var asking=a0[0], setAsking=a0[1];
-  function entrarDono(){ if(pin===props.ownerPin){ props.onPick("dono"); } else { alert("PIN incorreto."); setPin(""); } }
-  return (
-    <div style={{minHeight:"100vh",background:"linear-gradient(180deg,"+GN2+","+GN+")",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <style>{CSS}</style>
-      <div className="card" style={{maxWidth:380,width:"100%",textAlign:"center"}}>
-        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:28,color:GN,letterSpacing:1}}>DIAMANTES LHM</div>
-        <div style={{fontSize:13,color:MUT,margin:"6px 0 22px"}}>Quem está usando o app?</div>
-        {!asking
-          ? <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <Btn full onClick={function(){setAsking(true);}}>Luana</Btn>
-              <Btn full color={INP} onClick={function(){props.onPick("motorista");}}>Elinton</Btn>
-            </div>
-          : <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <div style={{fontSize:13,color:MUT}}>Luana, digite o PIN</div>
-              <input type="password" inputMode="numeric" value={pin} onChange={function(e){setPin(e.target.value);}} placeholder="••••••" style={{textAlign:"center",fontSize:20,letterSpacing:4}} onKeyDown={function(e){if(e.key==="Enter")entrarDono();}}/>
-              <Btn full onClick={entrarDono}>Entrar</Btn>
-              <button onClick={function(){setAsking(false);setPin("");}} style={{background:"none",color:MUT,fontSize:13}}>voltar</button>
-            </div>}
-        <div style={{fontSize:12,color:DIM,marginTop:20,lineHeight:1.5}}>O Elinton lança fretes, despesas e abastecimentos, mas <b>não vê</b> o resultado financeiro.</div>
-      </div>
-    </div>
-  );
-}
-
-// ── ABASTECIMENTO EXTERNO + ODÔMETRO (consumo médio) ─────────────────────────
-function Abastecimento(props){
-  var f0 = useState({tipo:"diesel", date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""}); var form=f0[0], setForm=f0[1];
-  function set(k,v){ setForm(function(p){var o=Object.assign({},p);o[k]=v;return o;}); }
-  function num2(v){ return Number(String(v).replace(",","."))||0; }
-  var isArla = form.tipo==="arla";
-  function salvar(){
-    var lit=num2(form.litros), val=num2(form.valor);
-    if(isArla){
-      if(!form.date || val<=0){ props.toast("Preencha data e valor do ARLA",true); return; }
-      window.TX.addOdometro({
-        id: Date.now()+Math.floor(Math.random()*100000),
-        tipo:"arla", date: form.date, odometro:0, litros:lit, valor:val,
-        local:(form.local||"").trim(), motorista:(form.motorista||"").trim(),
-        fonte:"externo", createdAt:new Date().toISOString()
-      });
-      props.toast("ARLA registrado ✓ (entra nas despesas)");
-    } else {
-      var odo=num2(form.odometro);
-      if(!form.date || odo<=0 || lit<=0){ props.toast("Preencha data, odômetro e litros",true); return; }
-      window.TX.addOdometro({
-        id: Date.now()+Math.floor(Math.random()*100000),
-        tipo:"diesel", date: form.date, odometro: odo, litros: lit, valor: val,
-        local:(form.local||"").trim(), motorista:(form.motorista||"").trim(),
-        fonte:"externo", createdAt:new Date().toISOString()
-      });
-      props.toast("Abastecimento registrado ✓");
-    }
-    setForm({tipo:"diesel", date:todayISO(), odometro:"", litros:"", valor:"", local:"", motorista:""});
-  }
-  // combina externos (odo) + posto da fazenda (fuelFH), ordenados por data desc
-  var postoItems = (props.fuelFH||[]).map(function(fl){
-    // o posto grava o odômetro no campo currentReading (km para caminhão)
-    var odo = Number(fl.reading)||Number(fl.currentReading)||Number(fl.odometer)||Number(fl.km)||Number(fl.currentKm)||0;
-    return { id:"posto_"+(fl.id||fl.date), tipo:"diesel", date:fl.date,
-      odometro: odo, litros:Number(fl.liters)||0,
-      valor:0, local:"Posto da Fazenda",
-      motorista: String(fl.operatorName||fl.operator||fl.motorista||"").trim(),
-      fonte:"posto" };
-  });
-  // para consumo: todos os diesel com odômetro conhecido (externos + posto se tiver currentReading)
-  var dieselEntries = (props.data.odo||[]).filter(function(x){return x.tipo!=="arla" && Number(x.odometro)>0;})
-    .concat(postoItems.filter(function(x){ return Number(x.odometro)>0; }));
-  var porOdo = dieselEntries.slice().sort(function(a,b){ return Number(a.odometro)-Number(b.odometro); });
-  var consumo=null;
-  if(porOdo.length>=2){
-    var first=porOdo[0], last=porOdo[porOdo.length-1];
-    var km=Number(last.odometro)-Number(first.odometro);
-    // litros = todos os abastecimentos entre a primeira e a última leitura de odômetro
-    var litros=0;
-    dieselEntries.forEach(function(e){ if(String(e.date)>String(first.date) && String(e.date)<=String(last.date)) litros += Number(e.litros)||0; });
-    // adiciona os itens do posto que não têm odômetro (só litros), no mesmo período
-    postoItems.filter(function(x){ return !(Number(x.odometro)>0); }).forEach(function(fl){ if(String(fl.date)>String(first.date) && String(fl.date)<=String(last.date)) litros += Number(fl.litros)||0; });
-    consumo = { km:km, litros:litros, kmL: litros>0? km/litros : 0 };
-  }
-  var lista = (props.data.odo||[]).concat(postoItems)
-    .sort(function(a,b){ return String(b.date)<String(a.date)?-1:(String(b.date)>String(a.date)?1:(Number(b.odometro)-Number(a.odometro))); });
-  function excluir(r){ if(confirm("Excluir este registro?")) window.TX.delOdometro(r.id); }
-
-  return (
-    <div>
-      <div className="sec" style={{marginTop:18}}>Consumo do caminhão</div>
-      {consumo
-        ? <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16}}>
-            <Stat label="Consumo médio" value={num(consumo.kmL)+" km/L"} sub="posto + externo" color={GN}/>
-            <Stat label="Km rodados" value={num(consumo.km)+" km"} sub="entre leituras" color={BLU}/>
-            <Stat label="Litros no período" value={num(consumo.litros)+" L"} sub="abastecidos" color={AMB}/>
-          </div>
-        : <div className="card" style={{marginBottom:16,color:MUT,fontSize:14}}>Registre pelo menos <b>2 abastecimentos com odômetro</b> para o app calcular o consumo médio.</div>}
-
-      <div className="card" style={{marginBottom:18}}>
-        <div style={{fontWeight:700,marginBottom:12,color:GN2}}>Registrar abastecimento</div>
-        <div style={{display:"flex",gap:8,marginBottom:14}}>
-          <button onClick={function(){set("tipo","diesel");}} style={{flex:1,padding:"10px",background:!isArla?GN:INP,color:!isArla?"#fff":MUT}}>Diesel</button>
-          <button onClick={function(){set("tipo","arla");}} style={{flex:1,padding:"10px",background:isArla?BLU:INP,color:isArla?"#fff":MUT}}>ARLA</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
-          <Fld label="Data" type="date" value={form.date} onChange={function(v){set("date",v);}}/>
-          {!isArla && <Fld label="Odômetro (km)" type="text" inputMode="numeric" value={form.odometro} onChange={function(v){set("odometro",v);}} placeholder="Ex: 245680"/>}
-          <Fld label={isArla?"Litros — opcional":"Litros"} type="text" inputMode="decimal" value={form.litros} onChange={function(v){set("litros",v);}} placeholder="Ex: 180"/>
-          <Fld label={isArla?"Valor (R$)":"Valor (R$) — opcional"} type="text" inputMode="decimal" value={form.valor} onChange={function(v){set("valor",v);}} placeholder="0,00"/>
-          <Fld label="Local/Posto — opcional" value={form.local} onChange={function(v){set("local",v);}} placeholder="Ex: Posto Trevo, BR-050"/>
-          <Fld label="Motorista — opcional" value={form.motorista} onChange={function(v){set("motorista",v);}} placeholder="Nome"/>
-        </div>
-        {isArla && <div style={{fontSize:13,color:MUT,marginTop:10}}>O ARLA não pede odômetro e não entra no consumo de diesel — ele entra automaticamente nas <b>Despesas</b> (categoria ARLA).</div>}
-        <div style={{marginTop:14}}><Btn full onClick={salvar}>{isArla?"Salvar ARLA":"Salvar abastecimento"}</Btn></div>
-      </div>
-
-      <div className="sec">Abastecimentos registrados</div>
-      <div className="card" style={{padding:0,overflow:"hidden"}}>
-        <table><thead><tr>
-          <th>Data</th><th>Tipo</th><th>Odômetro</th><th>Litros</th><th>Local</th>
-          {!props.driver && <th>Valor</th>}{!props.driver && <th></th>}
-        </tr></thead><tbody>
-          {lista.length===0 && <tr><td colSpan={props.driver?5:7} style={{color:MUT,textAlign:"center",padding:22}}>Nenhum abastecimento registrado ainda.</td></tr>}
-          {lista.map(function(r){
-            var arla = r.tipo==="arla";
-            var doPosto = r.fonte==="posto";
-            return <tr key={r.id}>
-              <td>{ddmmyyyy(r.date)}</td>
-              <td>
-                {doPosto
-                  ? <span className="bdg bg" style={{background:"#d1fae5",color:"#065f46"}}>Posto Fazenda</span>
-                  : <span className={"bdg "+(arla?"bb":"bg")}>{arla?"ARLA":"Diesel Ext."}</span>}
-              </td>
-              <td style={{fontWeight:700}}>{(arla||(!r.odometro||r.odometro===0))?"—":num(r.odometro)+" km"}</td>
-              <td>{r.litros>0?num(r.litros)+" L":"—"}</td>
-              <td style={{fontSize:13,color:MUT}}>{r.local||"—"}{r.motorista?" · "+r.motorista:""}</td>
-              {!props.driver && <td>{r.valor>0?brl(r.valor):"—"}</td>}
-              {!props.driver && <td>
-                {doPosto
-                  ? <span className="bdg" style={{fontSize:11,background:"#f0fdf4",color:"#15803d"}}>app posto</span>
-                  : <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>}
-              </td>}
-            </tr>;
-          })}
-        </tbody></table>
-      </div>
-      <div style={{fontSize:13,color:MUT,marginTop:12,lineHeight:1.5}}>O consumo médio junta os litros do <b>posto da fazenda</b> (automático) com os abastecimentos <b>externos</b> registrados aqui, dividindo os km rodados pelo total de litros entre a primeira e a última leitura de odômetro.</div>
     </div>
   );
 }
