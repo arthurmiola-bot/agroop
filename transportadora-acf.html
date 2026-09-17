@@ -137,8 +137,8 @@ var CSS = [
   "td{padding:10px 12px;border-bottom:1px solid "+BDR+";font-size:14px;vertical-align:middle}",
   "tr:hover td{background:#f0f7f0}",
   ".sec{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:700;letter-spacing:1.5px;color:"+GN+";text-transform:uppercase;margin-bottom:14px}",
-  ".card{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:12px;padding:20px;box-shadow:0 2px 8px #0000000d}",
-  ".sbox{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:3px;box-shadow:0 2px 8px #0000000d}",
+  ".card{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:14px;padding:20px;box-shadow:0 1px 3px #00000010,0 4px 16px #00000009}",
+  ".sbox{background:"+CARD+";border:1.5px solid "+BDR+";border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:3px;box-shadow:0 1px 3px #00000010,0 4px 16px #00000009;overflow:hidden;position:relative}",
   ".slbl{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:"+MUT+";font-family:'Barlow Condensed',sans-serif}",
   ".sval{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:800;color:"+TXT+"}",
   ".flbl{font-size:12px;color:"+MUT+";margin-bottom:5px;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;font-weight:600;letter-spacing:.5px}",
@@ -201,10 +201,10 @@ function Btn(props){
 }
 function Stat(props){
   return (
-    <div className="sbox">
+    <div className="sbox" style={{borderTop:props.accent?"4px solid "+props.accent:"4px solid transparent"}}>
       <span className="slbl">{props.label}</span>
-      <span className="sval" style={{color:props.color||TXT}}>{props.value}</span>
-      {props.sub?<span style={{fontSize:12,color:MUT}}>{props.sub}</span>:null}
+      <span className="sval" style={{color:props.color||TXT,fontSize:props.size||24}}>{props.value}</span>
+      {props.sub?<span style={{fontSize:12,color:MUT,marginTop:2}}>{props.sub}</span>:null}
     </div>
   );
 }
@@ -322,6 +322,92 @@ function App(){
   var resultado = totRec - totDesp - diesel.custo;   // resultado geral da transportadora
   var acertoLiquido = totRecFaz - diesel.custo;      // acerto com a fazenda
 
+  // ---- análise econômica anual ----
+  var analise = useMemo(function(){
+    var meses = [];
+    var tomadores = {};
+    var categorias = {};
+    var totA = { rec:0, desp:0, diesel:0, resultado:0, km:0, litros:0 };
+
+    for(var m=1; m<=12; m++){
+      var mkM = ano+"-"+pad(m);
+
+      // Receitas do mês
+      var recM = (data.rec||[]).filter(function(r){ return monthOf(r.date)===mkM; });
+      var totRecM = recM.reduce(function(a,r){ return a+(Number(r.valor)||0); }, 0);
+
+      // Despesas do mês
+      var totDespM = (data.desp||[]).reduce(function(a,d){ return a+despValorNoMes(d,mkM); }, 0);
+
+      // Diesel do mês
+      var fuelM = fh540 ? (data.fuel||[]).filter(function(x){
+        return Number(x.machineId)===Number(fh540.id) && monthOf(x.date)===mkM;
+      }) : [];
+      var avgCPL = custoFallback;
+      for(var i=fuelM.length-1;i>=0;i--){ if(Number(fuelM[i].costPerLiter)>0){ avgCPL=Number(fuelM[i].costPerLiter); break; } }
+      var litrosM=0, custoM=0, metersM=[];
+      fuelM.forEach(function(x){
+        var l=Number(x.liters)||0; var cpl=fuelCostPerLiter(x,avgCPL);
+        litrosM+=l; custoM+=l*cpl;
+        if(Number(x.meter)>0) metersM.push(Number(x.meter));
+      });
+      var kmM = metersM.length>=2 ? Math.max.apply(null,metersM)-Math.min.apply(null,metersM) : 0;
+      var kmlM = (kmM>0&&litrosM>0) ? kmM/litrosM : 0;
+      var resultadoM = totRecM - totDespM - custoM;
+
+      // Acumula totais anuais
+      totA.rec    += totRecM;
+      totA.desp   += totDespM;
+      totA.diesel += custoM;
+      totA.km     += kmM;
+      totA.litros += litrosM;
+      totA.resultado += resultadoM;
+
+      // Receita por tomador (ano)
+      recM.forEach(function(r){
+        var t = (r.tomador||"Sem tomador").trim();
+        if(!tomadores[t]) tomadores[t]=0;
+        tomadores[t]+=(Number(r.valor)||0);
+      });
+
+      meses.push({ mk:mkM, m:m, rec:totRecM, desp:totDespM, diesel:custoM,
+                   resultado:resultadoM, km:kmM, litros:litrosM, kml:kmlM,
+                   temDados: totRecM>0||totDespM>0||custoM>0 });
+    }
+
+    // Despesas por categoria (ano inteiro)
+    (data.desp||[]).forEach(function(d){
+      for(var m=1;m<=12;m++){
+        var mkM2 = ano+"-"+pad(m);
+        var v = despValorNoMes(d, mkM2);
+        if(v>0){
+          var cat = (d.categoria||"Sem categoria").trim();
+          if(!categorias[cat]) categorias[cat]=0;
+          categorias[cat]+=v;
+        }
+      }
+    });
+    // Adiciona diesel como categoria
+    if(totA.diesel>0) categorias["Diesel (FH 540)"] = totA.diesel;
+
+    var tomList = Object.keys(tomadores).map(function(k){ return {nome:k,valor:tomadores[k]}; })
+      .sort(function(a,b){ return b.valor-a.valor; });
+    var catList = Object.keys(categorias).map(function(k){ return {nome:k,valor:categorias[k]}; })
+      .sort(function(a,b){ return b.valor-a.valor; });
+
+    var totCusto = totA.desp + totA.diesel;
+    var kmlAno = (totA.km>0&&totA.litros>0) ? totA.km/totA.litros : 0;
+    var recKm  = (totA.km>0&&totA.rec>0)    ? totA.rec/totA.km    : 0;
+    var custoKm= (totA.km>0&&totCusto>0)    ? totCusto/totA.km    : 0;
+    var margem = totA.rec>0 ? totA.resultado/totA.rec*100 : 0;
+    var dieselPct = totA.rec>0 ? totA.diesel/totA.rec*100 : 0;
+
+    return { meses:meses, totA:totA, totCusto:totCusto,
+             tomadores:tomList, categorias:catList,
+             kmlAno:kmlAno, recKm:recKm, custoKm:custoKm,
+             margem:margem, dieselPct:dieselPct };
+  },[data.rec, data.desp, data.fuel, fh540, ano, custoFallback]);
+
   var estilos = { maxWidth:960, margin:"0 auto", padding:"0 14px 90px" };
 
   return (
@@ -349,7 +435,7 @@ function App(){
       {/* NAV */}
       <div className="noprint" style={{background:CARD,borderBottom:"1.5px solid "+BDR}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",gap:4,padding:"0 8px",overflowX:"auto"}}>
-          {[["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["acerto","Acerto Fazenda"],["config","Config"]].map(function(t){
+          {[["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["analise","Análise"],["acerto","Acerto Fazenda"],["config","Config"]].map(function(t){
             var on = tab===t[0];
             return <button key={t[0]} onClick={function(){setTab(t[0]);}} style={{background:"none",color:on?GN:MUT,borderBottom:on?"3px solid "+GN:"3px solid transparent",borderRadius:0,padding:"14px 14px",fontSize:15,whiteSpace:"nowrap"}}>{t[1]}</button>;
           })}
@@ -360,6 +446,7 @@ function App(){
         {tab==="painel" && <Painel mk={mk} ano={ano} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} diesel={diesel} dieselAno={dieselAno} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
         {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast}/>}
         {tab==="despesas" && <Despesas data={data} mk={mk} despMes={despMes} totDesp={totDesp} toast={showToast}/>}
+        {tab==="analise" && <Analise mk={mk} ano={ano} analise={analise}/>}
         {tab==="acerto" && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
         {tab==="config" && <Config conf={conf} toast={showToast} fh540={fh540}/>}
       </div>
@@ -375,48 +462,258 @@ function Painel(props){
   function fmtKml(v){ return v>0 ? v.toFixed(2)+" km/L" : "—"; }
   function fmtCkm(v){ return v>0 ? brl(v)+"/km" : "—"; }
   function fmtKm(v){ return v>0 ? v.toLocaleString("pt-BR",{maximumFractionDigits:0})+" km" : "—"; }
+
   return (
     <div>
+      {/* ── Resumo financeiro ── */}
       <div className="sec" style={{marginTop:18}}>Resumo de {mesLabel(props.mk)}</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
-        <Stat label="Receitas (total)" value={brl(props.totRec)} sub={props.recCount+" frete(s)"} color={GN}/>
-        <Stat label="Despesas (total)" value={brl(props.totDesp)} sub={props.despCount+" lançamento(s)"} color={RED}/>
-        <Stat label="Diesel FH 540" value={brl(d.custo)} sub={num(d.litros)+" L · "+fmtKm(d.km)} color={AMB}/>
-        <Stat label="Resultado do mês" value={brl(props.resultado)} sub="receitas − despesas − diesel" color={props.resultado>=0?GN:RED}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Stat label="Receitas" value={brl(props.totRec)} sub={props.recCount+" frete(s)"} color={GN} accent={GN}/>
+        <Stat label="Despesas" value={brl(props.totDesp)} sub={props.despCount+" lançamento(s)"} color={RED} accent={RED}/>
+        <Stat label="Diesel FH 540" value={brl(d.custo)} sub={num(d.litros)+" L · "+fmtKm(d.km)} color={AMB} accent={AMB}/>
+        <Stat label="Resultado" value={brl(props.resultado)} sub="receitas − despesas − diesel" color={props.resultado>=0?GN:RED} accent={props.resultado>=0?GN:RED}/>
       </div>
 
-      {/* Eficiência de combustível — mês e ano lado a lado */}
-      <div className="sec" style={{marginTop:20}}>Eficiência — FH 540</div>
+      {/* ── Eficiência de combustível ── */}
+      <div className="sec" style={{marginTop:22}}>Eficiência — FH 540</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Stat label={"Consumo médio — "+mesLabel(props.mk)} value={fmtKml(d.kml)} sub={fmtKm(d.km)+" rodados"} color={BLU}/>
-          <Stat label={"Custo/km — "+mesLabel(props.mk)} value={fmtCkm(d.custokm)} sub={brl(d.custo)+" diesel"} color={PUR}/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Stat label={"Consumo médio — "+props.ano} value={fmtKml(da.kml)} sub={fmtKm(da.km)+" rodados"} color={BLU}/>
-          <Stat label={"Custo/km — "+props.ano} value={fmtCkm(da.custokm)} sub={brl(da.custo||0)+" diesel"} color={PUR}/>
-        </div>
-      </div>
-      {(!d.km || d.km===0) && d.litros>0 &&
-        <div style={{fontSize:12,color:MUT,marginBottom:10}}>* O hodômetro não está sendo registrado em alguns abastecimentos no Posto Diesel — confira o campo "Odômetro (Km)" ao abastecer a 016.</div>}
 
-      <div className="card" style={{marginTop:6,background:"#f7faf7"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-          <div>
-            <div className="slbl">Acerto com a Fazenda (prévia)</div>
-            <div style={{fontSize:13,color:MUT,marginTop:4}}>Fretes da fazenda {brl(props.totRecFaz)} − Diesel FH 540 {brl(d.custo)}</div>
+        {/* Cartão MÊS */}
+        <div style={{background:CARD,border:"1.5px solid "+BDR,borderRadius:14,padding:"14px 16px",boxShadow:"0 1px 3px #00000010,0 4px 16px #00000009",borderTop:"4px solid "+BLU}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,textTransform:"uppercase",color:BLU,marginBottom:12}}>{mesLabel(props.mk)}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+            <div>
+              <div className="slbl">Consumo</div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:BLU,lineHeight:1.1,marginTop:2}}>{fmtKml(d.kml)}</div>
+            </div>
+            <div>
+              <div className="slbl">Custo/km</div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:PUR,lineHeight:1.1,marginTop:2}}>{fmtCkm(d.custokm)}</div>
+            </div>
           </div>
+          <div style={{fontSize:12,color:MUT,borderTop:"1px solid "+BDR,paddingTop:8}}>{fmtKm(d.km)} · {num(d.litros)} L</div>
+        </div>
+
+        {/* Cartão ANO */}
+        <div style={{background:CARD,border:"1.5px solid "+BDR,borderRadius:14,padding:"14px 16px",boxShadow:"0 1px 3px #00000010,0 4px 16px #00000009",borderTop:"4px solid "+BLU}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,textTransform:"uppercase",color:BLU,marginBottom:12}}>{props.ano}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+            <div>
+              <div className="slbl">Consumo</div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:BLU,lineHeight:1.1,marginTop:2}}>{fmtKml(da.kml)}</div>
+            </div>
+            <div>
+              <div className="slbl">Custo/km</div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:PUR,lineHeight:1.1,marginTop:2}}>{fmtCkm(da.custokm)}</div>
+            </div>
+          </div>
+          <div style={{fontSize:12,color:MUT,borderTop:"1px solid "+BDR,paddingTop:8}}>{fmtKm(da.km)} · {num(da.litros||0)} L</div>
+        </div>
+
+      </div>
+      {(!d.km||d.km===0)&&d.litros>0&&
+        <div style={{fontSize:12,color:DIM,marginTop:6,marginBottom:2}}>* Hodômetro ausente em algum lançamento no Posto Diesel — confira o campo Odômetro ao abastecer a 016.</div>}
+
+      {/* ── Acerto prévia ── */}
+      <div style={{background:"linear-gradient(135deg,"+GN2+","+GN+")",borderRadius:14,padding:"18px 20px",marginTop:16,boxShadow:"0 4px 18px #2a7a2a30"}}>
+        <div style={{fontSize:11,letterSpacing:1.5,textTransform:"uppercase",color:"#ffffffbb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,marginBottom:6}}>Acerto com a Fazenda — prévia</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:8}}>
+          <div style={{fontSize:13,color:"#ffffffcc"}}>Fretes {brl(props.totRecFaz)} − Diesel {brl(d.custo)}</div>
           <div style={{textAlign:"right"}}>
-            <div className="sval" style={{color:props.acerto>=0?GN:RED,fontSize:28}}>{brl(props.acerto)}</div>
-            <div style={{fontSize:12,color:MUT}}>{props.acerto>=0?"a receber da fazenda":"a pagar à fazenda"}</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:30,color:"#fff",lineHeight:1}}>{brl(props.acerto)}</div>
+            <div style={{fontSize:12,color:"#ffffffaa",marginTop:2}}>{props.acerto>=0?"a receber da fazenda":"a pagar à fazenda"}</div>
           </div>
         </div>
       </div>
 
-      {!props.fh540 &&
+      {!props.fh540&&
         <div className="card" style={{marginTop:16,borderColor:"#fde047",background:"#fefce8",color:AMB}}>
-          Não encontrei a máquina de código <b>016</b> no Posto Diesel. Confira se ela está cadastrada lá (código 016, nome FH 540). Sem isso, o diesel não é puxado.
+          Não encontrei a máquina de código <b>016</b> no Posto Diesel. Confira se está cadastrada lá.
         </div>}
+    </div>
+  );
+}
+
+// ── ANÁLISE ECONÔMICA ────────────────────────────────────────────────────────
+function Analise(props){
+  var a = props.analise;
+  var nomes = ["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+  // barra proporcional ao maior valor absoluto do conjunto
+  function Bar(bprops){
+    var max = bprops.max || 1;
+    var v   = Math.abs(bprops.valor);
+    var pct = Math.min(v/max*100, 100);
+    var pos = (bprops.valor||0) >= 0;
+    var clr = bprops.color || (pos ? GN : RED);
+    return (
+      <div style={{height:8,background:"#e8f0e8",borderRadius:4,overflow:"hidden",marginTop:4}}>
+        <div style={{height:"100%",width:pct+"%",background:clr,borderRadius:4,transition:"width .4s"}}/>
+      </div>
+    );
+  }
+
+  // max resultado absoluto para as barras mensais
+  var maxRes   = Math.max.apply(null, a.meses.map(function(m){ return Math.abs(m.resultado); }).concat([1]));
+  var maxTom   = a.tomadores.length > 0 ? a.tomadores[0].valor : 1;
+  var maxCat   = a.categorias.length > 0 ? a.categorias[0].valor : 1;
+  var mesesComDados = a.meses.filter(function(m){ return m.temDados; });
+
+  return (
+    <div>
+      {/* ── 1. Indicadores-chave ── */}
+      <div className="sec" style={{marginTop:18}}>Indicadores-chave — {props.ano}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
+        <Stat label="Margem operacional" value={a.margem!==0 ? a.margem.toFixed(1)+"%" : "—"} sub="resultado ÷ receita" color={a.margem>=0?GN:RED} accent={a.margem>=0?GN:RED}/>
+        <Stat label="Diesel / receita" value={a.dieselPct>0 ? a.dieselPct.toFixed(1)+"%" : "—"} sub="% da receita em combustível" color={AMB} accent={AMB}/>
+        <Stat label="Receita / km" value={a.recKm>0 ? brl(a.recKm)+"/km" : "—"} sub="faturamento por km rodado" color={BLU} accent={BLU}/>
+        <Stat label="Custo total / km" value={a.custoKm>0 ? brl(a.custoKm)+"/km" : "—"} sub="despesas + diesel por km" color={PUR} accent={PUR}/>
+      </div>
+
+      {/* ── Totais anuais resumidos ── */}
+      <div className="card" style={{marginTop:4,background:"#f7faf7",padding:"14px 18px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,textAlign:"center"}}>
+          <div><div className="slbl">Receitas {props.ano}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:GN}}>{brl(a.totA.rec)}</div></div>
+          <div><div className="slbl">Custos {props.ano}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:RED}}>{brl(a.totCusto)}</div></div>
+          <div><div className="slbl">Resultado {props.ano}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:a.totA.resultado>=0?GN:RED}}>{brl(a.totA.resultado)}</div></div>
+        </div>
+      </div>
+
+      {/* ── 2. Resultado mês a mês ── */}
+      <div className="sec" style={{marginTop:22}}>Resultado mês a mês — {props.ano}</div>
+      <div className="card" style={{padding:0,overflowX:"auto"}}>
+        <table>
+          <thead>
+            <tr>
+              <th>Mês</th>
+              <th style={{textAlign:"right"}}>Receitas</th>
+              <th style={{textAlign:"right"}}>Despesas</th>
+              <th style={{textAlign:"right"}}>Diesel</th>
+              <th style={{textAlign:"right",minWidth:130}}>Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.meses.map(function(m){
+              var ativo = m.mk===props.mk;
+              return (
+                <tr key={m.mk} style={{background:ativo?"#f0f7f0":""}}>
+                  <td style={{fontWeight:ativo?700:400,color:ativo?GN:TXT,whiteSpace:"nowrap"}}>
+                    {ativo ? "▶ " : ""}{nomes[m.m]}
+                  </td>
+                  <td style={{textAlign:"right",color:m.rec>0?GN:DIM}}>{m.rec>0?brl(m.rec):"—"}</td>
+                  <td style={{textAlign:"right",color:m.desp>0?RED:DIM}}>{m.desp>0?brl(m.desp):"—"}</td>
+                  <td style={{textAlign:"right",color:m.diesel>0?AMB:DIM}}>{m.diesel>0?brl(m.diesel):"—"}</td>
+                  <td style={{textAlign:"right",minWidth:130}}>
+                    {m.temDados
+                      ? <div>
+                          <div style={{fontWeight:700,color:m.resultado>=0?GN:RED}}>{brl(m.resultado)}</div>
+                          <Bar valor={m.resultado} max={maxRes}/>
+                        </div>
+                      : <span style={{color:DIM}}>—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+            {/* Totais */}
+            <tr style={{borderTop:"2px solid "+BDR,background:"#f7faf7"}}>
+              <td style={{fontWeight:700}}>TOTAL</td>
+              <td style={{textAlign:"right",fontWeight:700,color:GN}}>{brl(a.totA.rec)}</td>
+              <td style={{textAlign:"right",fontWeight:700,color:RED}}>{brl(a.totA.desp)}</td>
+              <td style={{textAlign:"right",fontWeight:700,color:AMB}}>{brl(a.totA.diesel)}</td>
+              <td style={{textAlign:"right",fontWeight:700,color:a.totA.resultado>=0?GN:RED}}>{brl(a.totA.resultado)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── 3. Receita por tomador ── */}
+      <div className="sec" style={{marginTop:22}}>Receita por tomador — {props.ano}</div>
+      {a.tomadores.length===0
+        ? <div className="card" style={{color:MUT}}>Nenhuma receita lançada em {props.ano}.</div>
+        : <div className="card" style={{display:"flex",flexDirection:"column",gap:14}}>
+            {a.tomadores.map(function(t){
+              var pct = a.totA.rec>0 ? t.valor/a.totA.rec*100 : 0;
+              return (
+                <div key={t.nome}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                    <span style={{fontWeight:600,fontSize:15}}>{t.nome}</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:GN}}>{brl(t.valor)} <span style={{fontSize:12,color:MUT,fontWeight:400}}>({pct.toFixed(1)}%)</span></span>
+                  </div>
+                  <Bar valor={t.valor} max={maxTom} color={GN}/>
+                </div>
+              );
+            })}
+            <div style={{borderTop:"1px solid "+BDR,paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:13,color:MUT}}>
+              <span>Total de receitas em {props.ano}</span>
+              <span style={{fontWeight:700,color:TXT}}>{brl(a.totA.rec)}</span>
+            </div>
+          </div>}
+
+      {/* ── 4. Despesas por categoria ── */}
+      <div className="sec" style={{marginTop:22}}>Despesas por categoria — {props.ano}</div>
+      {a.categorias.length===0
+        ? <div className="card" style={{color:MUT}}>Nenhuma despesa lançada em {props.ano}.</div>
+        : <div className="card" style={{display:"flex",flexDirection:"column",gap:14}}>
+            {a.categorias.map(function(c){
+              var totGasto = a.totCusto;
+              var pct = totGasto>0 ? c.valor/totGasto*100 : 0;
+              var isDiesel = c.nome==="Diesel (FH 540)";
+              return (
+                <div key={c.nome}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                    <span style={{fontWeight:600,fontSize:15,color:isDiesel?AMB:TXT}}>{c.nome}</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:RED}}>{brl(c.valor)} <span style={{fontSize:12,color:MUT,fontWeight:400}}>({pct.toFixed(1)}%)</span></span>
+                  </div>
+                  <Bar valor={c.valor} max={maxCat} color={isDiesel?AMB:RED}/>
+                </div>
+              );
+            })}
+            <div style={{borderTop:"1px solid "+BDR,paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:13,color:MUT}}>
+              <span>Total de custos em {props.ano} (despesas + diesel)</span>
+              <span style={{fontWeight:700,color:TXT}}>{brl(a.totCusto)}</span>
+            </div>
+          </div>}
+
+      {/* ── Eficiência mensal ── */}
+      {mesesComDados.some(function(m){return m.kml>0;}) &&
+        <div>
+          <div className="sec" style={{marginTop:22}}>Eficiência de combustível por mês — {props.ano}</div>
+          <div className="card" style={{padding:0,overflowX:"auto"}}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mês</th>
+                  <th style={{textAlign:"right"}}>Km rodados</th>
+                  <th style={{textAlign:"right"}}>Litros</th>
+                  <th style={{textAlign:"right"}}>Consumo</th>
+                  <th style={{textAlign:"right"}}>Custo/km</th>
+                </tr>
+              </thead>
+              <tbody>
+                {a.meses.filter(function(m){return m.kml>0||m.litros>0;}).map(function(m){
+                  var ativo = m.mk===props.mk;
+                  return (
+                    <tr key={m.mk} style={{background:ativo?"#f0f7f0":""}}>
+                      <td style={{fontWeight:ativo?700:400,color:ativo?GN:TXT}}>{ativo?"▶ ":""}{nomes[m.m]}</td>
+                      <td style={{textAlign:"right",color:MUT}}>{m.km>0?m.km.toLocaleString("pt-BR",{maximumFractionDigits:0})+" km":"—"}</td>
+                      <td style={{textAlign:"right",color:MUT}}>{m.litros>0?num(m.litros)+" L":"—"}</td>
+                      <td style={{textAlign:"right",fontWeight:700,color:BLU}}>{m.kml>0?m.kml.toFixed(2)+" km/L":"—"}</td>
+                      <td style={{textAlign:"right",color:PUR}}>{(m.km>0&&m.diesel>0)?brl(m.diesel/m.km)+"/km":"—"}</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{borderTop:"2px solid "+BDR,background:"#f7faf7"}}>
+                  <td style={{fontWeight:700}}>TOTAL/MÉD</td>
+                  <td style={{textAlign:"right",fontWeight:700}}>{a.totA.km>0?a.totA.km.toLocaleString("pt-BR",{maximumFractionDigits:0})+" km":"—"}</td>
+                  <td style={{textAlign:"right",fontWeight:700}}>{a.totA.litros>0?num(a.totA.litros)+" L":"—"}</td>
+                  <td style={{textAlign:"right",fontWeight:700,color:BLU}}>{a.kmlAno>0?a.kmlAno.toFixed(2)+" km/L":"—"}</td>
+                  <td style={{textAlign:"right",fontWeight:700,color:PUR}}>{a.custoKm>0?brl(a.custoKm)+"/km":"—"}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>}
+
     </div>
   );
 }
