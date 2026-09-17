@@ -229,9 +229,12 @@ function Toast(props){
 // ── APP ──────────────────────────────────────────────────────────────────────
 function App(){
   var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[] }); var data=s0[0], setData=s0[1];
-  var t0 = useState("painel"); var tab=t0[0], setTab=t0[1];
+  var t0 = useState("receitas"); var tab=t0[0], setTab=t0[1];
   var m0 = useState(thisMonth()); var mk=m0[0], setMk=m0[1];
   var ts0 = useState(null); var toast=ts0[0], setToast=ts0[1];
+  var pf0 = useState(null); var perfil=pf0[0], setPerfil=pf0[1];
+  var pm0 = useState(false); var pinModal=pm0[0], setPinModal=pm0[1];
+  var pd0 = useState(""); var pinDigits=pd0[0], setPinDigits=pd0[1];
 
   useEffect(function(){
     if(window.TX && window.TX.ready){ window.TX.onData(function(st){ setData(Object.assign({},st)); }); }
@@ -410,22 +413,136 @@ function App(){
 
   var estilos = { maxWidth:960, margin:"0 auto", padding:"0 14px 90px" };
 
+  // ── Login / PIN helpers ──
+  var pinGestora = String(conf.pinGestora || "1234");
+
+  function entrarGestora(){
+    if(pinDigits === pinGestora){
+      setPerfil("gestora"); setPinModal(false); setPinDigits(""); setTab("painel");
+    } else {
+      setPinDigits(""); showToast("PIN incorreto",true);
+    }
+  }
+
+  function teclarPin(d){
+    if(d==="del"){ setPinDigits(function(p){ return p.slice(0,-1); }); return; }
+    if(d==="ok"){ entrarGestora(); return; }
+    setPinDigits(function(p){ if(p.length>=4) return p; return p+d; });
+  }
+
+  useEffect(function(){
+    if(pinDigits.length===4){ entrarGestora(); }
+  },[pinDigits]);
+
+  function sair(){ setPerfil(null); setPinDigits(""); setTab("receitas"); }
+
+  // Tabs por perfil
+  var tabsGestora  = [["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["analise","Análise"],["acerto","Acerto Fazenda"],["config","Config"]];
+  var tabsMotorista = [["receitas","Fretes"],["despesas","Despesas"]];
+  var tabs = perfil==="gestora" ? tabsGestora : tabsMotorista;
+
+  // ── Tela de login ──
+  if(!perfil){
+    return (
+      <div style={{minHeight:"100vh",background:"linear-gradient(160deg,"+GN2+" 0%,"+GN+" 50%,#3a9a3a 100%)"}}>
+        <style>{CSS}</style>
+        <div style={{maxWidth:400,margin:"0 auto",padding:"60px 24px 40px",display:"flex",flexDirection:"column",alignItems:"center",gap:0}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:32,color:"#fff",letterSpacing:2,textAlign:"center",lineHeight:1}}>TRANSPORTADORA</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:18,color:"#ffffffbb",letterSpacing:4,marginBottom:8}}>ACF</div>
+          <div style={{fontSize:13,color:"#ffffffaa",marginBottom:48,textAlign:"center"}}>Caminhão FH 540 · 016</div>
+
+          <div style={{fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"#ffffffaa",marginBottom:18,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>Selecione seu perfil</div>
+
+          {/* Card Luana */}
+          <button onClick={function(){ setPinModal(true); setPinDigits(""); }}
+            style={{width:"100%",background:"#fff",borderRadius:16,padding:"22px 24px",marginBottom:14,display:"flex",alignItems:"center",gap:18,boxShadow:"0 8px 32px #00000030",cursor:"pointer"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,"+GN+","+GN2+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>👩</div>
+            <div style={{textAlign:"left"}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:TXT}}>LUANA</div>
+              <div style={{fontSize:13,color:MUT,marginTop:2}}>Gestora · acesso completo</div>
+              <div style={{fontSize:11,color:DIM,marginTop:1}}>🔒 Requer PIN</div>
+            </div>
+          </button>
+
+          {/* Card Elinton */}
+          <button onClick={function(){ setPerfil("motorista"); setTab("receitas"); }}
+            style={{width:"100%",background:"#fff",borderRadius:16,padding:"22px 24px",display:"flex",alignItems:"center",gap:18,boxShadow:"0 8px 32px #00000030",cursor:"pointer"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#1d6fa4,#0369a1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>👨</div>
+            <div style={{textAlign:"left"}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:TXT}}>ELINTON</div>
+              <div style={{fontSize:13,color:MUT,marginTop:2}}>Motorista · lançamentos</div>
+              <div style={{fontSize:11,color:DIM,marginTop:1}}>✓ Acesso direto</div>
+            </div>
+          </button>
+        </div>
+
+        {/* Modal PIN */}
+        {pinModal &&
+          <div style={{position:"fixed",inset:0,background:"#000a",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:50}} onClick={function(){ setPinModal(false); setPinDigits(""); }}>
+            <div style={{background:CARD,borderRadius:"20px 20px 0 0",padding:"28px 24px 40px",width:"100%",maxWidth:400,boxShadow:"0 -8px 40px #0004"}} onClick={function(e){e.stopPropagation();}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:TXT,textAlign:"center",marginBottom:6}}>ACESSO GESTOR</div>
+              <div style={{fontSize:13,color:MUT,textAlign:"center",marginBottom:24}}>Luana — insira o PIN</div>
+
+              {/* Pontos do PIN */}
+              <div style={{display:"flex",justifyContent:"center",gap:16,marginBottom:28}}>
+                {[0,1,2,3].map(function(i){
+                  return <div key={i} style={{width:18,height:18,borderRadius:"50%",background:i<pinDigits.length?GN:BDR,transition:"background .15s"}}/>;
+                })}
+              </div>
+
+              {/* Teclado numérico */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+                {["1","2","3","4","5","6","7","8","9","del","0","ok"].map(function(d){
+                  var isDel=d==="del", isOk=d==="ok";
+                  return <button key={d} onClick={function(){teclarPin(d);}}
+                    style={{padding:"18px 0",fontSize:isDel||isOk?15:22,fontWeight:700,borderRadius:12,
+                      background:isOk?GN:isDel?"#fee2e2":INP,
+                      color:isOk?"#fff":isDel?RED:TXT,
+                      fontFamily:"'Barlow Condensed',sans-serif"}}>
+                    {isDel?"⌫":isOk?"OK":d}
+                  </button>;
+                })}
+              </div>
+            </div>
+          </div>}
+
+        <Toast msg={toast&&toast.msg} err={toast&&toast.err}/>
+      </div>
+    );
+  }
+
+  // ── App principal (após login) ──
   return (
     <div style={{minHeight:"100vh"}}>
       <style>{CSS}</style>
 
       {/* CABEÇALHO */}
-      <div className="noprint" style={{background:"linear-gradient(180deg,"+GN2+","+GN+")",padding:"18px 14px 16px",color:"#fff",boxShadow:"0 2px 12px #0002"}}>
+      <div className="noprint" style={{background:"linear-gradient(180deg,"+GN2+","+GN+")",padding:"14px 14px 12px",color:"#fff",boxShadow:"0 2px 12px #0002"}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:24,letterSpacing:1,lineHeight:1}}>TRANSPORTADORA · ACF</div>
-            <div style={{fontSize:12,opacity:.85,marginTop:2}}>Controle de resultados · Caminhão FH 540 (016)</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,letterSpacing:1,lineHeight:1}}>TRANSPORTADORA · ACF</div>
+            <div style={{fontSize:11,opacity:.75,marginTop:1}}>
+              {perfil==="gestora" ? "👩 Luana — Gestora" : "👨 Elinton — Motorista"}
+              {" · FH 540 (016)"}
+            </div>
           </div>
-          <div style={{background:"#ffffff22",borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.85}}>Mês</span>
-            <input type="month" value={mk} onChange={function(e){setMk(e.target.value);}} style={{width:150,padding:"6px 10px",border:"none",fontWeight:700,color:TXT}}/>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {perfil==="gestora" &&
+              <div style={{background:"#ffffff22",borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.85}}>Mês</span>
+                <input type="month" value={mk} onChange={function(e){setMk(e.target.value);}} style={{width:140,padding:"5px 8px",border:"none",fontWeight:700,color:TXT}}/>
+              </div>}
+            <button onClick={sair} style={{background:"#ffffff22",color:"#fff",padding:"8px 12px",borderRadius:8,fontSize:13,fontWeight:600}}>Sair</button>
           </div>
         </div>
+        {/* Seletor de mês para motorista */}
+        {perfil==="motorista" &&
+          <div style={{maxWidth:960,margin:"6px auto 0",display:"flex",alignItems:"center",gap:8}}>
+            <div style={{background:"#ffffff22",borderRadius:10,padding:"5px 10px",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.85}}>Mês</span>
+              <input type="month" value={mk} onChange={function(e){setMk(e.target.value);}} style={{width:150,padding:"5px 8px",border:"none",fontWeight:700,color:TXT}}/>
+            </div>
+          </div>}
       </div>
 
       {/* AVISO se não achou a FH540 */}
@@ -435,7 +552,7 @@ function App(){
       {/* NAV */}
       <div className="noprint" style={{background:CARD,borderBottom:"1.5px solid "+BDR}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",gap:4,padding:"0 8px",overflowX:"auto"}}>
-          {[["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["analise","Análise"],["acerto","Acerto Fazenda"],["config","Config"]].map(function(t){
+          {tabs.map(function(t){
             var on = tab===t[0];
             return <button key={t[0]} onClick={function(){setTab(t[0]);}} style={{background:"none",color:on?GN:MUT,borderBottom:on?"3px solid "+GN:"3px solid transparent",borderRadius:0,padding:"14px 14px",fontSize:15,whiteSpace:"nowrap"}}>{t[1]}</button>;
           })}
@@ -443,12 +560,12 @@ function App(){
       </div>
 
       <div style={estilos} className="fi">
-        {tab==="painel" && <Painel mk={mk} ano={ano} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} diesel={diesel} dieselAno={dieselAno} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
-        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast}/>}
-        {tab==="despesas" && <Despesas data={data} mk={mk} despMes={despMes} totDesp={totDesp} toast={showToast}/>}
-        {tab==="analise" && <Analise mk={mk} ano={ano} analise={analise}/>}
-        {tab==="acerto" && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
-        {tab==="config" && <Config conf={conf} toast={showToast} fh540={fh540}/>}
+        {tab==="painel"   && <Painel mk={mk} ano={ano} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} diesel={diesel} dieselAno={dieselAno} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
+        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast} soLeitura={perfil==="motorista"}/>}
+        {tab==="despesas" && <Despesas data={data} mk={mk} despMes={despMes} totDesp={totDesp} toast={showToast} soLeitura={perfil==="motorista"}/>}
+        {tab==="analise"  && <Analise mk={mk} ano={ano} analise={analise}/>}
+        {tab==="acerto"   && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
+        {tab==="config"   && <Config conf={conf} toast={showToast} fh540={fh540}/>}
       </div>
 
       <Toast msg={toast&&toast.msg} err={toast&&toast.err}/>
@@ -820,8 +937,8 @@ function Receitas(props){
                 <td>{brl(r.precoTon)}</td>
                 <td style={{fontWeight:700}}>{brl(r.valor)}</td>
                 <td style={{whiteSpace:"nowrap"}}>
-                  <button onClick={function(){editar(r);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
-                  <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
+                  {!props.soLeitura && <button onClick={function(){editar(r);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>}
+                  {!props.soLeitura && <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>}
                 </td>
               </tr>;
             })}
@@ -947,8 +1064,8 @@ function Despesas(props){
                   <td style={{fontSize:13}}>{periodo}</td>
                   <td style={{fontWeight:700,color:RED}}>{valor}</td>
                   <td style={{whiteSpace:"nowrap"}}>
-                    <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>
-                    <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>
+                    {!props.soLeitura && <button onClick={function(){editar(d);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>}
+                    {!props.soLeitura && <button onClick={function(){excluir(d);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>}
                   </td>
                 </tr>;
               })}
@@ -1145,11 +1262,11 @@ function Acerto(props){
 // ── CONFIG ───────────────────────────────────────────────────────────────────
 function Config(props){
   var c=props.conf||{};
-  var f0=useState({ fazendaKey:c.fazendaKey||"ACF", fazendaNome:c.fazendaNome||"Agropecuária Córrego das Flores", custoFallback:String(c.custoFallback||6.15) });
+  var f0=useState({ fazendaKey:c.fazendaKey||"ACF", fazendaNome:c.fazendaNome||"Agropecuária Córrego das Flores", custoFallback:String(c.custoFallback||6.15), pinGestora:String(c.pinGestora||"1234") });
   var form=f0[0], setForm=f0[1];
   function set(k,v){ setForm(function(p){var o=Object.assign({},p);o[k]=v;return o;}); }
   function salvar(){
-    window.TX.saveConfig({ fazendaKey:(form.fazendaKey||"ACF").trim(), fazendaNome:form.fazendaNome, custoFallback:Number(String(form.custoFallback).replace(",","."))||6.15 })
+    window.TX.saveConfig({ fazendaKey:(form.fazendaKey||"ACF").trim(), fazendaNome:form.fazendaNome, custoFallback:Number(String(form.custoFallback).replace(",","."))||6.15, pinGestora:String(form.pinGestora||"1234").replace(/\D/g,"").slice(0,6) })
       .then(function(){ props.toast("Configuração salva"); }).catch(function(){ props.toast("Erro ao salvar",true); });
   }
   return (
@@ -1160,6 +1277,8 @@ function Config(props){
         <div style={{fontSize:13,color:MUT,marginTop:-8}}>Todo frete cujo tomador contenha esta palavra entra no acerto. Está como <b>ACF</b> — então lance esses fretes com o tomador “ACF”.</div>
         <Fld label="Nome da fazenda no relatório PDF" value={form.fazendaNome} onChange={function(v){set("fazendaNome",v);}}/>
         <Fld label="Custo do diesel de reserva (R$/L)" inputMode="decimal" value={form.custoFallback} onChange={function(v){set("custoFallback",v);}} placeholder="6,15"/>
+        <Fld label="PIN da gestora (Luana)" type="password" value={form.pinGestora} onChange={function(v){set("pinGestora",v.replace(/\D/g,"").slice(0,6));}} placeholder="1234"/>
+        <div style={{fontSize:13,color:MUT,marginTop:-8}}>Somente números, até 6 dígitos. Padrão: 1234.</div>
         <div style={{fontSize:13,color:MUT,marginTop:-8}}>Usado só se algum abastecimento antigo não tiver o custo gravado. Os novos já vêm com o custo congelado do Posto Diesel.</div>
         <Btn onClick={salvar}>Salvar configuração</Btn>
       </div>
