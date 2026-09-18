@@ -50,7 +50,10 @@
     var POSTO_CONFIG = db.collection("posto-diesel").doc("config");
     var POSTO_FUEL   = db.collection("posto-diesel").doc("dados").collection("abastecimentos");
 
-    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[] };
+    // ---- Abastecimentos externos (S10 e Arla fora da fazenda) ----
+    var ABAST_EXT = ROOT.collection("abastExt");
+
+    var state = { rec:[], desp:[], conf:null, postoMachines:[], fuel:[], abastExt:[] };
     var listeners = [];
     function emit(){ for(var i=0;i<listeners.length;i++){ try{listeners[i](state);}catch(e){console.error(e);} } }
 
@@ -86,6 +89,11 @@
       emit();
     }, function(e){console.error("postoFuel:",e);});
 
+    ABAST_EXT.onSnapshot(function(qs){
+      state.abastExt = qs.docs.map(function(d){return d.data();}).filter(function(x){return x && !x.deleted;});
+      emit();
+    }, function(e){console.error("abastExt:",e);});
+
     // API para o React
     window.TX = {
       ready: true,
@@ -94,6 +102,8 @@
       delReceita: function(id){ return REC.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
       addDespesa: function(item){ return DESP.doc(String(item.id)).set(item); },
       delDespesa: function(id){ return DESP.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
+      addAbastExt: function(item){ return ABAST_EXT.doc(String(item.id)).set(item); },
+      delAbastExt: function(id){ return ABAST_EXT.doc(String(id)).set({deleted:true, deletedAt:new Date().toISOString()},{merge:true}); },
       saveConfig: function(cfg){ return CONF.set({ payload: JSON.stringify(cfg) }); }
     };
   } catch(err){
@@ -228,7 +238,7 @@ function Toast(props){
 
 // ── APP ──────────────────────────────────────────────────────────────────────
 function App(){
-  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[] }); var data=s0[0], setData=s0[1];
+  var s0 = useState({ rec:[], desp:[], conf:null, postoMachines:[], fuel:[], abastExt:[] }); var data=s0[0], setData=s0[1];
   var t0 = useState("receitas"); var tab=t0[0], setTab=t0[1];
   var m0 = useState(thisMonth()); var mk=m0[0], setMk=m0[1];
   var ts0 = useState(null); var toast=ts0[0], setToast=ts0[1];
@@ -411,6 +421,29 @@ function App(){
              margem:margem, dieselPct:dieselPct };
   },[data.rec, data.desp, data.fuel, fh540, ano, custoFallback]);
 
+  // ---- km/L combinado do mês (posto fazenda S10 + externo S10, para Elinton) ----
+  var kmlElintonMes = useMemo(function(){
+    // S10 do Posto Fazenda (meter já registrado no Posto Diesel)
+    var postoS10 = fh540 ? (data.fuel||[]).filter(function(x){
+      return Number(x.machineId)===Number(fh540.id) && monthOf(x.date)===mk;
+    }) : [];
+    var postoLitros = postoS10.reduce(function(a,x){return a+(Number(x.liters)||0);},0);
+    var postoMeters = postoS10.map(function(x){return Number(x.meter)||0;}).filter(function(m){return m>0;});
+
+    // S10 externo (abastecimentos fora da fazenda, tipo S10)
+    var extS10 = (data.abastExt||[]).filter(function(x){
+      return x.tipo==="S10" && monthOf(x.date)===mk;
+    });
+    var extLitros = extS10.reduce(function(a,x){return a+(Number(x.litros)||0);},0);
+    var extMeters = extS10.map(function(x){return Number(x.odometro)||0;}).filter(function(m){return m>0;});
+
+    // Combina odômetros de ambas as fontes para calcular km rodados
+    var allMeters = postoMeters.concat(extMeters);
+    var totalLitrosS10 = postoLitros + extLitros;
+    var km = allMeters.length>=2 ? Math.max.apply(null,allMeters)-Math.min.apply(null,allMeters) : 0;
+    return { kml: (km>0&&totalLitrosS10>0)?km/totalLitrosS10:0, km:km, litrosS10:totalLitrosS10 };
+  },[data.fuel, data.abastExt, fh540, mk]);
+
   var estilos = { maxWidth:960, margin:"0 auto", padding:"0 14px 90px" };
 
   // ── Login / PIN helpers ──
@@ -438,7 +471,7 @@ function App(){
 
   // Tabs por perfil
   var tabsGestora  = [["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["analise","Análise"],["acerto","Acerto Fazenda"],["config","Config"]];
-  var tabsMotorista = [["receitas","Fretes"],["despesas","Despesas"]];
+  var tabsMotorista = [["receitas","Fretes"],["despesas","Despesas"],["abast","Abastecimento"]];
   var tabs = perfil==="gestora" ? tabsGestora : tabsMotorista;
 
   // ── Tela de login ──
@@ -566,6 +599,7 @@ function App(){
         {tab==="analise"  && <Analise mk={mk} ano={ano} analise={analise}/>}
         {tab==="acerto"   && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
         {tab==="config"   && <Config conf={conf} toast={showToast} fh540={fh540}/>}
+        {tab==="abast"    && <AbastExterno data={data} mk={mk} kmlMes={kmlElintonMes} toast={showToast}/>}
       </div>
 
       <Toast msg={toast&&toast.msg} err={toast&&toast.err}/>
@@ -913,18 +947,20 @@ function Receitas(props){
     <div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"18px 0 14px"}}>
         <Btn onClick={nova}>+ Novo frete</Btn>
-        <label style={{display:"inline-block"}}>
+        {!props.soLeitura && <label style={{display:"inline-block"}}>
           <Btn color={INP} style={{pointerEvents:"none"}}>Importar Excel</Btn>
           <input type="file" accept=".xlsx,.xls,.csv" onChange={importar} style={{display:"none"}}/>
-        </label>
-        <Btn color={INP} onClick={baixarModelo}>Modelo</Btn>
-        <Btn color={INP} onClick={exportar}>Exportar mês</Btn>
+        </label>}
+        {!props.soLeitura && <Btn color={INP} onClick={baixarModelo}>Modelo</Btn>}
+        {!props.soLeitura && <Btn color={INP} onClick={exportar}>Exportar mês</Btn>}
       </div>
 
-      <div className="sec">Fretes de {mesLabel(props.mk)} — total {brl(props.totRec)}</div>
+      {props.soLeitura
+        ? <div className="sec">Fretes de {mesLabel(props.mk)}</div>
+        : <div className="sec">Fretes de {mesLabel(props.mk)} — total {brl(props.totRec)}</div>}
       <div className="card" style={{padding:0,overflowX:"auto"}}>
         <table>
-          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th><th>R$/ton</th><th>Valor</th><th></th></tr></thead>
+          <thead><tr><th>Data</th><th>Tomador</th><th>Produto</th><th>Origem → Destino</th><th>Ton</th>{!props.soLeitura&&<th>R$/ton</th>}{!props.soLeitura&&<th>Valor</th>}<th></th></tr></thead>
           <tbody>
             {props.recMes.length===0 && <tr><td colSpan={8} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum frete neste mês. Adicione ou importe uma planilha.</td></tr>}
             {props.recMes.map(function(r){
@@ -934,8 +970,8 @@ function Receitas(props){
                 <td>{r.produto}</td>
                 <td style={{fontSize:13,color:MUT}}>{r.origem}{r.destino?" → "+r.destino:""}</td>
                 <td>{num(r.ton)}</td>
-                <td>{brl(r.precoTon)}</td>
-                <td style={{fontWeight:700}}>{brl(r.valor)}</td>
+                {!props.soLeitura&&<td>{brl(r.precoTon)}</td>}
+                {!props.soLeitura&&<td style={{fontWeight:700}}>{brl(r.valor)}</td>}
                 <td style={{whiteSpace:"nowrap"}}>
                   {!props.soLeitura && <button onClick={function(){editar(r);}} style={{background:INP,color:MUT,padding:"5px 9px",fontSize:13,marginRight:4}}>✎</button>}
                   {!props.soLeitura && <button onClick={function(){excluir(r);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button>}
@@ -1289,6 +1325,149 @@ function Config(props){
           ? <div style={{marginTop:6,color:GN}}>✓ Conectado à máquina <b>016 — {props.fh540.desc}</b>. Os abastecimentos são puxados automaticamente.</div>
           : <div style={{marginTop:6,color:AMB}}>Máquina 016 não encontrada no Posto Diesel. Confira o cadastro lá.</div>}
       </div>
+    </div>
+  );
+}
+
+// ── ABASTECIMENTO EXTERNO ─────────────────────────────────────────────────────
+function AbastExterno(props){
+  var km = props.kmlMes || {};
+  var f0=useState(null); var form=f0[0], setForm=f0[1];
+
+  function nova(){
+    setForm({ date:todayISO(), posto:"", tipo:"S10", litros:"", precoLitro:"", odometro:"" });
+  }
+  function set(k,v){ setForm(function(p){ var o=Object.assign({},p); o[k]=v; return o; }); }
+
+  function salvar(){
+    var litros = Number(String(form.litros).replace(",","."))||0;
+    var preco  = Number(String(form.precoLitro).replace(",","."))||0;
+    var odo    = Number(String(form.odometro).replace(".","").replace(",","."))||0;
+    var item = {
+      id: form.id||Date.now(),
+      date: form.date,
+      posto: (form.posto||"").trim(),
+      tipo: form.tipo,
+      litros: litros,
+      precoLitro: preco,
+      valorTotal: litros*preco,
+      odometro: odo,
+      createdAt: form.createdAt||new Date().toISOString()
+    };
+    window.TX.addAbastExt(item).then(function(){ setForm(null); props.toast("Abastecimento salvo"); })
+      .catch(function(){ props.toast("Erro ao salvar",true); });
+  }
+
+  function excluir(x){
+    if(!confirm("Excluir este abastecimento?")) return;
+    window.TX.delAbastExt(x.id).then(function(){ props.toast("Excluído"); });
+  }
+
+  var itens = (props.data.abastExt||[]).filter(function(x){ return monthOf(x.date)===props.mk; })
+    .sort(function(a,b){ return String(a.date)<String(b.date)?-1:1; });
+
+  var totS10  = itens.filter(function(x){return x.tipo==="S10";}).reduce(function(a,x){return a+(Number(x.litros)||0);},0);
+  var totArla = itens.filter(function(x){return x.tipo==="Arla";}).reduce(function(a,x){return a+(Number(x.litros)||0);},0);
+  var totValor = itens.reduce(function(a,x){return a+(Number(x.valorTotal)||0);},0);
+
+  return (
+    <div>
+      {/* Consumo do mês */}
+      <div className="sec" style={{marginTop:18}}>Consumo do mês — {mesLabel(props.mk)}</div>
+
+      {km.kml>0
+        ? <div style={{background:"linear-gradient(135deg,"+BLU+",#1d4ed8)",borderRadius:14,padding:"18px 20px",marginBottom:16,boxShadow:"0 4px 18px #0369a130"}}>
+            <div style={{fontSize:11,letterSpacing:1.5,textTransform:"uppercase",color:"#ffffffbb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,marginBottom:4}}>Consumo médio · S10 apenas</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:38,color:"#fff",lineHeight:1}}>
+              {km.kml.toFixed(2)} <span style={{fontSize:18,fontWeight:600}}>km/L</span>
+            </div>
+            <div style={{fontSize:13,color:"#ffffffbb",marginTop:6}}>
+              {km.km>0?km.km.toLocaleString("pt-BR",{maximumFractionDigits:0})+" km rodados · ":""}{num(km.litrosS10||0)} L de S10 (posto fazenda + externo)
+            </div>
+          </div>
+        : <div className="card" style={{marginBottom:16,color:MUT}}>
+            Sem dados suficientes para calcular o consumo — registre abastecimentos com o hodômetro preenchido.
+          </div>}
+
+      {/* Totais rápidos */}
+      {itens.length>0 &&
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+          <Stat label="S10 externo" value={num(totS10)+" L"} sub={itens.filter(function(x){return x.tipo==="S10";}).length+" abastecimento(s)"} color={GN} accent={GN}/>
+          <Stat label="Arla externo" value={num(totArla)+" L"} sub="não conta no km/L" color={BLU} accent={BLU}/>
+        </div>}
+
+      {/* Botão */}
+      <Btn onClick={nova} style={{marginBottom:14}}>+ Novo abastecimento</Btn>
+
+      {/* Lista */}
+      <div className="sec">Abastecimentos de {mesLabel(props.mk)}</div>
+      <div className="card" style={{padding:0,overflowX:"auto"}}>
+        <table>
+          <thead><tr>
+            <th>Data</th><th>Posto</th><th>Tipo</th>
+            <th style={{textAlign:"right"}}>Litros</th>
+            <th style={{textAlign:"right"}}>R$/L</th>
+            <th style={{textAlign:"right"}}>Hodôm.</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {itens.length===0 &&
+              <tr><td colSpan={7} style={{color:MUT,textAlign:"center",padding:24}}>Nenhum abastecimento externo neste mês.</td></tr>}
+            {itens.map(function(x){
+              return <tr key={x.id}>
+                <td>{ddmmyyyy(x.date)}</td>
+                <td style={{fontWeight:600}}>{x.posto||"—"}</td>
+                <td>
+                  <span className={"bdg "+(x.tipo==="S10"?"bg":"bb")}>{x.tipo}</span>
+                </td>
+                <td style={{textAlign:"right"}}>{num(x.litros)} L</td>
+                <td style={{textAlign:"right",color:MUT}}>{x.precoLitro>0?brl(x.precoLitro):"—"}</td>
+                <td style={{textAlign:"right",color:MUT,fontSize:13}}>{x.odometro>0?x.odometro.toLocaleString("pt-BR")+" km":"—"}</td>
+                <td><button onClick={function(){excluir(x);}} style={{background:"#fee2e2",color:RED,padding:"5px 9px",fontSize:13}}>×</button></td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Formulário */}
+      {form &&
+        <Modal title={form.id?"Editar abastecimento":"Novo abastecimento"} onClose={function(){setForm(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+            {/* Tipo S10 / Arla */}
+            <div>
+              <label className="flbl">Tipo de combustível</label>
+              <div className="mtog">
+                <button className={form.tipo==="S10"?"on":""} onClick={function(){set("tipo","S10");}}>S10 (diesel)</button>
+                <button className={form.tipo==="Arla"?"on":""} onClick={function(){set("tipo","Arla");}}>Arla 32</button>
+              </div>
+              {form.tipo==="Arla" &&
+                <div style={{fontSize:12,color:BLU,marginTop:6}}>Arla não conta no cálculo de km/L — apenas registrado para controle de custo.</div>}
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Fld label="Data" type="date" value={form.date} onChange={function(v){set("date",v);}}/>
+              <Fld label="Nome do posto" value={form.posto} onChange={function(v){set("posto",v);}} placeholder="Ex: Posto Ipiranga"/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Fld label="Litros" inputMode="decimal" value={form.litros} onChange={function(v){set("litros",v);}} placeholder="0,00"/>
+              <Fld label="Preço por litro (R$)" inputMode="decimal" value={form.precoLitro} onChange={function(v){set("precoLitro",v);}} placeholder="0,00"/>
+            </div>
+            <Fld label="Hodômetro do caminhão (km)" inputMode="numeric" value={form.odometro} onChange={function(v){set("odometro",v);}} placeholder="Ex: 366500"/>
+
+            {/* Preview do valor total */}
+            {(Number(String(form.litros).replace(",","."))||0)>0 && (Number(String(form.precoLitro).replace(",","."))||0)>0 &&
+              <div style={{background:"#f7faf7",borderRadius:8,padding:"10px 14px",fontSize:15}}>
+                Valor total: <b style={{color:GN}}>{brl((Number(String(form.litros).replace(",","."))||0)*(Number(String(form.precoLitro).replace(",","."))||0))}</b>
+              </div>}
+
+            <div style={{display:"flex",gap:10,marginTop:4}}>
+              <Btn full color={INP} onClick={function(){setForm(null);}}>Cancelar</Btn>
+              <Btn full onClick={salvar} disabled={!form.date||!form.litros}>Salvar</Btn>
+            </div>
+          </div>
+        </Modal>}
     </div>
   );
 }
