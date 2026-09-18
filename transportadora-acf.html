@@ -255,6 +255,9 @@ function App(){
     if(window.TX && window.TX.ready){ window.TX.onData(function(st){ setData(Object.assign({},st)); }); }
   },[]);
 
+  // conf precisa estar definido ANTES dos useEffects que o referenciam
+  var conf = data.conf || {};
+
   // ── Conexão ao Nossas Contas (Diamantes LHM) ──
   useEffect(function(){
     var ncKey = conf.ncApiKey;
@@ -301,7 +304,6 @@ function App(){
 
   function showToast(msg,err){ setToast({msg:msg,err:err}); setTimeout(function(){setToast(null);},2600); }
 
-  var conf = data.conf || {};
   var fazendaKey = conf.fazendaKey || "ACF";
   var custoFallback = Number(conf.custoFallback)||6.15;
 
