@@ -13,6 +13,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
@@ -157,8 +158,9 @@ var CSS = [
   ".mtog button.on{background:"+GN+";color:#fff;font-weight:700}",
   "@keyframes fi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}",
   ".fi{animation:fi .3s ease forwards}",
-  "@media print{ body{background:#fff} .noprint{display:none !important} #root>div>*{display:none} #printArea{display:block !important} }",
-  "#printArea{display:none}"
+  "@media print{ body{background:#fff} .noprint{display:none !important} #root>div>*{display:none} #printArea{display:none} #printAreaRelatorio{display:none} }",
+  "body.print-acerto #printArea{display:block !important}",
+  "body.print-relatorio #printAreaRelatorio{display:block !important}"
 ].join("\n");
 
 // ── UTILIDADES ───────────────────────────────────────────────────────────────
@@ -245,10 +247,57 @@ function App(){
   var pf0 = useState(null); var perfil=pf0[0], setPerfil=pf0[1];
   var pm0 = useState(false); var pinModal=pm0[0], setPinModal=pm0[1];
   var pd0 = useState(""); var pinDigits=pd0[0], setPinDigits=pd0[1];
+  var nc0 = useState([]); var ncDespesas=nc0[0], setNcDespesas=nc0[1];
+  var ne0 = useState(null); var ncErr=ne0[0], setNcErr=ne0[1];
+  var ns0 = useState("idle"); var ncStatus=ns0[0], setNcStatus=ns0[1];
 
   useEffect(function(){
     if(window.TX && window.TX.ready){ window.TX.onData(function(st){ setData(Object.assign({},st)); }); }
   },[]);
+
+  // ── Conexão ao Nossas Contas (Diamantes LHM) ──
+  useEffect(function(){
+    var ncKey = conf.ncApiKey;
+    var ncAppId = conf.ncAppId;
+    if(!ncKey || !ncAppId){ setNcStatus("idle"); setNcDespesas([]); return; }
+
+    setNcStatus("connecting");
+    var unsubscribe;
+    try {
+      var existing = firebase.apps.filter(function(a){ return a.name==="nc"; });
+      var ncApp = existing.length ? existing[0] : firebase.initializeApp({
+        apiKey: ncKey,
+        authDomain: "nossas-contas-6c240.firebaseapp.com",
+        projectId: "nossas-contas-6c240",
+        storageBucket: "nossas-contas-6c240.firebasestorage.app",
+        appId: ncAppId
+      }, "nc");
+
+      var ncDb = ncApp.firestore();
+      var ncAuth = ncApp.auth();
+
+      ncAuth.signInAnonymously().then(function(){
+        var col = ncDb.collection("gastos_familia").doc("dados").collection("gastos");
+        unsubscribe = col.onSnapshot(function(snap){
+          var lista = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
+            .filter(function(e){ return e.category==="Diamantes LHM" && e.include!==false && Number(e.amount)>0; });
+          setNcDespesas(lista);
+          setNcStatus("ok");
+          setNcErr(null);
+        }, function(err){
+          setNcErr(err.message||"Erro ao ler Nossas Contas");
+          setNcStatus("error");
+        });
+      }).catch(function(err){
+        setNcErr(err.message||"Erro de autenticação");
+        setNcStatus("error");
+      });
+    } catch(err) {
+      setNcErr(err.message||"Erro ao conectar");
+      setNcStatus("error");
+    }
+    return function(){ if(unsubscribe) unsubscribe(); };
+  },[conf.ncApiKey, conf.ncAppId]);
 
   function showToast(msg,err){ setToast({msg:msg,err:err}); setTimeout(function(){setToast(null);},2600); }
 
@@ -330,7 +379,24 @@ function App(){
       .filter(function(o){ return o.v>0; })
       .sort(function(a,b){ return b.v-a.v; });
   },[data.desp, mk]);
-  var totDesp = despMes.reduce(function(a,o){ return a+o.v; },0);
+  var totDespLocal = despMes.reduce(function(a,o){ return a+o.v; },0);
+
+  // Despesas Diamantes vindas do Nossas Contas
+  var ncDespMes = useMemo(function(){
+    return (ncDespesas||[]).filter(function(e){ return monthOf(e.date)===mk; })
+      .sort(function(a,b){ return String(a.date)<String(b.date)?-1:1; });
+  },[ncDespesas, mk]);
+  var totDespNC = ncDespMes.reduce(function(a,e){ return a+(Number(e.amount)||0); },0);
+  var totDesp = totDespLocal + totDespNC;
+
+  // Custo de abastecimentos externos (S10 + Arla, ambos são saída de caixa)
+  var extFuelCusto = useMemo(function(){
+    return (data.abastExt||[]).filter(function(x){ return monthOf(x.date)===mk; })
+      .reduce(function(a,x){ return a+(Number(x.valorTotal)||0); }, 0);
+  },[data.abastExt, mk]);
+
+  // Custo total do mês a ser distribuído pelos fretes
+  var custoTotalMes = totDesp + diesel.custo + extFuelCusto;
 
   var resultado = totRec - totDesp - diesel.custo;   // resultado geral da transportadora
   var acertoLiquido = totRecFaz - diesel.custo;      // acerto com a fazenda
@@ -349,8 +415,12 @@ function App(){
       var recM = (data.rec||[]).filter(function(r){ return monthOf(r.date)===mkM; });
       var totRecM = recM.reduce(function(a,r){ return a+(Number(r.valor)||0); }, 0);
 
-      // Despesas do mês
-      var totDespM = (data.desp||[]).reduce(function(a,d){ return a+despValorNoMes(d,mkM); }, 0);
+      // Despesas locais do mês
+      var totDespLocalM = (data.desp||[]).reduce(function(a,d){ return a+despValorNoMes(d,mkM); }, 0);
+      // Despesas NC do mês
+      var totDespNCM = (ncDespesas||[]).filter(function(e){ return monthOf(e.date)===mkM; })
+        .reduce(function(a,e){ return a+(Number(e.amount)||0); }, 0);
+      var totDespM = totDespLocalM + totDespNCM;
 
       // Diesel do mês
       var fuelM = fh540 ? (data.fuel||[]).filter(function(x){
@@ -388,7 +458,7 @@ function App(){
                    temDados: totRecM>0||totDespM>0||custoM>0 });
     }
 
-    // Despesas por categoria (ano inteiro)
+    // Despesas por categoria (ano inteiro) — locais
     (data.desp||[]).forEach(function(d){
       for(var m=1;m<=12;m++){
         var mkM2 = ano+"-"+pad(m);
@@ -399,6 +469,13 @@ function App(){
           categorias[cat]+=v;
         }
       }
+    });
+    // Despesas Diamantes do Nossas Contas no ano
+    (ncDespesas||[]).filter(function(e){ return String(e.date||"").slice(0,4)===ano; }).forEach(function(e){
+      var desc = (e.desc||"Outros").trim();
+      var cat = "Diamantes · " + (desc.length>28 ? desc.slice(0,28)+"…" : desc);
+      if(!categorias[cat]) categorias[cat]=0;
+      categorias[cat]+=(Number(e.amount)||0);
     });
     // Adiciona diesel como categoria
     if(totA.diesel>0) categorias["Diesel (FH 540)"] = totA.diesel;
@@ -419,7 +496,7 @@ function App(){
              tomadores:tomList, categorias:catList,
              kmlAno:kmlAno, recKm:recKm, custoKm:custoKm,
              margem:margem, dieselPct:dieselPct };
-  },[data.rec, data.desp, data.fuel, fh540, ano, custoFallback]);
+  },[data.rec, data.desp, data.fuel, fh540, ano, custoFallback, ncDespesas]);
 
   // ---- km/L combinado do mês (posto fazenda S10 + externo S10, para Elinton) ----
   var kmlElintonMes = useMemo(function(){
@@ -470,7 +547,7 @@ function App(){
   function sair(){ setPerfil(null); setPinDigits(""); setTab("receitas"); }
 
   // Tabs por perfil
-  var tabsGestora  = [["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["analise","Análise"],["acerto","Acerto Fazenda"],["config","Config"]];
+  var tabsGestora  = [["painel","Painel"],["receitas","Receitas"],["despesas","Despesas"],["analise","Análise"],["acerto","Acerto Fazenda"],["relatorio","Relatório"],["config","Config"]];
   var tabsMotorista = [["receitas","Fretes"],["despesas","Despesas"],["abast","Abastecimento"]];
   var tabs = perfil==="gestora" ? tabsGestora : tabsMotorista;
 
@@ -594,11 +671,12 @@ function App(){
 
       <div style={estilos} className="fi">
         {tab==="painel"   && <Painel mk={mk} ano={ano} totRec={totRec} totRecFaz={totRecFaz} totDesp={totDesp} diesel={diesel} dieselAno={dieselAno} resultado={resultado} acerto={acertoLiquido} fh540={fh540} recCount={recMes.length} despCount={despMes.length}/>}
-        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} toast={showToast} soLeitura={perfil==="motorista"}/>}
-        {tab==="despesas" && <Despesas data={data} mk={mk} despMes={despMes} totDesp={totDesp} toast={showToast} soLeitura={perfil==="motorista"}/>}
+        {tab==="receitas" && <Receitas data={data} mk={mk} recMes={recMes} totRec={totRec} custoTotalMes={custoTotalMes} custoBreakdown={{diesel:diesel.custo, extFuel:extFuelCusto, despLocal:totDespLocal, despNC:totDespNC}} toast={showToast} soLeitura={perfil==="motorista"}/>}
+        {tab==="despesas" && <Despesas data={data} mk={mk} despMes={despMes} totDespLocal={totDespLocal} totDesp={totDesp} ncDespMes={ncDespMes} totDespNC={totDespNC} ncStatus={ncStatus} ncErr={ncErr} toast={showToast} soLeitura={perfil==="motorista"}/>}
         {tab==="analise"  && <Analise mk={mk} ano={ano} analise={analise}/>}
         {tab==="acerto"   && <Acerto mk={mk} recFazenda={recFazenda} totRecFaz={totRecFaz} diesel={diesel} liquido={acertoLiquido} fazendaKey={fazendaKey} conf={conf}/>}
-        {tab==="config"   && <Config conf={conf} toast={showToast} fh540={fh540}/>}
+        {tab==="relatorio" && <Relatorio mk={mk} conf={conf} recMes={recMes} totRec={totRec} despMes={despMes} totDespLocal={totDespLocal} ncDespMes={ncDespMes} totDespNC={totDespNC} diesel={diesel} data={data} kmlMes={kmlElintonMes} extFuelCusto={extFuelCusto} custoTotalMes={custoTotalMes}/>}
+        {tab==="config"   && <Config conf={conf} toast={showToast} fh540={fh540} ncStatus={ncStatus} ncErr={ncErr}/>}
         {tab==="abast"    && <AbastExterno data={data} mk={mk} kmlMes={kmlElintonMes} toast={showToast}/>}
       </div>
 
@@ -872,6 +950,7 @@ function Analise(props){
 // ── RECEITAS ─────────────────────────────────────────────────────────────────
 function Receitas(props){
   var f0=useState(null); var form=f0[0], setForm=f0[1];
+  var dm0=useState("receita"); var distMethod=dm0[0], setDistMethod=dm0[1];
   function nova(){ setForm({ date:todayISO(), tomador:"", produto:"", origem:"", destino:"", precoTon:"", ton:"" }); }
   function set(k,v){ setForm(function(p){ var o=Object.assign({},p); o[k]=v; return o; }); }
 
@@ -982,6 +1061,130 @@ function Receitas(props){
         </table>
       </div>
 
+      {/* ── Margem por frete (só gestora) ── */}
+      {!props.soLeitura && props.recMes.length>0 && (function(){
+        var custo = Number(props.custoTotalMes)||0;
+        var bkd   = props.custoBreakdown||{};
+        var fretes = props.recMes.slice();
+        var totR   = fretes.reduce(function(a,r){return a+(Number(r.valor)||0);},0);
+        var n      = fretes.length;
+
+        // Custo alocado por frete
+        var comMargem = fretes.map(function(r){
+          var rec = Number(r.valor)||0;
+          var custoR = distMethod==="receita"
+            ? (totR>0 ? custo*(rec/totR) : custo/n)
+            : custo/n;
+          var margem = rec - custoR;
+          var pct = rec>0 ? margem/rec*100 : 0;
+          return Object.assign({},r,{custoR:custoR,margem:margem,pct:pct});
+        }).sort(function(a,b){return b.margem-a.margem;});
+
+        var melhor = comMargem[0];
+        var pior   = comMargem[comMargem.length-1];
+        var margemMedia = totR>0 ? (totR-custo)/totR*100 : 0;
+
+        return (
+          <div style={{marginTop:22}}>
+            <div className="sec">Margem por frete — {mesLabel(props.mk)}</div>
+
+            {/* Custo total + método */}
+            <div className="card" style={{marginBottom:12,padding:"14px 16px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:12}}>
+                <div>
+                  <div className="slbl">Total de custos distribuídos</div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:RED}}>{brl(custo)}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div className="slbl">Margem média</div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:margemMedia>=0?GN:RED}}>{margemMedia.toFixed(1)+"%"}</div>
+                </div>
+              </div>
+
+              {/* Breakdown dos custos */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6,marginBottom:12,fontSize:12,color:MUT}}>
+                <div style={{background:"#f7faf7",padding:"6px 10px",borderRadius:8}}>
+                  <span style={{display:"block",fontWeight:600,color:TXT}}>Despesas</span>
+                  {brl(bkd.despLocal||0)}{(bkd.despNC||0)>0?" + NC "+brl(bkd.despNC):""}
+                </div>
+                <div style={{background:"#f7faf7",padding:"6px 10px",borderRadius:8}}>
+                  <span style={{display:"block",fontWeight:600,color:TXT}}>Diesel</span>
+                  Fazenda {brl(bkd.diesel||0)}{(bkd.extFuel||0)>0?" + ext. "+brl(bkd.extFuel):""}
+                </div>
+              </div>
+
+              {/* Método de distribuição */}
+              <div>
+                <label className="flbl">Distribuição do custo entre fretes</label>
+                <div className="mtog">
+                  <button className={distMethod==="receita"?"on":""} onClick={function(){setDistMethod("receita");}}>Proporcional à receita</button>
+                  <button className={distMethod==="igual"?"on":""} onClick={function(){setDistMethod("igual");}}>Igualitária</button>
+                </div>
+                <div style={{fontSize:11,color:DIM,marginTop:5}}>
+                  {distMethod==="receita"
+                    ? "Fretes maiores absorvem mais custo — mais preciso para avaliar rotas rentáveis"
+                    : "Custo igual para cada frete — independente do valor"}
+                </div>
+              </div>
+            </div>
+
+            {/* Tabela de margem */}
+            <div className="card" style={{padding:0,overflowX:"auto"}}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Frete</th>
+                    <th style={{textAlign:"right"}}>Receita</th>
+                    <th style={{textAlign:"right"}}>Custo</th>
+                    <th style={{textAlign:"right",minWidth:90}}>Margem R$</th>
+                    <th style={{textAlign:"right"}}>Margem %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comMargem.map(function(r){
+                    var pos = r.margem>=0;
+                    return (
+                      <tr key={r.id} style={{borderLeft:"3px solid "+(pos?GN:RED)}}>
+                        <td>
+                          <div style={{fontWeight:600,fontSize:13}}>{r.tomador}</div>
+                          <div style={{fontSize:12,color:MUT}}>{ddmmyyyy(r.date)} · {r.produto}</div>
+                          <div style={{fontSize:11,color:DIM}}>{r.origem}{r.destino?" → "+r.destino:""}</div>
+                        </td>
+                        <td style={{textAlign:"right",color:GN,fontWeight:600}}>{brl(r.valor)}</td>
+                        <td style={{textAlign:"right",color:RED}}>{brl(r.custoR)}</td>
+                        <td style={{textAlign:"right",fontWeight:700,color:pos?GN:RED}}>{brl(r.margem)}</td>
+                        <td style={{textAlign:"right"}}>
+                          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:pos?GN:RED}}>{r.pct.toFixed(1)+"%"}</span>
+                          <div style={{height:5,background:"#e8f0e8",borderRadius:3,marginTop:3,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:Math.min(Math.abs(r.pct),100)+"%",background:pos?GN:RED,borderRadius:3}}/>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Destaques */}
+            {n>1 && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:10}}>
+              <div className="sbox" style={{borderTop:"4px solid "+GN}}>
+                <span className="slbl">Melhor frete</span>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:GN}}>{melhor.pct.toFixed(1)+"%"}</span>
+                <span style={{fontSize:12,color:MUT}}>{melhor.tomador} · {melhor.produto}</span>
+              </div>
+              <div className="sbox" style={{borderTop:"4px solid "+(pior.margem>=0?GN:RED)}}>
+                <span className="slbl">Frete com menor margem</span>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:pior.margem>=0?GN:RED}}>{pior.pct.toFixed(1)+"%"}</span>
+                <span style={{fontSize:12,color:MUT}}>{pior.tomador} · {pior.produto}</span>
+              </div>
+            </div>}
+
+            <div style={{fontSize:11,color:DIM,marginTop:8}}>* O custo alocado é uma estimativa mensal — a margem real de cada viagem depende de variáveis operacionais específicas como distância e consumo pontual.</div>
+          </div>
+        );
+      })()}
+
       {form &&
         <Modal title={form.id?"Editar frete":"Novo frete"} onClose={function(){setForm(null);}}>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -1015,6 +1218,8 @@ function Receitas(props){
 function Despesas(props){
   var f0=useState(null); var form=f0[0], setForm=f0[1];
   var v0=useState("mes"); var view=v0[0], setView=v0[1]; // mes | todas
+  var ncOk = props.ncStatus==="ok";
+  var ncConf = props.ncStatus!=="idle";
   function nova(){ setForm({ tipo:"unica", date:todayISO(), categoria:"", descricao:"", valor:"", inicio:thisMonth(), fim:"", parcInicio:thisMonth(), parcN:"", parcTotal:"" }); }
   function set(k,v){ setForm(function(p){ var o=Object.assign({},p); o[k]=v; return o; }); }
 
@@ -1078,6 +1283,42 @@ function Despesas(props){
             </tbody>
           </table>
         </div>
+      </div>}
+
+      {/* ── Despesas do Nossas Contas (Diamantes LHM) ── */}
+      {view==="mes" && ncConf && <div style={{marginTop:16}}>
+        <div className="sec">Diamantes · Nossas Contas
+          {props.ncStatus==="connecting" && <span style={{fontSize:12,color:MUT,fontWeight:400,marginLeft:8}}>conectando…</span>}
+          {props.ncStatus==="error" && <span style={{fontSize:12,color:RED,fontWeight:400,marginLeft:8}}>erro de conexão</span>}
+          {ncOk && <span style={{fontSize:12,color:GN,fontWeight:400,marginLeft:8}}>✓ sincronizado</span>}
+        </div>
+        {props.ncStatus==="error" &&
+          <div className="card" style={{borderColor:"#fca5a5",background:"#fef2f2",color:RED,fontSize:13}}>{props.ncErr}</div>}
+        {ncOk && (props.ncDespMes||[]).length===0 &&
+          <div className="card" style={{color:MUT}}>Nenhuma despesa Diamantes LHM no Nossas Contas este mês.</div>}
+        {ncOk && (props.ncDespMes||[]).length>0 &&
+          <div className="card" style={{padding:0,overflowX:"auto"}}>
+            <table>
+              <thead><tr><th>Data</th><th>Descrição</th><th>Quem</th><th style={{textAlign:"right"}}>Valor</th></tr></thead>
+              <tbody>
+                {(props.ncDespMes||[]).map(function(e){
+                  return <tr key={e.id}>
+                    <td style={{whiteSpace:"nowrap"}}>{ddmmyyyy(e.date)}</td>
+                    <td style={{fontSize:13,color:MUT}}>{e.desc||"—"}</td>
+                    <td><span className="bdg bb">{e.person||"—"}</span></td>
+                    <td style={{textAlign:"right",fontWeight:700,color:RED}}>{brl(e.amount)}</td>
+                  </tr>;
+                })}
+                <tr style={{borderTop:"2px solid "+BDR,background:"#f7faf7"}}>
+                  <td colSpan={3} style={{fontWeight:700,textAlign:"right"}}>Total Diamantes</td>
+                  <td style={{fontWeight:700,color:RED,textAlign:"right"}}>{brl(props.totDespNC||0)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{padding:"8px 14px",fontSize:12,color:MUT}}>Despesas lançadas no Nossas Contas com categoria "Diamantes LHM" · somente leitura aqui</div>
+          </div>}
+        {!ncConf &&
+          <div className="card" style={{color:MUT,fontSize:13}}>Configure as credenciais do Nossas Contas em <b>Config</b> para ativar a integração.</div>}
       </div>}
 
       {view==="todas" && <div>
@@ -1171,7 +1412,7 @@ function Despesas(props){
 // ── ACERTO FAZENDA ───────────────────────────────────────────────────────────
 function Acerto(props){
   var d=props.diesel;
-  function imprimir(){ window.print(); }
+  function imprimir(){ document.body.className="print-acerto"; window.print(); setTimeout(function(){document.body.className="";},500); }
   var nomeFaz = (props.conf && props.conf.fazendaNome) || "Agropecuária Córrego das Flores";
 
   return (
@@ -1298,11 +1539,11 @@ function Acerto(props){
 // ── CONFIG ───────────────────────────────────────────────────────────────────
 function Config(props){
   var c=props.conf||{};
-  var f0=useState({ fazendaKey:c.fazendaKey||"ACF", fazendaNome:c.fazendaNome||"Agropecuária Córrego das Flores", custoFallback:String(c.custoFallback||6.15), pinGestora:String(c.pinGestora||"1234") });
+  var f0=useState({ fazendaKey:c.fazendaKey||"ACF", fazendaNome:c.fazendaNome||"Agropecuária Córrego das Flores", custoFallback:String(c.custoFallback||6.15), pinGestora:String(c.pinGestora||"1234"), ncApiKey:c.ncApiKey||"", ncAppId:c.ncAppId||"" });
   var form=f0[0], setForm=f0[1];
   function set(k,v){ setForm(function(p){var o=Object.assign({},p);o[k]=v;return o;}); }
   function salvar(){
-    window.TX.saveConfig({ fazendaKey:(form.fazendaKey||"ACF").trim(), fazendaNome:form.fazendaNome, custoFallback:Number(String(form.custoFallback).replace(",","."))||6.15, pinGestora:String(form.pinGestora||"1234").replace(/\D/g,"").slice(0,6) })
+    window.TX.saveConfig({ fazendaKey:(form.fazendaKey||"ACF").trim(), fazendaNome:form.fazendaNome, custoFallback:Number(String(form.custoFallback).replace(",","."))||6.15, pinGestora:String(form.pinGestora||"1234").replace(/[^0-9]/g,"").slice(0,6), ncApiKey:(form.ncApiKey||"").trim(), ncAppId:(form.ncAppId||"").trim() })
       .then(function(){ props.toast("Configuração salva"); }).catch(function(){ props.toast("Erro ao salvar",true); });
   }
   return (
@@ -1317,6 +1558,23 @@ function Config(props){
         <div style={{fontSize:13,color:MUT,marginTop:-8}}>Somente números, até 6 dígitos. Padrão: 1234.</div>
         <div style={{fontSize:13,color:MUT,marginTop:-8}}>Usado só se algum abastecimento antigo não tiver o custo gravado. Os novos já vêm com o custo congelado do Posto Diesel.</div>
         <Btn onClick={salvar}>Salvar configuração</Btn>
+      </div>
+
+      <div className="card" style={{marginTop:16,maxWidth:520}}>
+        <div className="slbl" style={{marginBottom:10}}>Integração Nossas Contas · Diamantes LHM</div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:13,color:MUT}}>Cole as credenciais do projeto <b>nossas-contas-6c240</b> do Firebase Console → Project Settings → Your apps.</div>
+          <Fld label="API Key" value={form.ncApiKey} onChange={function(v){set("ncApiKey",v);}} placeholder="AIzaSy..."/>
+          <Fld label="App ID" value={form.ncAppId} onChange={function(v){set("ncAppId",v);}} placeholder="1:...:web:..."/>
+          <div style={{fontSize:12,padding:"8px 12px",borderRadius:8,background:
+            props.ncStatus==="ok"?"#dcfce7":props.ncStatus==="error"?"#fee2e2":props.ncStatus==="connecting"?"#fef9c3":"#f0f4f0",
+            color:props.ncStatus==="ok"?GN:props.ncStatus==="error"?RED:props.ncStatus==="connecting"?AMB:MUT}}>
+            {props.ncStatus==="ok" && "✓ Conectado e sincronizando despesas Diamantes LHM"}
+            {props.ncStatus==="connecting" && "Conectando ao Nossas Contas…"}
+            {props.ncStatus==="error" && ("Erro: "+(props.ncErr||"falha na conexão"))}
+            {props.ncStatus==="idle" && "Não configurado — preencha as credenciais acima e salve."}
+          </div>
+        </div>
       </div>
 
       <div className="card" style={{marginTop:16,maxWidth:520}}>
@@ -1468,6 +1726,252 @@ function AbastExterno(props){
             </div>
           </div>
         </Modal>}
+    </div>
+  );
+}
+
+// ── RELATÓRIO MENSAL COMPLETO ──────────────────────────────────────────────────
+function Relatorio(props){
+  var d = props.diesel || {};
+  var km = props.kmlMes || {};
+  var conf = props.conf || {};
+  var nomeFaz = conf.fazendaNome || "Agropecuária Córrego das Flores";
+
+  // Abastecimentos externos do mês
+  var abastMes = (props.data.abastExt||[]).filter(function(x){ return monthOf(x.date)===props.mk; });
+  var abastS10ext = abastMes.filter(function(x){return x.tipo==="S10";});
+  var abastArla   = abastMes.filter(function(x){return x.tipo==="Arla";});
+  var extS10L   = abastS10ext.reduce(function(a,x){return a+(Number(x.litros)||0);},0);
+  var extArlaL  = abastArla.reduce(function(a,x){return a+(Number(x.litros)||0);},0);
+  var extS10Val = abastS10ext.reduce(function(a,x){return a+(Number(x.valorTotal)||0);},0);
+  var extArlaVal= abastArla.reduce(function(a,x){return a+(Number(x.valorTotal)||0);},0);
+  var totDieselMes = d.custo + extS10Val + extArlaVal;
+
+  // Despesas locais agrupadas por categoria
+  var despByCat = {};
+  (props.despMes||[]).forEach(function(o){
+    var cat = o.d.categoria||"Sem categoria";
+    if(!despByCat[cat]) despByCat[cat]={itens:[],total:0};
+    despByCat[cat].itens.push({desc:o.d.descricao,tipo:o.d.tipo,valor:o.v});
+    despByCat[cat].total+=o.v;
+  });
+  var catKeys = Object.keys(despByCat).sort(function(a,b){ return despByCat[b].total-despByCat[a].total; });
+
+  var totDesp = props.totDespLocal + props.totDespNC;
+  var resultado = props.totRec - totDesp - totDieselMes;
+
+  function imprimir(){
+    document.body.className="print-relatorio";
+    window.print();
+    setTimeout(function(){document.body.className="";},500);
+  }
+
+  var PSTY = {fontFamily:"'Barlow',sans-serif",fontSize:13,color:"#111"};
+  var TH = {textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px",fontSize:12,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:.5,textTransform:"uppercase"};
+  var TD = {padding:"5px 8px",borderBottom:"1px solid #ddd"};
+  var TDR = Object.assign({},TD,{textAlign:"right"});
+  var GNC = "#1d561d", REDC = "#b91c1c", AMC = "#854d0e";
+
+  var printContent = (
+    <div style={PSTY}>
+      {/* ── CABEÇALHO ── */}
+      <div style={{borderBottom:"3px solid "+GNC,paddingBottom:12,marginBottom:20}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:28,color:GNC,letterSpacing:1}}>TRANSPORTADORA · ACF</div>
+        <div style={{fontSize:14,color:"#333",marginTop:2}}>Relatório de Resultado Mensal</div>
+        <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginTop:6}}>
+          <div style={{fontSize:14}}><b>Referência:</b> {mesLabel(props.mk)}</div>
+          <div style={{fontSize:12,color:"#666"}}>Emitido em {ddmmyyyy(todayISO())}</div>
+        </div>
+      </div>
+
+      {/* ── 1. RECEITAS ── */}
+      <div style={{fontWeight:700,fontSize:15,margin:"0 0 8px",color:GNC}}>1. Receitas — Fretes</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:4}}>
+        <thead><tr>
+          <th style={TH}>Data</th><th style={TH}>Tomador</th><th style={TH}>Produto</th>
+          <th style={TH}>Origem → Destino</th>
+          <th style={Object.assign({},TH,{textAlign:"right"})}>Ton</th>
+          <th style={Object.assign({},TH,{textAlign:"right"})}>R$/ton</th>
+          <th style={Object.assign({},TH,{textAlign:"right"})}>Valor</th>
+        </tr></thead>
+        <tbody>
+          {(props.recMes||[]).map(function(r){
+            return <tr key={r.id}>
+              <td style={TD}>{ddmmyyyy(r.date)}</td>
+              <td style={TD}>{r.tomador}</td>
+              <td style={TD}>{r.produto}</td>
+              <td style={TD}>{r.origem}{r.destino?" → "+r.destino:""}</td>
+              <td style={TDR}>{num(r.ton)}</td>
+              <td style={TDR}>{brl(r.precoTon)}</td>
+              <td style={Object.assign({},TDR,{fontWeight:700})}>{brl(r.valor)}</td>
+            </tr>;
+          })}
+          <tr>
+            <td colSpan={6} style={{padding:"7px 8px",textAlign:"right",fontWeight:700}}>Total Receitas</td>
+            <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,color:GNC,fontSize:14}}>{brl(props.totRec)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* ── 2. DESPESAS ── */}
+      <div style={{fontWeight:700,fontSize:15,margin:"18px 0 8px",color:REDC}}>2. Despesas</div>
+
+      {/* 2.1 Locais por categoria */}
+      {catKeys.length>0 && <div>
+        <div style={{fontSize:12,fontWeight:600,color:"#555",marginBottom:6,textTransform:"uppercase",letterSpacing:.5}}>2.1 Lançadas no app</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:10}}>
+          <thead><tr>
+            <th style={TH}>Categoria</th><th style={TH}>Descrição</th><th style={TH}>Tipo</th>
+            <th style={Object.assign({},TH,{textAlign:"right"})}>Valor</th>
+          </tr></thead>
+          <tbody>
+            {catKeys.map(function(cat){
+              return (props.despByCat||despByCat)[cat]
+                ? (despByCat[cat].itens||[]).map(function(it,i){
+                    return <tr key={cat+i}>
+                      <td style={TD}>{i===0?cat:""}</td>
+                      <td style={TD}>{it.desc||"—"}</td>
+                      <td style={TD}>{it.tipo}</td>
+                      <td style={TDR}>{brl(it.valor)}</td>
+                    </tr>;
+                  })
+                : null;
+            })}
+            <tr>
+              <td colSpan={3} style={{padding:"6px 8px",textAlign:"right",fontWeight:700}}>Subtotal</td>
+              <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,color:REDC}}>{brl(props.totDespLocal)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>}
+
+      {/* 2.2 Diamantes do Nossas Contas */}
+      {(props.ncDespMes||[]).length>0 && <div>
+        <div style={{fontSize:12,fontWeight:600,color:"#555",marginBottom:6,textTransform:"uppercase",letterSpacing:.5}}>2.2 Diamantes LHM (Nossas Contas)</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:10}}>
+          <thead><tr>
+            <th style={TH}>Data</th><th style={TH}>Descrição</th><th style={TH}>Pago por</th>
+            <th style={Object.assign({},TH,{textAlign:"right"})}>Valor</th>
+          </tr></thead>
+          <tbody>
+            {(props.ncDespMes||[]).map(function(e){
+              return <tr key={e.id}>
+                <td style={TD}>{ddmmyyyy(e.date)}</td>
+                <td style={TD}>{e.desc||"—"}</td>
+                <td style={TD}>{e.person||"—"}</td>
+                <td style={TDR}>{brl(e.amount)}</td>
+              </tr>;
+            })}
+            <tr>
+              <td colSpan={3} style={{padding:"6px 8px",textAlign:"right",fontWeight:700}}>Subtotal</td>
+              <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,color:REDC}}>{brl(props.totDespNC)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>}
+
+      {/* Total despesas */}
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:16}}>
+        <tbody>
+          <tr style={{borderTop:"2px solid #ccc"}}>
+            <td style={{padding:"7px 8px",fontWeight:700}}>Total Despesas</td>
+            <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,color:REDC,fontSize:14}}>{brl(totDesp)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* ── 3. DIESEL ── */}
+      <div style={{fontWeight:700,fontSize:15,margin:"0 0 8px",color:AMC}}>3. Diesel e Arla</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:4}}>
+        <thead><tr>
+          <th style={TH}>Tipo</th><th style={TH}>Fonte</th>
+          <th style={Object.assign({},TH,{textAlign:"right"})}>Litros</th>
+          <th style={Object.assign({},TH,{textAlign:"right"})}>Custo total</th>
+        </tr></thead>
+        <tbody>
+          {d.litros>0 && <tr>
+            <td style={TD}>S10</td>
+            <td style={TD}>Posto Fazenda ACF</td>
+            <td style={TDR}>{num(d.litros)} L</td>
+            <td style={TDR}>{brl(d.custo)}</td>
+          </tr>}
+          {extS10L>0 && <tr>
+            <td style={TD}>S10</td>
+            <td style={TD}>Abastecimento externo</td>
+            <td style={TDR}>{num(extS10L)} L</td>
+            <td style={TDR}>{brl(extS10Val)}</td>
+          </tr>}
+          {extArlaL>0 && <tr>
+            <td style={TD}>Arla 32</td>
+            <td style={TD}>Abastecimento externo</td>
+            <td style={TDR}>{num(extArlaL)} L</td>
+            <td style={TDR}>{brl(extArlaVal)}</td>
+          </tr>}
+          <tr>
+            <td colSpan={3} style={{padding:"7px 8px",textAlign:"right",fontWeight:700}}>Total Diesel/Arla</td>
+            <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,color:AMC,fontSize:14}}>{brl(totDieselMes)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* ── 4. RESULTADO ── */}
+      <div style={{fontWeight:700,fontSize:15,margin:"18px 0 8px"}}>4. Resultado do Mês</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:14,marginBottom:8}}>
+        <tbody>
+          <tr><td style={{padding:"6px 8px"}}>(+) Receitas</td><td style={{padding:"6px 8px",textAlign:"right",color:GNC,fontWeight:600}}>{brl(props.totRec)}</td></tr>
+          <tr><td style={{padding:"6px 8px"}}>(−) Despesas</td><td style={{padding:"6px 8px",textAlign:"right",color:REDC,fontWeight:600}}>{brl(totDesp)}</td></tr>
+          <tr><td style={{padding:"6px 8px"}}>(−) Diesel / Arla</td><td style={{padding:"6px 8px",textAlign:"right",color:AMC,fontWeight:600}}>{brl(totDieselMes)}</td></tr>
+          <tr style={{borderTop:"2px solid #333"}}>
+            <td style={{padding:"10px 8px",fontWeight:800,fontSize:16}}>{resultado>=0?"= RESULTADO LÍQUIDO":"= PREJUÍZO"}</td>
+            <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,fontSize:18,color:resultado>=0?GNC:REDC}}>{brl(resultado)}</td>
+          </tr>
+          {props.totRec>0 && <tr>
+            <td style={{padding:"4px 8px",color:"#555",fontSize:12}}>Margem operacional</td>
+            <td style={{padding:"4px 8px",textAlign:"right",color:"#555",fontSize:12}}>{(resultado/props.totRec*100).toFixed(1)+"%"}</td>
+          </tr>}
+        </tbody>
+      </table>
+
+      {/* ── 5. EFICIÊNCIA ── */}
+      {km.km>0 && <div>
+        <div style={{fontWeight:700,fontSize:15,margin:"16px 0 8px"}}>5. Eficiência — FH 540</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead><tr>
+            <th style={TH}>Km rodados</th><th style={TH}>S10 total (L)</th>
+            <th style={TH}>Consumo médio</th><th style={TH}>Custo S10/km</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td style={TD}>{km.km.toLocaleString("pt-BR",{maximumFractionDigits:0})+" km"}</td>
+              <td style={TD}>{num(km.litrosS10||0)+" L"}</td>
+              <td style={TD}>{km.kml>0?km.kml.toFixed(2)+" km/L":"—"}</td>
+              <td style={TD}>{km.km>0?brl((d.custo+extS10Val)/km.km)+"/km":"—"}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>}
+
+      <div style={{marginTop:24,fontSize:11,color:"#888",borderTop:"1px solid #ccc",paddingTop:8}}>
+        Transportadora · ACF · {nomeFaz} · Relatório gerado em {ddmmyyyy(todayISO())}
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"18px 0 16px"}} className="noprint">
+        <div className="sec" style={{margin:0}}>Relatório Mensal — {mesLabel(props.mk)}</div>
+        <Btn onClick={imprimir}>Gerar PDF</Btn>
+      </div>
+
+      {/* Preview em tela */}
+      <div className="card noprint">{printContent}</div>
+      <div className="noprint" style={{fontSize:13,color:MUT,marginTop:10}}>Clique em <b>Gerar PDF</b> e escolha "Salvar como PDF" no diálogo de impressão.</div>
+
+      {/* Área de impressão */}
+      <div id="printAreaRelatorio" style={{padding:"16px 20px"}}>
+        {printContent}
+      </div>
     </div>
   );
 }
