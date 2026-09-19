@@ -158,9 +158,9 @@ var CSS = [
   ".mtog button.on{background:"+GN+";color:#fff;font-weight:700}",
   "@keyframes fi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}",
   ".fi{animation:fi .3s ease forwards}",
-  "@media print{ body{background:#fff} .noprint{display:none !important} #root>div>*{display:none} #printArea{display:none} #printAreaRelatorio{display:none} }",
-  "body.print-acerto #printArea{display:block !important}",
-  "body.print-relatorio #printAreaRelatorio{display:block !important}"
+  "@media print{ body{background:#fff} .noprint{display:none !important} }",
+  "#printArea{display:none}",
+  "#printAreaRelatorio{display:none}"
 ].join("\n");
 
 // ── UTILIDADES ───────────────────────────────────────────────────────────────
@@ -188,6 +188,29 @@ function fuelCostPerLiter(x, avg){
   if(d10 && d10<="2026-08-16") return 6.20;
   if(d10 && d10<="2026-08-23") return 6.15;
   return Number(avg)||0;
+}
+
+// ── IMPRESSÃO PDF (iOS-compatible) ────────────────────────────────────────────
+// Clona o conteúdo para fora do React e oculta o app antes de window.print().
+// Garante compatibilidade com iOS Safari, que não aplica CSS class a tempo.
+function imprimirPDF(printAreaId){
+  var el = document.getElementById(printAreaId);
+  if(!el){ console.warn("printArea não encontrado:", printAreaId); return; }
+  var clone = el.cloneNode(true);
+  clone.style.cssText = "display:block;background:#fff;font-family:'Barlow',sans-serif;";
+  clone.id = "";
+  document.body.appendChild(clone);
+  var root = document.getElementById("root");
+  root.style.display = "none";
+  function cleanup(){
+    root.style.display = "";
+    if(clone.parentNode) clone.parentNode.removeChild(clone);
+    window.removeEventListener("afterprint", cleanup);
+    clearTimeout(fallback);
+  }
+  window.addEventListener("afterprint", cleanup);
+  var fallback = setTimeout(cleanup, 15000); // fallback iOS (afterprint pode não disparar)
+  setTimeout(function(){ window.print(); }, 300);
 }
 
 // ── COMPONENTES BÁSICOS ──────────────────────────────────────────────────────
@@ -1413,7 +1436,7 @@ function Despesas(props){
 // ── ACERTO FAZENDA ───────────────────────────────────────────────────────────
 function Acerto(props){
   var d=props.diesel;
-  function imprimir(){ document.body.className="print-acerto"; window.print(); setTimeout(function(){document.body.className="";},500); }
+  function imprimir(){ imprimirPDF("printArea"); }
   var nomeFaz = (props.conf && props.conf.fazendaNome) || "Agropecuária Córrego das Flores";
 
   return (
@@ -1761,11 +1784,7 @@ function Relatorio(props){
   var totDesp = props.totDespLocal + props.totDespNC;
   var resultado = props.totRec - totDesp - totDieselMes;
 
-  function imprimir(){
-    document.body.className="print-relatorio";
-    window.print();
-    setTimeout(function(){document.body.className="";},500);
-  }
+  function imprimir(){ imprimirPDF("printAreaRelatorio"); }
 
   var PSTY = {fontFamily:"'Barlow',sans-serif",fontSize:13,color:"#111"};
   var TH = {textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px",fontSize:12,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:.5,textTransform:"uppercase"};
