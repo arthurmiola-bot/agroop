@@ -15,6 +15,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
@@ -211,6 +213,74 @@ function imprimirPDF(printAreaId){
   window.addEventListener("afterprint", cleanup);
   var fallback = setTimeout(cleanup, 15000); // fallback iOS (afterprint pode não disparar)
   setTimeout(function(){ window.print(); }, 300);
+}
+
+// ── COMPARTILHAR / BAIXAR PDF ──────────────────────────────────────────────────
+// Gera um PDF real via html2canvas + jsPDF e abre o share sheet do iOS.
+// Fallback: download direto no desktop.
+function compartilharPDF(printAreaId, filename, onStart, onEnd){
+  var el = document.getElementById(printAreaId);
+  if(!el || typeof html2canvas==="undefined" || !window.jspdf){
+    imprimirPDF(printAreaId); onEnd&&onEnd(); return;
+  }
+  onStart&&onStart();
+
+  // Clona o conteúdo fora da tela para captura
+  var clone = el.cloneNode(true);
+  clone.style.cssText = "display:block;position:fixed;top:0;left:110vw;width:720px;background:#fff;padding:20px 24px;box-sizing:border-box;font-family:Arial,sans-serif;font-size:13px;line-height:1.4;";
+  document.body.appendChild(clone);
+
+  setTimeout(function(){
+    html2canvas(clone, {
+      scale:2, useCORS:true, allowTaint:true, backgroundColor:"#fff",
+      logging:false, width:720, windowWidth:770
+    }).then(function(canvas){
+      if(clone.parentNode) clone.parentNode.removeChild(clone);
+
+      var pdf = new window.jspdf.jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+      var pw = pdf.internal.pageSize.getWidth();   // 210mm
+      var ph = pdf.internal.pageSize.getHeight();  // 297mm
+      var imgH = pw * canvas.height / canvas.width; // altura total da imagem em mm
+      var imgData = canvas.toDataURL("image/png");
+
+      // Paginar: cada página mostra uma fatia da imagem
+      var offset = 0;
+      var page = 0;
+      while(offset < imgH - 1){
+        if(page > 0) pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, -offset, pw, imgH);
+        offset += ph;
+        page++;
+      }
+
+      var blob = pdf.output("blob");
+      var fname = filename || "relatorio.pdf";
+
+      // iOS / Android: Share API com arquivo PDF
+      try {
+        var file = new File([blob], fname, {type:"application/pdf"});
+        if(navigator.canShare && navigator.canShare({files:[file]})){
+          navigator.share({files:[file], title:fname})
+            .then(function(){ onEnd&&onEnd(); })
+            .catch(function(){ onEnd&&onEnd(); });
+          return;
+        }
+      } catch(e){}
+
+      // Fallback desktop: download direto
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href=url; a.download=fname; a.click();
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      onEnd&&onEnd();
+
+    }).catch(function(err){
+      if(clone.parentNode) clone.parentNode.removeChild(clone);
+      console.error("html2canvas error:", err);
+      imprimirPDF(printAreaId); // fallback
+      onEnd&&onEnd();
+    });
+  }, 600);
 }
 
 // ── COMPONENTES BÁSICOS ──────────────────────────────────────────────────────
@@ -1436,14 +1506,20 @@ function Despesas(props){
 // ── ACERTO FAZENDA ───────────────────────────────────────────────────────────
 function Acerto(props){
   var d=props.diesel;
-  function imprimir(){ imprimirPDF("printArea"); }
+  var gc0=useState(false); var gerando=gc0[0], setGerando=gc0[1];
   var nomeFaz = (props.conf && props.conf.fazendaNome) || "Agropecuária Córrego das Flores";
+  function imprimir(){
+    compartilharPDF("printArea", "acerto-fazenda-"+props.mk+".pdf",
+      function(){setGerando(true);},
+      function(){setGerando(false);}
+    );
+  }
 
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"18px 0 14px"}}>
         <div className="sec" style={{margin:0}}>Acerto com a Fazenda — {mesLabel(props.mk)}</div>
-        <Btn onClick={imprimir}>Gerar PDF</Btn>
+        <Btn onClick={imprimir} disabled={gerando} style={{minWidth:160}}>{gerando?"⏳ Gerando PDF…":"📤 Compartilhar PDF"}</Btn>
       </div>
 
       <div className="card">
@@ -1784,7 +1860,13 @@ function Relatorio(props){
   var totDesp = props.totDespLocal + props.totDespNC;
   var resultado = props.totRec - totDesp - totDieselMes;
 
-  function imprimir(){ imprimirPDF("printAreaRelatorio"); }
+  var gc0=useState(false); var gerando=gc0[0], setGerando=gc0[1];
+  function imprimir(){
+    compartilharPDF("printAreaRelatorio", "resultado-mensal-"+props.mk+".pdf",
+      function(){setGerando(true);},
+      function(){setGerando(false);}
+    );
+  }
 
   var PSTY = {fontFamily:"'Barlow',sans-serif",fontSize:13,color:"#111"};
   var TH = {textAlign:"left",borderBottom:"1.5px solid #999",padding:"6px 8px",fontSize:12,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:.5,textTransform:"uppercase"};
@@ -1981,12 +2063,11 @@ function Relatorio(props){
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,margin:"18px 0 16px"}} className="noprint">
         <div className="sec" style={{margin:0}}>Relatório Mensal — {mesLabel(props.mk)}</div>
-        <Btn onClick={imprimir}>Gerar PDF</Btn>
+        <Btn onClick={imprimir} disabled={gerando} style={{minWidth:160}}>{gerando?"⏳ Gerando PDF…":"📤 Compartilhar PDF"}</Btn>
       </div>
 
       {/* Preview em tela */}
       <div className="card noprint">{printContent}</div>
-      <div className="noprint" style={{fontSize:13,color:MUT,marginTop:10}}>Clique em <b>Gerar PDF</b> e escolha "Salvar como PDF" no diálogo de impressão.</div>
 
       {/* Área de impressão */}
       <div id="printAreaRelatorio" style={{padding:"16px 20px"}}>
