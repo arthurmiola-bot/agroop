@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Transportadora — ACF</title>
+  <title>Diamantes LHM — ACF</title>
   <meta name="theme-color" content="#2a7a2a"/>
-  <meta name="apple-mobile-web-app-title" content="Transportadora"/>
+  <meta name="apple-mobile-web-app-title" content="Diamantes LHM"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="mobile-web-app-capable" content="yes"/>
@@ -559,17 +559,16 @@ function App(){
       <div style={{minHeight:"100vh",background:"linear-gradient(160deg,"+GN2+" 0%,"+GN+" 50%,#3a9a3a 100%)"}}>
         <style>{CSS}</style>
         <div style={{maxWidth:400,margin:"0 auto",padding:"60px 24px 40px",display:"flex",flexDirection:"column",alignItems:"center",gap:0}}>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:32,color:"#fff",letterSpacing:2,textAlign:"center",lineHeight:1}}>TRANSPORTADORA</div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:18,color:"#ffffffbb",letterSpacing:4,marginBottom:8}}>ACF</div>
-          <div style={{fontSize:13,color:"#ffffffaa",marginBottom:48,textAlign:"center"}}>Caminhão FH 540 · 016</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:32,color:"#fff",letterSpacing:2,textAlign:"center",lineHeight:1}}>DIAMANTES LHM</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:18,color:"#ffffffbb",letterSpacing:4,marginBottom:48}}>ACF</div>
 
           <div style={{fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"#ffffffaa",marginBottom:18,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>Selecione seu perfil</div>
 
           {/* Card Luana */}
           <button onClick={function(){ setPinModal(true); setPinDigits(""); }}
-            style={{width:"100%",background:"#fff",borderRadius:16,padding:"22px 24px",marginBottom:14,display:"flex",alignItems:"center",gap:18,boxShadow:"0 8px 32px #00000030",cursor:"pointer"}}>
-            <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,"+GN+","+GN2+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>👩</div>
-            <div style={{textAlign:"left"}}>
+            style={{width:"100%",background:"#fff",borderRadius:16,padding:"22px 24px",marginBottom:14,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 8px 32px #00000030",cursor:"pointer"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,"+GN+","+GN2+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>👩</div>
+            <div style={{textAlign:"center"}}>
               <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:TXT}}>LUANA</div>
               <div style={{fontSize:13,color:MUT,marginTop:2}}>Gestora · acesso completo</div>
               <div style={{fontSize:11,color:DIM,marginTop:1}}>🔒 Requer PIN</div>
@@ -578,9 +577,9 @@ function App(){
 
           {/* Card Elinton */}
           <button onClick={function(){ setPerfil("motorista"); setTab("receitas"); }}
-            style={{width:"100%",background:"#fff",borderRadius:16,padding:"22px 24px",display:"flex",alignItems:"center",gap:18,boxShadow:"0 8px 32px #00000030",cursor:"pointer"}}>
-            <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#1d6fa4,#0369a1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>👨</div>
-            <div style={{textAlign:"left"}}>
+            style={{width:"100%",background:"#fff",borderRadius:16,padding:"22px 24px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 8px 32px #00000030",cursor:"pointer"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#1d6fa4,#0369a1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>👨</div>
+            <div style={{textAlign:"center"}}>
               <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:TXT}}>ELINTON</div>
               <div style={{fontSize:13,color:MUT,marginTop:2}}>Motorista · lançamentos</div>
               <div style={{fontSize:11,color:DIM,marginTop:1}}>✓ Acesso direto</div>
@@ -632,10 +631,10 @@ function App(){
       <div className="noprint" style={{background:"linear-gradient(180deg,"+GN2+","+GN+")",padding:"14px 14px 12px",color:"#fff",boxShadow:"0 2px 12px #0002"}}>
         <div style={{maxWidth:960,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,letterSpacing:1,lineHeight:1}}>TRANSPORTADORA · ACF</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,letterSpacing:1,lineHeight:1}}>DIAMANTES LHM · ACF</div>
             <div style={{fontSize:11,opacity:.75,marginTop:1}}>
               {perfil==="gestora" ? "👩 Luana — Gestora" : "👨 Elinton — Motorista"}
-              {" · FH 540 (016)"}
+              
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -1469,9 +1468,9 @@ function Acerto(props){
       {/* ÁREA DE IMPRESSÃO (PDF) */}
       <div id="printArea" style={{padding:"10px 4px",color:"#111",fontFamily:"'Barlow',sans-serif"}}>
         <div style={{borderBottom:"3px solid "+GN,paddingBottom:10,marginBottom:16}}>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>TRANSPORTADORA · ACF</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:GN2,letterSpacing:1}}>DIAMANTES LHM · ACF</div>
           <div style={{fontSize:14,color:"#333"}}>Acerto de contas — {nomeFaz}</div>
-          <div style={{fontSize:14,color:"#333"}}>Referência: <b>{mesLabel(props.mk)}</b> · Caminhão FH 540 (016)</div>
+          <div style={{fontSize:14,color:"#333"}}>Referência: <b>{mesLabel(props.mk)}</b></div>
         </div>
 
         <div style={{fontWeight:700,fontSize:15,margin:"6px 0"}}>1. Fretes prestados</div>
@@ -1778,7 +1777,7 @@ function Relatorio(props){
     <div style={PSTY}>
       {/* ── CABEÇALHO ── */}
       <div style={{borderBottom:"3px solid "+GNC,paddingBottom:12,marginBottom:20}}>
-        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:28,color:GNC,letterSpacing:1}}>TRANSPORTADORA · ACF</div>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:28,color:GNC,letterSpacing:1}}>DIAMANTES LHM · ACF</div>
         <div style={{fontSize:14,color:"#333",marginTop:2}}>Relatório de Resultado Mensal</div>
         <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginTop:6}}>
           <div style={{fontSize:14}}><b>Referência:</b> {mesLabel(props.mk)}</div>
@@ -1954,7 +1953,7 @@ function Relatorio(props){
       </div>}
 
       <div style={{marginTop:24,fontSize:11,color:"#888",borderTop:"1px solid #ccc",paddingTop:8}}>
-        Transportadora · ACF · {nomeFaz} · Relatório gerado em {ddmmyyyy(todayISO())}
+        Diamantes LHM · ACF · {nomeFaz} · Relatório gerado em {ddmmyyyy(todayISO())}
       </div>
     </div>
   );
