@@ -3162,8 +3162,9 @@ function renderEstoque() {
     <div class="nav" style="background:var(--branco);border-radius:var(--radius);margin-bottom:20px;padding:0 8px;border-bottom:none;box-shadow:var(--sombra)">
       <button class="nav-btn ${estoqueSubaba==='estoque'?'ativo':''}" onclick="mudarSubabaEstoque('estoque')">📦 Estoque Atual</button>
       <button class="nav-btn ${estoqueSubaba==='previsao'?'ativo':''}" onclick="mudarSubabaEstoque('previsao')">🔮 Previsão de Cobertura</button>
+      <button class="nav-btn ${estoqueSubaba==='extrato'?'ativo':''}" onclick="mudarSubabaEstoque('extrato')">📋 Extrato</button>
     </div>
-    <div id="estoque-conteudo"></div>`;
+    <div id="estoque-conteudo"></div>\`;
   renderSubabaEstoque();
 }
 
@@ -3171,6 +3172,7 @@ window.mudarSubabaEstoque = function(sub) { estoqueSubaba = sub; renderEstoque()
 
 function renderSubabaEstoque() {
   if (estoqueSubaba === 'previsao') { renderCobertura(); return; }
+  if (estoqueSubaba === 'extrato')  { renderExtrato(); return; }
   const el = document.getElementById('estoque-conteudo');
   el.innerHTML = `
     <div class="sec-header">
@@ -3315,6 +3317,169 @@ window.removerLote = async function(loteId, produtoNome) {
     filtrarEstoque();
     toast('Lote excluído. Estoque recalculado.');
   } catch(e) { toast('Erro: '+e.message,'erro'); }
+};
+
+// ──────────── EXTRATO POR PRODUTO ────────────
+function renderExtrato() {
+  const el = document.getElementById('estoque-conteudo');
+  const opcoes = [...new Set([...estoque.map(e => e.produto), ...retiradas.map(r => r.produto)])].filter(Boolean).sort();
+  el.innerHTML = `
+    <div class="sec-header" style="margin-bottom:16px">
+      <div style="font-size:14px;color:var(--cinza)">Histórico completo de entradas e saídas de um produto</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+      <input type="text" id="extrato-busca" placeholder="🔍 Digite o nome do produto..." list="extrato-dl" autocomplete="off"
+        oninput="buscarExtrato()"
+        style="flex:1;min-width:220px;padding:11px 14px;border:2px solid var(--creme-escuro);border-radius:10px;font-size:15px;outline:none">
+      <datalist id="extrato-dl">${opcoes.map(n => `<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+    </div>
+    <div id="extrato-resultado">
+      <div style="text-align:center;padding:48px 20px;color:var(--cinza);font-size:14px">
+        Digite o nome de um produto acima para ver o extrato de movimentações.
+      </div>
+    </div>`;
+}
+
+window.buscarExtrato = function() {
+  const busca = (document.getElementById('extrato-busca')?.value || '').trim();
+  const el = document.getElementById('extrato-resultado');
+  if (!el) return;
+
+  if (busca.length < 2) {
+    el.innerHTML = `<div style="text-align:center;padding:48px 20px;color:var(--cinza);font-size:14px">
+      Digite o nome de um produto acima para ver o extrato de movimentações.</div>`;
+    return;
+  }
+
+  const normBusca = normalizar(busca);
+
+  // ── Entradas (entradasRaw) ──
+  const movEntradas = entradasRaw
+    .filter(e => normalizar(e.prodNome || '').includes(normBusca))
+    .map(e => {
+      const dt = e.dt?.toDate ? e.dt.toDate() : (e.dt ? new Date(e.dt) : null);
+      const iso = dt ? dt.toISOString().slice(0,10) : '';
+      return {
+        iso, dataDisplay: dt ? dt.toLocaleDateString('pt-BR') : '—',
+        tipo: 'Entrada',
+        origemDestino: e.forn || '—',
+        qtd: parseFloat(e.qtd) || 0,
+        unidade: e.unid || '',
+        custo: parseFloat(e.preco) || 0,
+        prodNome: e.prodNome || ''
+      };
+    });
+
+  // ── Saídas (retiradas) ──
+  const movSaidas = retiradas
+    .filter(r => normalizar(r.produto || '').includes(normBusca))
+    .map(r => {
+      const dt = r.data?.toDate ? r.data.toDate() : (r.data ? new Date(r.data) : null);
+      const iso = dt ? dt.toISOString().slice(0,10) : (typeof r.data === 'string' ? r.data : '');
+      return {
+        iso, dataDisplay: dt ? dt.toLocaleDateString('pt-BR') : fmtData(r.data),
+        tipo: 'Saída',
+        origemDestino: [r.fazenda, r.talhao].filter(Boolean).join(' / ') || r.obs || '—',
+        qtd: parseFloat(r.quantidade) || 0,
+        unidade: r.unidade || '',
+        custo: parseFloat(r.custo_unitario) || 0,
+        prodNome: r.produto || ''
+      };
+    });
+
+  const movs = [...movEntradas, ...movSaidas].sort((a, b) => {
+    if (a.iso !== b.iso) return a.iso.localeCompare(b.iso);
+    return a.tipo === 'Entrada' ? -1 : 1; // entradas antes das saídas no mesmo dia
+  });
+
+  if (!movs.length) {
+    el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--cinza)">Nenhuma movimentação encontrada para "<strong>${busca}</strong>"</div>`;
+    return;
+  }
+
+  // Nome e unidade canônicos
+  const nomeProd = movs.find(m => m.prodNome)?.prodNome || busca;
+  const unid     = movs.find(m => m.unidade)?.unidade || '';
+
+  // Saldo progressivo
+  let saldo = 0, totalEnt = 0, totalSai = 0;
+  const rows = movs.map(m => {
+    if (m.tipo === 'Entrada') { saldo += m.qtd; totalEnt += m.qtd; }
+    else                      { saldo -= m.qtd; totalSai += m.qtd; }
+    return { ...m, saldo };
+  });
+
+  // Guarda para o export
+  window._extratoAtual = { produto: nomeProd, unidade: unid, rows, totalEnt, totalSai, saldoFinal: saldo };
+
+  const cardStyle = (bg, color) =>
+    `background:${bg};border-radius:10px;padding:10px 16px;min-width:130px`;
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <strong style="font-size:16px">${nomeProd}</strong>
+        <span style="color:var(--cinza);font-size:13px;margin-left:8px">${rows.length} movimentação(ões)</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="exportarExtrato()">📥 Exportar Excel</button>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+      <div style="${cardStyle('#e8f5e9')}">
+        <div style="font-size:11px;color:var(--cinza);text-transform:uppercase;margin-bottom:2px">Total Entradas</div>
+        <div style="font-size:17px;font-weight:700;color:var(--verde)">+${fmt(totalEnt)} ${unid}</div>
+      </div>
+      <div style="${cardStyle('#fce8e8')}">
+        <div style="font-size:11px;color:var(--cinza);text-transform:uppercase;margin-bottom:2px">Total Saídas</div>
+        <div style="font-size:17px;font-weight:700;color:#c0392b">-${fmt(totalSai)} ${unid}</div>
+      </div>
+      <div style="${cardStyle(saldo >= 0 ? '#e8f5e9' : '#fce8e8')}">
+        <div style="font-size:11px;color:var(--cinza);text-transform:uppercase;margin-bottom:2px">Saldo Final</div>
+        <div style="font-size:17px;font-weight:700;color:${saldo >= 0 ? 'var(--verde)' : '#c0392b'}">${fmt(saldo)} ${unid}</div>
+      </div>
+    </div>
+    <div class="tabela-wrap"><table>
+      <thead><tr>
+        <th>Data</th>
+        <th>Tipo</th>
+        <th>Fornecedor / Destino</th>
+        <th style="text-align:right">Qtd</th>
+        <th>Un</th>
+        <th style="text-align:right">Custo Unit.</th>
+        <th style="text-align:right">Saldo</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr style="${r.tipo === 'Saída' ? 'background:#fff9f9' : ''}">
+            <td>${r.dataDisplay}</td>
+            <td><span style="font-size:11px;padding:2px 8px;border-radius:12px;font-weight:600;
+              background:${r.tipo==='Entrada'?'#e8f5e9':'#fce8e8'};
+              color:${r.tipo==='Entrada'?'var(--verde)':'#c0392b'}">
+              ${r.tipo==='Entrada'?'↑ Entrada':'↓ Saída'}
+            </span></td>
+            <td>${r.origemDestino}</td>
+            <td style="text-align:right;font-weight:600;color:${r.tipo==='Entrada'?'var(--verde)':'#c0392b'}">
+              ${r.tipo==='Entrada'?'+':'-'}${fmt(r.qtd)}
+            </td>
+            <td>${r.unidade}</td>
+            <td style="text-align:right;color:var(--cinza)">${r.custo > 0 ? 'R$ '+fmt(r.custo) : '—'}</td>
+            <td style="text-align:right;font-weight:700;color:${r.saldo>=0?'var(--verde)':'#c0392b'}">${fmt(r.saldo)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+};
+
+window.exportarExtrato = function() {
+  const d = window._extratoAtual;
+  if (!d) return;
+  exportarExcel(
+    `Extrato_${d.produto.replace(/[\/\\:*?"<>|]/g,'_')}`,
+    ['Data','Tipo','Fornecedor / Destino','Quantidade','Unidade','Custo Unit. (R$)','Saldo'],
+    d.rows.map(r => [
+      r.dataDisplay, r.tipo, r.origemDestino,
+      (r.tipo==='Entrada' ? 1 : -1) * r.qtd,
+      r.unidade, r.custo || 0, r.saldo
+    ])
+  );
 };
 
 window.exportarEstoque = function() {
